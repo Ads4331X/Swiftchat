@@ -17,6 +17,7 @@ import { Colors } from "@/constants/theme";
 import Toast from "react-native-toast-message";
 import { Image } from "expo-image";
 import AntDesign from "@expo/vector-icons/AntDesign";
+import * as SecureStore from "expo-secure-store";
 
 type FormData = {
   email: string;
@@ -42,7 +43,7 @@ export default function LoginScreen() {
 
   const onSubmit = async (data: FormData) => {
     try {
-      await api.post("/api/auth/login", {
+      const response = await api.post("/api/auth/login", {
         email: data.email,
         password: data.password,
       });
@@ -53,7 +54,9 @@ export default function LoginScreen() {
         text2: "You're logged in",
       });
 
-      router.push("/(tabs)");
+      await SecureStore.setItemAsync("token", response.data.token);
+
+      router.push("/chat");
     } catch (err: any) {
       Toast.show({
         type: "error",
@@ -121,7 +124,6 @@ export default function LoginScreen() {
           </View>
 
           {/* Email */}
-          {/* Email */}
           <View className="mb-4">
             <Text
               style={{ color: colors.text }}
@@ -183,7 +185,6 @@ export default function LoginScreen() {
               </Text>
             )}
           </View>
-          {/* Password */}
           {/* Password */}
           <View className="mb-2">
             <View className="flex-row items-center justify-between mb-1.5">
