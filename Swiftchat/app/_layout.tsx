@@ -7,27 +7,59 @@ import {
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import "react-native-reanimated";
-
+import Toast from "react-native-toast-message";
+import { toastConfig } from "@/lib/toastConfig";
+import {
+  SafeAreaProvider,
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 
 export const unstable_settings = {
   anchor: "(tabs)",
 };
 
+function ToastSafeAreaWrapper() {
+  const insets = useSafeAreaInsets();
+
+  return (
+    <SafeAreaView
+      style={{
+        position: "absolute",
+        top: insets.top,
+        left: 0,
+        right: 0,
+        zIndex: 999,
+      }}
+      pointerEvents="box-none"
+    >
+      <Toast config={toastConfig} />
+    </SafeAreaView>
+  );
+}
+
 export default function RootLayout() {
   const colorScheme = useColorScheme();
 
   return (
-    <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="auth" />
-        <Stack.Screen
-          name="modal"
-          options={{ presentation: "modal", title: "Modal", headerShown: true }}
-        />
-      </Stack>
-      <StatusBar style="auto" />
-    </ThemeProvider>
+    <SafeAreaProvider>
+      <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="auth" />
+          <Stack.Screen
+            name="modal"
+            options={{
+              presentation: "modal",
+              title: "Modal",
+              headerShown: true,
+            }}
+          />
+        </Stack>
+        <ToastSafeAreaWrapper />
+        <StatusBar style="auto" />
+      </ThemeProvider>
+    </SafeAreaProvider>
   );
 }
