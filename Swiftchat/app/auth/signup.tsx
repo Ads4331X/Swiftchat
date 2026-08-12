@@ -15,6 +15,8 @@ import { router } from "expo-router";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { Colors } from "@/constants/theme";
 import Toast from "react-native-toast-message";
+import { Image } from "expo-image";
+import AntDesign from "@expo/vector-icons/AntDesign";
 
 type FormData = {
   email: string;
@@ -27,6 +29,7 @@ export default function SignupScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? "light"];
   const isDark = colorScheme === "dark";
+
   const [showPassword, setShowPassword] = useState(false);
 
   const {
@@ -55,10 +58,10 @@ export default function SignupScreen() {
       Toast.show({
         type: "success",
         text1: "Account created!",
-        text2: "Welcome to SwiftChat ",
+        text2: "Welcome to SwiftChat",
       });
 
-      router.push("/(tabs)");
+      router.push("/auth/login");
     } catch (err: any) {
       Toast.show({
         type: "error",
@@ -68,9 +71,11 @@ export default function SignupScreen() {
     }
   };
 
+  const subtleText = isDark ? "#9BA1A6" : "#687076";
   const inputBorderColor = isDark ? "#2A2D2F" : "#E5E7EB";
   const inputBg = isDark ? "#1C1F21" : "#F9FAFB";
   const placeholderColor = isDark ? "#6B7280" : "#9CA3AF";
+  const dividerColor = isDark ? "#2A2D2F" : "#E5E7EB";
 
   const fieldStyle = {
     borderWidth: 1,
@@ -84,27 +89,50 @@ export default function SignupScreen() {
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+    <SafeAreaView
+      style={{
+        flex: 1,
+        backgroundColor: colors.background,
+      }}
+    >
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={{ flex: 1 }}
       >
         <ScrollView
-          contentContainerStyle={{ flexGrow: 1, padding: 24 }}
+          contentContainerStyle={{
+            flexGrow: 1,
+            paddingHorizontal: 22,
+            paddingBottom: 10,
+          }}
           keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
         >
-          <Text
-            style={{ color: colors.text }}
-            className="text-3xl font-bold mb-2"
-          >
-            Create your account
-          </Text>
-          <Text
-            style={{ color: isDark ? "#9BA1A6" : "#687076" }}
-            className="text-base mb-8"
-          >
-            Join SwiftChat and start messaging securely.
-          </Text>
+          {/* logo */}
+          <View className="items-center ">
+            <Image
+              source={require("@/assets/images/logo.png")}
+              style={{ width: 176, height: 176 }}
+              contentFit="contain"
+            />
+          </View>
+
+          {/* Header */}
+          <View className="mb-8">
+            <Text
+              style={{ color: colors.text }}
+              className="text-3xl font-bold text-center mb-2"
+            >
+              Create your account
+            </Text>
+
+            <Text
+              style={{ color: subtleText }}
+              className="text-base text-center"
+            >
+              Join SwiftChat and start messaging securely
+            </Text>
+          </View>
 
           {/* Email */}
           <View className="mb-4">
@@ -114,6 +142,7 @@ export default function SignupScreen() {
             >
               Email
             </Text>
+
             <Controller
               control={control}
               name="email"
@@ -125,18 +154,41 @@ export default function SignupScreen() {
                 },
               }}
               render={({ field: { onChange, value, onBlur } }) => (
-                <TextInput
-                  value={value}
-                  onChangeText={onChange}
-                  onBlur={onBlur}
-                  placeholder="you@example.com"
-                  placeholderTextColor={placeholderColor}
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                  style={fieldStyle}
-                />
+                <View
+                  style={{
+                    position: "relative",
+                    justifyContent: "center",
+                  }}
+                >
+                  <View
+                    style={{
+                      position: "absolute",
+                      left: 16,
+                      zIndex: 1,
+                    }}
+                  >
+                    <AntDesign name="mail" size={20} color={subtleText} />
+                  </View>
+
+                  <TextInput
+                    value={value}
+                    onChangeText={onChange}
+                    onBlur={onBlur}
+                    placeholder="you@example.com"
+                    placeholderTextColor={placeholderColor}
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                    style={[
+                      fieldStyle,
+                      {
+                        paddingLeft: 50,
+                      },
+                    ]}
+                  />
+                </View>
               )}
             />
+
             {errors.email && (
               <Text className="text-red-500 text-sm mt-1">
                 {errors.email.message}
@@ -152,25 +204,52 @@ export default function SignupScreen() {
             >
               Username
             </Text>
+
             <Controller
               control={control}
               name="username"
               rules={{
                 required: "Username is required",
-                minLength: { value: 3, message: "At least 3 characters" },
+                minLength: {
+                  value: 3,
+                  message: "At least 3 characters",
+                },
               }}
               render={({ field: { onChange, value, onBlur } }) => (
-                <TextInput
-                  value={value}
-                  onChangeText={onChange}
-                  onBlur={onBlur}
-                  placeholder="yourname"
-                  placeholderTextColor={placeholderColor}
-                  autoCapitalize="none"
-                  style={fieldStyle}
-                />
+                <View
+                  style={{
+                    position: "relative",
+                    justifyContent: "center",
+                  }}
+                >
+                  <View
+                    style={{
+                      position: "absolute",
+                      left: 16,
+                      zIndex: 1,
+                    }}
+                  >
+                    <AntDesign name="user" size={20} color={subtleText} />
+                  </View>
+
+                  <TextInput
+                    value={value}
+                    onChangeText={onChange}
+                    onBlur={onBlur}
+                    placeholder="yourname"
+                    placeholderTextColor={placeholderColor}
+                    autoCapitalize="none"
+                    style={[
+                      fieldStyle,
+                      {
+                        paddingLeft: 50,
+                      },
+                    ]}
+                  />
+                </View>
               )}
             />
+
             {errors.username && (
               <Text className="text-red-500 text-sm mt-1">
                 {errors.username.message}
@@ -186,12 +265,16 @@ export default function SignupScreen() {
             >
               Password
             </Text>
+
             <Controller
               control={control}
               name="password"
               rules={{
                 required: "Password is required",
-                minLength: { value: 8, message: "At least 8 characters" },
+                minLength: {
+                  value: 8,
+                  message: "At least 8 characters",
+                },
                 pattern: {
                   value:
                     /^(?=.*[a-z])(?=.*[A-Z])(?=.*[!@#$%^&*(),.?":{}|<>])[A-Za-z\d!@#$%^&*(),.?":{}|<>]{8,}$/,
@@ -200,18 +283,59 @@ export default function SignupScreen() {
                 },
               }}
               render={({ field: { onChange, value, onBlur } }) => (
-                <TextInput
-                  value={value}
-                  onChangeText={onChange}
-                  onBlur={onBlur}
-                  placeholder="••••••••"
-                  placeholderTextColor={placeholderColor}
-                  secureTextEntry={!showPassword}
-                  autoCapitalize="none"
-                  style={fieldStyle}
-                />
+                <View
+                  style={{
+                    position: "relative",
+                    justifyContent: "center",
+                  }}
+                >
+                  {/* Lock icon */}
+                  <View
+                    style={{
+                      position: "absolute",
+                      left: 16,
+                      zIndex: 1,
+                    }}
+                  >
+                    <AntDesign name="lock" size={20} color={subtleText} />
+                  </View>
+
+                  <TextInput
+                    value={value}
+                    onChangeText={onChange}
+                    onBlur={onBlur}
+                    placeholder="••••••••"
+                    placeholderTextColor={placeholderColor}
+                    secureTextEntry={!showPassword}
+                    autoCapitalize="none"
+                    style={[
+                      fieldStyle,
+                      {
+                        paddingLeft: 50,
+                        paddingRight: 44,
+                      },
+                    ]}
+                  />
+
+                  {/* Eye */}
+                  <Pressable
+                    onPress={() => setShowPassword((prev) => !prev)}
+                    hitSlop={10}
+                    style={{
+                      position: "absolute",
+                      right: 14,
+                    }}
+                  >
+                    <AntDesign
+                      name={showPassword ? "eye-invisible" : "eye"}
+                      size={20}
+                      color={subtleText}
+                    />
+                  </Pressable>
+                </View>
               )}
             />
+
             {errors.password && (
               <Text className="text-red-500 text-sm mt-1">
                 {errors.password.message}
@@ -227,6 +351,7 @@ export default function SignupScreen() {
             >
               Confirm Password
             </Text>
+
             <Controller
               control={control}
               name="confirmPassword"
@@ -236,18 +361,59 @@ export default function SignupScreen() {
                   value === watch("password") || "Passwords don't match",
               }}
               render={({ field: { onChange, value, onBlur } }) => (
-                <TextInput
-                  value={value}
-                  onChangeText={onChange}
-                  onBlur={onBlur}
-                  placeholder="••••••••"
-                  placeholderTextColor={placeholderColor}
-                  secureTextEntry={!showPassword}
-                  autoCapitalize="none"
-                  style={fieldStyle}
-                />
+                <View
+                  style={{
+                    position: "relative",
+                    justifyContent: "center",
+                  }}
+                >
+                  {/* Lock icon */}
+                  <View
+                    style={{
+                      position: "absolute",
+                      left: 16,
+                      zIndex: 1,
+                    }}
+                  >
+                    <AntDesign name="lock" size={20} color={subtleText} />
+                  </View>
+
+                  <TextInput
+                    value={value}
+                    onChangeText={onChange}
+                    onBlur={onBlur}
+                    placeholder="••••••••"
+                    placeholderTextColor={placeholderColor}
+                    secureTextEntry={!showPassword}
+                    autoCapitalize="none"
+                    style={[
+                      fieldStyle,
+                      {
+                        paddingLeft: 50,
+                        paddingRight: 44,
+                      },
+                    ]}
+                  />
+
+                  {/* Eye */}
+                  <Pressable
+                    onPress={() => setShowPassword((prev) => !prev)}
+                    hitSlop={10}
+                    style={{
+                      position: "absolute",
+                      right: 14,
+                    }}
+                  >
+                    <AntDesign
+                      name={showPassword ? "eye-invisible" : "eye"}
+                      size={20}
+                      color={subtleText}
+                    />
+                  </Pressable>
+                </View>
               )}
             />
+
             {errors.confirmPassword && (
               <Text className="text-red-500 text-sm mt-1">
                 {errors.confirmPassword.message}
@@ -255,38 +421,57 @@ export default function SignupScreen() {
             )}
           </View>
 
-          <Pressable
-            onPress={() => setShowPassword((prev) => !prev)}
-            className="self-start mb-6 mt-1"
-          >
-            <Text className="text-[#00A896] text-sm font-medium">
-              {showPassword ? "Hide" : "Show"} password
-            </Text>
-          </Pressable>
-
           {/* Submit */}
           <Pressable
             onPress={handleSubmit(onSubmit)}
             disabled={isSubmitting}
-            className="rounded-2xl bg-[#008378] py-4 items-center active:opacity-90"
-            style={{ opacity: isSubmitting ? 0.6 : 1 }}
+            className="rounded-2xl bg-[#008378] py-4 items-center active:opacity-90 mt-6"
+            style={{
+              opacity: isSubmitting ? 0.6 : 1,
+            }}
           >
             <Text className="text-white text-lg font-semibold">
               {isSubmitting ? "Creating account..." : "Sign Up"}
             </Text>
           </Pressable>
 
-          {/* back to login */}
-          <View className="flex-row items-center justify-center py-6">
-            <Text
-              style={{ color: isDark ? "#9BA1A6" : "#687076" }}
-              className="text-base"
-            >
+          {/* Divider */}
+          <View className="flex-row items-center my-8">
+            <View
+              style={{
+                flex: 1,
+                height: 1,
+                backgroundColor: dividerColor,
+              }}
+            />
+
+            <Text style={{ color: subtleText }} className="mx-3 text-sm">
+              or
+            </Text>
+
+            <View
+              style={{
+                flex: 1,
+                height: 1,
+                backgroundColor: dividerColor,
+              }}
+            />
+          </View>
+
+          {/* Login */}
+          <View className="flex-row items-center justify-center">
+            <Text style={{ color: subtleText }} className="text-base">
               Already have an account?
             </Text>
+
             <Pressable
               onPress={() => router.push("/auth/login")}
-              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              hitSlop={{
+                top: 12,
+                bottom: 12,
+                left: 12,
+                right: 12,
+              }}
               className="ml-1 px-1 py-1"
             >
               <Text className="text-[#00A896] font-semibold text-base">
