@@ -15,6 +15,7 @@ import {
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
 import { AppThemeProvider, useTheme } from "@/constants/theme-provider";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 export const unstable_settings = {
   anchor: "(tabs)",
@@ -64,10 +65,12 @@ function AppNavigator() {
 
 export default function RootLayout() {
   return (
-    <SafeAreaProvider>
-      <AppThemeProvider>
-        <AppNavigator />
-      </AppThemeProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <AppThemeProvider>
+          <AppNavigator />
+        </AppThemeProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

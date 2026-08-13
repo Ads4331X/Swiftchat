@@ -3,11 +3,18 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useTheme } from "@/constants/theme-provider";
 import PillsNav, { ChatCategory } from "@/components/layout/PillsNav";
 import { useState } from "react";
+import { View } from "react-native";
 import ChatList from "@/components/layout/ChatList";
+import AddChatMemberBtn from "@/components/layout/AddChatMemberBtn";
+import AddChatMemberForm from "@/components/layout/AddChatMemberForm";
+import { useRef } from "react";
+import BottomSheet, { BottomSheetView } from "@gorhom/bottom-sheet";
 export default function Chat() {
   const [activeChatCategory, setActiveChatCategory] =
     useState<ChatCategory>("All");
   const { colors } = useTheme();
+  const bottomSheetRef = useRef<BottomSheet>(null);
+
   return (
     <SafeAreaView
       className="flex-1"
@@ -19,6 +26,10 @@ export default function Chat() {
         onSelectCategory={setActiveChatCategory}
       />
       <ChatList filteredMode={activeChatCategory} />
+      <View className="absolute right-2 bottom-16">
+        <AddChatMemberBtn onPress={() => bottomSheetRef.current?.expand()} />
+      </View>
+      <AddChatMemberForm bottomSheetRef={bottomSheetRef} />
     </SafeAreaView>
   );
 }
