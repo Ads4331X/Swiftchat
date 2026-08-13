@@ -1,6 +1,6 @@
 import WelcomePage from "@/components/WelcomePage";
 import { View } from "react-native";
-import * as SecureStore from "expo-secure-store";
+import { getToken } from "@/lib/secureStorage";
 import { useRouter } from "expo-router";
 import { useEffect } from "react";
 
@@ -9,7 +9,7 @@ export default function HomeScreen() {
 
   useEffect(() => {
     const checkToken = async () => {
-      const token = await SecureStore.getItemAsync("token");
+      const token = await getToken("token");
 
       if (token) {
         router.replace("/chat");

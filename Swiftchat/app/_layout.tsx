@@ -14,7 +14,7 @@ import {
   SafeAreaView,
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
-import { useColorScheme } from "@/hooks/use-color-scheme";
+import { AppThemeProvider, useTheme } from "@/constants/theme-provider";
 
 export const unstable_settings = {
   anchor: "(tabs)",
@@ -39,27 +39,35 @@ function ToastSafeAreaWrapper() {
   );
 }
 
-export default function RootLayout() {
-  const colorScheme = useColorScheme();
+function AppNavigator() {
+  const { isDark } = useTheme();
 
   return (
+    <ThemeProvider value={isDark ? DarkTheme : DefaultTheme}>
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="auth" />
+        <Stack.Screen
+          name="modal"
+          options={{
+            presentation: "modal",
+            title: "Modal",
+            headerShown: true,
+          }}
+        />
+      </Stack>
+      <ToastSafeAreaWrapper />
+      <StatusBar style="auto" />
+    </ThemeProvider>
+  );
+}
+
+export default function RootLayout() {
+  return (
     <SafeAreaProvider>
-      <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="auth" />
-          <Stack.Screen
-            name="modal"
-            options={{
-              presentation: "modal",
-              title: "Modal",
-              headerShown: true,
-            }}
-          />
-        </Stack>
-        <ToastSafeAreaWrapper />
-        <StatusBar style="auto" />
-      </ThemeProvider>
+      <AppThemeProvider>
+        <AppNavigator />
+      </AppThemeProvider>
     </SafeAreaProvider>
   );
 }

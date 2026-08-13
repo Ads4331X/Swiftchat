@@ -1,4 +1,5 @@
 import { View, Pressable, Text } from "react-native";
+import { useTheme } from "@/constants/theme-provider";
 
 export type ChatCategory = "All" | "Unread" | "Groups";
 export const CHAT_CATEGORIES: ChatCategory[] = ["All", "Unread", "Groups"];
@@ -12,8 +13,11 @@ export default function PillsNav({
   activeChatCategory,
   onSelectCategory,
 }: PillsNavProps) {
+  const theme = useTheme();
+  const colors = theme.colors;
+
   return (
-    <View className="flex-row flex-wrap items-center m-2 pt-2">
+    <View className="flex-row flex-wrap items-center m-2 mb-2 ">
       {CHAT_CATEGORIES.map((category) => {
         const isActive = category === activeChatCategory;
         return (
@@ -21,9 +25,19 @@ export default function PillsNav({
             key={category}
             onPress={() => onSelectCategory(category)}
             className="px-4 py-2 m-1 rounded-full"
-            style={{ backgroundColor: isActive ? "#3B82F6" : "#FEF2F2" }}
+            style={{
+              backgroundColor: isActive
+                ? colors.pillActiveBg
+                : colors.pillInactiveBg,
+            }}
           >
-            <Text className={isActive ? "text-white" : "text-black"}>
+            <Text
+              style={{
+                color: isActive
+                  ? colors.pillActiveText
+                  : colors.pillInactiveText,
+              }}
+            >
               {category}
             </Text>
           </Pressable>

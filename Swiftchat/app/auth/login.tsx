@@ -12,12 +12,11 @@ import { api } from "@/lib/api";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useForm, Controller } from "react-hook-form";
 import { router } from "expo-router";
-import { useColorScheme } from "@/hooks/use-color-scheme";
-import { Colors } from "@/constants/theme";
+import { useTheme } from "@/constants/theme-provider";
 import Toast from "react-native-toast-message";
 import { Image } from "expo-image";
 import AntDesign from "@expo/vector-icons/AntDesign";
-import * as SecureStore from "expo-secure-store";
+import { setToken } from "@/lib/secureStorage";
 
 type FormData = {
   email: string;
@@ -25,9 +24,8 @@ type FormData = {
 };
 
 export default function LoginScreen() {
-  const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme ?? "light"];
-  const isDark = colorScheme === "dark";
+  const theme = useTheme();
+  const colors = theme.colors;
   const [showPassword, setShowPassword] = useState(false);
 
   const {
@@ -54,7 +52,7 @@ export default function LoginScreen() {
         text2: "You're logged in",
       });
 
-      await SecureStore.setItemAsync("token", response.data.token);
+      await setToken("token", response.data.token);
 
       router.push("/chat");
     } catch (err: any) {
@@ -66,11 +64,13 @@ export default function LoginScreen() {
     }
   };
 
-  const subtleText = isDark ? "#9BA1A6" : "#687076";
-  const inputBorderColor = isDark ? "#2A2D2F" : "#E5E7EB";
-  const inputBg = isDark ? "#1C1F21" : "#F9FAFB";
-  const placeholderColor = isDark ? "#6B7280" : "#9CA3AF";
-  const dividerColor = isDark ? "#2A2D2F" : "#E5E7EB";
+  const {
+    subtleText,
+    inputBorderColor,
+    inputBg,
+    placeholderColor,
+    dividerColor,
+  } = theme;
 
   const fieldStyle = {
     borderWidth: 1,

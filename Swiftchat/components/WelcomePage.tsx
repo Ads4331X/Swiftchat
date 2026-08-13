@@ -2,13 +2,10 @@ import { Image, View, Text, Pressable, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import AntDesign from "@expo/vector-icons/AntDesign";
 import { Link, router } from "expo-router";
-import { useColorScheme } from "@/hooks/use-color-scheme";
-import { Colors } from "@/constants/theme";
+import { useTheme } from "@/constants/theme-provider";
 
 export default function WelcomePage() {
-  const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme ?? "light"];
-  const isDark = colorScheme === "dark";
+  const { colors, subtleText } = useTheme();
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
@@ -37,7 +34,7 @@ export default function WelcomePage() {
 
             <Text
               className="text-lg text-center leading-relaxed max-w-xs"
-              style={{ color: isDark ? "#9BA1A6" : "#687076" }}
+                style={{ color: subtleText }}
             >
               Fast, Secure and Private messaging for everyone. Effortless
               connection starts here.
@@ -58,7 +55,7 @@ export default function WelcomePage() {
             <View className="flex-row items-center justify-center py-2">
               <Text
                 className="text-base"
-                style={{ color: isDark ? "#9BA1A6" : "#687076" }}
+              style={{ color: subtleText }}
               >
                 Already have an account?
               </Text>

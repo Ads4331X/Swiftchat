@@ -1,13 +1,9 @@
 import { View, Pressable, Text, Image } from "react-native";
 import Feather from "@expo/vector-icons/Feather";
-import { useColorScheme } from "@/hooks/use-color-scheme";
-import { Colors } from "@/constants/theme";
+import { useTheme } from "@/constants/theme-provider";
 
 export default function ChatHome() {
-  const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme ?? "light"];
-  const isDark = colorScheme === "dark";
-  const dividerColor = isDark ? "#2A2D2F" : "#E5E7EB";
+  const { dividerColor } = useTheme();
 
   return (
     <View className="w-full">
