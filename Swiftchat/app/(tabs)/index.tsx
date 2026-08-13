@@ -17,7 +17,7 @@ export default function HomeScreen() {
     };
 
     checkToken();
-  }, []);
+  }, [router]);
 
   return (
     <View className="flex-1">

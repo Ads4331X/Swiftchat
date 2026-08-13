@@ -59,7 +59,7 @@ export default function SkeletonLoader() {
     );
     pulse.start();
     return () => pulse.stop();
-  }, []);
+  }, [opacity]);
 
   return (
     <View className="w-full">

@@ -2,13 +2,12 @@ import ChatHome from "@/components/layout/ChatHome";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useTheme } from "@/constants/theme-provider";
 import PillsNav, { ChatCategory } from "@/components/layout/PillsNav";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { View } from "react-native";
 import ChatList from "@/components/layout/ChatList";
 import AddChatMemberBtn from "@/components/layout/AddChatMemberBtn";
 import AddChatMemberForm from "@/components/layout/AddChatMemberForm";
-import { useRef } from "react";
-import BottomSheet, { BottomSheetView } from "@gorhom/bottom-sheet";
+import BottomSheet from "@gorhom/bottom-sheet";
 export default function Chat() {
   const [activeChatCategory, setActiveChatCategory] =
     useState<ChatCategory>("All");
