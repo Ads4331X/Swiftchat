@@ -9,18 +9,26 @@ import { api } from "@/lib/api";
 import NewChatSheetHeader from "./NewChatSheetHeader";
 import UsernameSearchInput from "./UsernameSearchInput";
 import SearchLoadingCard from "./SearchLoadingCard";
-import SearchResultCard from "./SearchResultCard";
-import type { NewChatResult } from "./types";
+import SearchResultItem from "./SearchResultItem";
 
 type FormData = {
   username: string;
 };
 
-type NewChatSheetProps = {
-  bottomSheetRef: React.RefObject<React.ElementRef<typeof BottomSheet> | null>;
+type SearchUser = {
+  id: number;
+  username: string;
 };
 
-export default function NewChatSheet({ bottomSheetRef }: NewChatSheetProps) {
+type NewChatSheetProps = {
+  bottomSheetRef: React.RefObject<React.ElementRef<typeof BottomSheet> | null>;
+  onChatCreated?: () => void;
+};
+
+export default function NewChatSheet({
+  bottomSheetRef,
+  onChatCreated,
+}: NewChatSheetProps) {
   const theme = useTheme();
   const colors = theme.colors;
   const { subtleText } = theme;
@@ -32,45 +40,57 @@ export default function NewChatSheet({ bottomSheetRef }: NewChatSheetProps) {
   });
 
   const insets = useSafeAreaInsets();
-  const [result, setResult] = useState<NewChatResult | null>(null);
+  const [users, setUsers] = useState<SearchUser[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [searched, setSearched] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [creatingUsername, setCreatingUsername] = useState<string | null>(null);
   const inputRef = useRef<TextInput>(null);
 
   const onSubmit = async (data: FormData) => {
-    if (!data.username.trim()) {
+    const query = data.username.trim();
+    if (!query) {
       return;
     }
 
-    setResult(null);
+    setUsers([]);
+    setErrorMessage(null);
+    setSearched(true);
     setIsSearching(true);
 
     try {
-      const response = await api.post("/api/conversations/new-conversation", {
-        targetUsername: data.username,
+      const response = await api.get("/api/user/search", {
+        params: { username: query },
       });
 
-      const conversation = response.data.conversation;
-      const otherMember = conversation?.members?.find(
-        (m: { username?: string }) =>
-          m.username?.toLowerCase() !== data.username.trim().toLowerCase(),
-      );
-
-      setResult({
-        type: "success",
-        title: otherMember?.username
-          ? `Chat with @${otherMember.username}`
-          : "Conversation ready",
-        message: response.data.message ?? "You can start chatting now",
-        username: otherMember?.username,
-      });
+      setUsers(response.data.users ?? []);
     } catch (err: any) {
-      setResult({
-        type: "error",
-        title: "User not found",
-        message: err.response?.data?.error ?? "Something went wrong",
-      });
+      setErrorMessage(err.response?.data?.error ?? "Something went wrong");
     } finally {
       setIsSearching(false);
+    }
+  };
+
+  const startChat = async (username: string) => {
+    if (creatingUsername) {
+      return;
+    }
+
+    setCreatingUsername(username);
+    setErrorMessage(null);
+
+    try {
+      await api.post("/api/conversations/new-conversation", {
+        targetUsername: username,
+      });
+
+      onChatCreated?.();
+      closeSheet();
+      router.push("/chat");
+    } catch (err: any) {
+      setErrorMessage(err.response?.data?.error ?? "Something went wrong");
+    } finally {
+      setCreatingUsername(null);
     }
   };
 
@@ -80,15 +100,13 @@ export default function NewChatSheet({ bottomSheetRef }: NewChatSheetProps) {
   };
 
   const onCancel = () => {
-    setResult(null);
+    setUsers([]);
     setIsSearching(false);
+    setSearched(false);
+    setErrorMessage(null);
+    setCreatingUsername(null);
     inputRef.current?.blur();
     reset();
-  };
-
-  const onStartChat = () => {
-    closeSheet();
-    router.push("/chat");
   };
 
   return (
@@ -129,14 +147,32 @@ export default function NewChatSheet({ bottomSheetRef }: NewChatSheetProps) {
 
           {isSearching && <SearchLoadingCard />}
 
-          {result && result.type === "error" && (
+          {!isSearching && errorMessage && (
             <Text style={{ color: "#EF4444" }} className="mt-4 text-sm">
-              {result.message ?? result.title}
+              {errorMessage}
             </Text>
           )}
 
-          {result && result.type === "success" && (
-            <SearchResultCard title={result.title} onChat={onStartChat} />
+          {!isSearching && !errorMessage && users.length > 0 && (
+            <View className="mt-2">
+              {users.map((user) => (
+                <SearchResultItem
+                  key={user.id}
+                  username={user.username}
+                  loading={creatingUsername === user.username}
+                  onPress={() => startChat(user.username)}
+                />
+              ))}
+            </View>
+          )}
+
+          {!isSearching && !errorMessage && searched && users.length === 0 && (
+            <Text
+              style={{ color: subtleText }}
+              className="mt-6 text-sm text-center"
+            >
+              No users found
+            </Text>
           )}
         </View>
       </BottomSheetView>
