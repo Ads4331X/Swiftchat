@@ -15,3 +15,11 @@ export async function setToken(key: string, value: string): Promise<void> {
   }
   await SecureStore.setItemAsync(key, value);
 }
+
+export async function removeToken(key: string): Promise<void> {
+  if (Platform.OS === "web") {
+    localStorage.removeItem(key);
+    return;
+  }
+  await SecureStore.deleteItemAsync(key);
+}

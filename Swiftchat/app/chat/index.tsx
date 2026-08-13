@@ -3,7 +3,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useTheme } from "@/constants/theme-provider";
 import PillsNav, { ChatCategory } from "@/components/layout/PillsNav";
 import { useCallback, useRef, useState } from "react";
-import { View } from "react-native";
+import { ScrollView, View } from "react-native";
 import ChatList from "@/components/layout/ChatList";
 import NewChatFab from "@/components/chat/new-chat/NewChatFab";
 import NewChatSheet from "@/components/chat/new-chat/NewChatSheet";
@@ -30,14 +30,30 @@ export default function Chat() {
       style={{ backgroundColor: colors.background }}
     >
       <ChatHome />
+
       <PillsNav
         activeChatCategory={activeChatCategory}
         onSelectCategory={setActiveChatCategory}
       />
-      <ChatList filteredMode={activeChatCategory} chats={chats} loading={loading} />
+
+      <ScrollView
+        className="flex-1"
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{
+          paddingBottom: 120,
+        }}
+      >
+        <ChatList
+          filteredMode={activeChatCategory}
+          chats={chats}
+          loading={loading}
+        />
+      </ScrollView>
+
       <View className="absolute right-2 bottom-16">
         <NewChatFab onPress={() => bottomSheetRef.current?.expand()} />
       </View>
+
       <NewChatSheet bottomSheetRef={bottomSheetRef} onChatCreated={refetch} />
     </SafeAreaView>
   );

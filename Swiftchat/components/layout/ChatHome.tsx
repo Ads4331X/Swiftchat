@@ -1,17 +1,21 @@
 import { View, Pressable, Text, Image } from "react-native";
 import Feather from "@expo/vector-icons/Feather";
 import { useTheme } from "@/constants/theme-provider";
+import { useRouter } from "expo-router";
 
 export default function ChatHome() {
   const { dividerColor } = useTheme();
+  const router = useRouter();
 
   return (
     <View className="w-full">
       <View className="w-full px-4 flex-row items-center justify-between">
-        <Image
-          className="w-10 h-10 rounded-full"
-          source={require("@/assets/images/icon.png")}
-        />
+        <Pressable onPress={() => router.push("/usersetting")}>
+          <Image
+            className="w-10 h-10 rounded-full"
+            source={require("@/assets/images/icon.png")}
+          />
+        </Pressable>
 
         <Text className="text-[#29A195] font-bold text-xl">SwiftChat</Text>
 

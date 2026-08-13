@@ -9,6 +9,12 @@ export type ChatMember = {
 export type Chat = {
   id: number;
   members: ChatMember[];
+  lastMessage?: {
+    id: number;
+    text: string;
+    sentAt: string;
+    senderId: number;
+  } | null;
 };
 
 function dedupe(chats: Chat[]): Chat[] {
@@ -29,14 +35,14 @@ export default function useChats() {
   const [loading, setLoading] = useState(true);
 
   const refetch = useCallback(async () => {
-    setLoading(true);
+    if (chats.length === 0) setLoading(true);
     try {
       const response = await api.get(`/api/conversations`);
       setChats(dedupe(response.data));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [chats.length]);
 
   return { chats, loading, refetch };
 }

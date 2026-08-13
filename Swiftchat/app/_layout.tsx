@@ -16,6 +16,7 @@ import {
 } from "react-native-safe-area-context";
 import { AppThemeProvider, useTheme } from "@/constants/theme-provider";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { useMemo } from "react";
 
 export const unstable_settings = {
   anchor: "(tabs)",
@@ -41,11 +42,28 @@ function ToastSafeAreaWrapper() {
 }
 
 function AppNavigator() {
-  const { isDark } = useTheme();
+  const { isDark, colors } = useTheme();
+
+  const navigationTheme = useMemo(() => {
+    const base = isDark ? DarkTheme : DefaultTheme;
+    return {
+      ...base,
+      colors: {
+        ...base.colors,
+        background: colors.background,
+        card: colors.background,
+      },
+    };
+  }, [isDark, colors.background]);
 
   return (
-    <ThemeProvider value={isDark ? DarkTheme : DefaultTheme}>
-      <Stack screenOptions={{ headerShown: false }}>
+    <ThemeProvider value={navigationTheme}>
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: colors.background },
+        }}
+      >
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="auth" />
       </Stack>
