@@ -3,7 +3,6 @@ import { useState, useEffect, useRef } from "react";
 import {
   ActivityIndicator,
   FlatList,
-  KeyboardAvoidingView,
   Platform,
   Pressable,
   StyleSheet,
@@ -11,6 +10,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Feather from "@expo/vector-icons/Feather";
 import { useTheme } from "@/constants/theme-provider";
@@ -70,8 +70,14 @@ export default function UserChat() {
     username?: string;
   }>();
   const router = useRouter();
-  const { colors, subtleText, dividerColor, inputBg, inputBorderColor, placeholderColor } =
-    useTheme();
+  const {
+    colors,
+    subtleText,
+    dividerColor,
+    inputBg,
+    inputBorderColor,
+    placeholderColor,
+  } = useTheme();
   const { messages, loading, sendMessage } = useChatMessages(id);
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
@@ -100,8 +106,9 @@ export default function UserChat() {
       style={{ backgroundColor: colors.background }}
     >
       <KeyboardAvoidingView
-        className="flex-1"
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={{ flex: 1 }}
+        behavior="padding"
+        keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
       >
         <View
           className="w-full px-4 py-3 flex-row items-center"
@@ -155,7 +162,8 @@ export default function UserChat() {
                 bubbleColor={inputBg}
               />
             )}
-            contentContainerStyle={{ paddingVertical: 12 }}
+            style={{ flex: 1 }}
+            contentContainerStyle={{ paddingVertical: 12, flexGrow: 1 }}
             onContentSizeChange={() =>
               listRef.current?.scrollToEnd({ animated: true })
             }

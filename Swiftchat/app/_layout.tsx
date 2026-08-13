@@ -6,6 +6,7 @@ import {
 } from "@react-navigation/native";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import * as SystemUI from "expo-system-ui";
 import "react-native-reanimated";
 import Toast from "react-native-toast-message";
 import { toastConfig } from "@/lib/toastConfig";
@@ -16,7 +17,8 @@ import {
 } from "react-native-safe-area-context";
 import { AppThemeProvider, useTheme } from "@/constants/theme-provider";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { useMemo } from "react";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+import { useEffect, useMemo } from "react";
 
 export const unstable_settings = {
   anchor: "(tabs)",
@@ -43,6 +45,10 @@ function ToastSafeAreaWrapper() {
 
 function AppNavigator() {
   const { isDark, colors } = useTheme();
+
+  useEffect(() => {
+    SystemUI.setBackgroundColorAsync(colors.background);
+  }, [colors.background]);
 
   const navigationTheme = useMemo(() => {
     const base = isDark ? DarkTheme : DefaultTheme;
@@ -78,7 +84,9 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <AppThemeProvider>
-          <AppNavigator />
+          <KeyboardProvider>
+            <AppNavigator />
+          </KeyboardProvider>
         </AppThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
