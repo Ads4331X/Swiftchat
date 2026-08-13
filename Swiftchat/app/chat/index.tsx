@@ -5,8 +5,8 @@ import PillsNav, { ChatCategory } from "@/components/layout/PillsNav";
 import { useRef, useState } from "react";
 import { View } from "react-native";
 import ChatList from "@/components/layout/ChatList";
-import AddChatMemberBtn from "@/components/layout/AddChatMemberBtn";
-import AddChatMemberForm from "@/components/layout/AddChatMemberForm";
+import NewChatFab from "@/components/chat/new-chat/NewChatFab";
+import NewChatSheet from "@/components/chat/new-chat/NewChatSheet";
 import BottomSheet from "@gorhom/bottom-sheet";
 export default function Chat() {
   const [activeChatCategory, setActiveChatCategory] =
@@ -26,9 +26,9 @@ export default function Chat() {
       />
       <ChatList filteredMode={activeChatCategory} />
       <View className="absolute right-2 bottom-16">
-        <AddChatMemberBtn onPress={() => bottomSheetRef.current?.expand()} />
+        <NewChatFab onPress={() => bottomSheetRef.current?.expand()} />
       </View>
-      <AddChatMemberForm bottomSheetRef={bottomSheetRef} />
+      <NewChatSheet bottomSheetRef={bottomSheetRef} />
     </SafeAreaView>
   );
 }
