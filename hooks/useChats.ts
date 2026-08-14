@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { api } from "@/lib/api";
-import { listenForNewMessages } from "@/lib/socket";
+import { listenForNewMessages, joinConversations } from "@/lib/socket";
 
 export type ChatMember = {
   id: number;
@@ -54,7 +54,9 @@ export default function useChats() {
     if (chats.length === 0) setLoading(true);
     try {
       const response = await api.get(`/api/conversations`);
-      setChats(dedupe(response.data));
+      const fetched = dedupe(response.data);
+      setChats(fetched);
+      joinConversations(fetched.map((chat) => chat.id));
     } finally {
       setLoading(false);
     }

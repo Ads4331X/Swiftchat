@@ -25,12 +25,40 @@ export async function connectSocket() {
   });
 }
 
-export function joinConversation({ id }: { id: string }) {
-  Socket?.emit("join-conversation", id);
+export function joinConversation({ id }: { id: string | number }) {
+  Socket?.emit("join-conversation", Number(id));
+}
+
+export function joinConversations(ids: number[]) {
+  ids.forEach((conversationId) =>
+    Socket?.emit("join-conversation", conversationId),
+  );
 }
 
 export function listenForNewMessages(callback: (message: any) => void) {
   Socket?.on("new-message", callback);
+
+  return () => {
+    Socket?.off("new-message", callback);
+  };
+}
+
+export function listenForMessageUpdates(callback: (message: any) => void) {
+  Socket?.on("message-updated", callback);
+
+  return () => {
+    Socket?.off("message-updated", callback);
+  };
+}
+
+export function listenForMessageDeletes(
+  callback: (message: { id: number }) => void,
+) {
+  Socket?.on("message-deleted", callback);
+
+  return () => {
+    Socket?.off("message-deleted", callback);
+  };
 }
 
 export function disconnectSocket() {

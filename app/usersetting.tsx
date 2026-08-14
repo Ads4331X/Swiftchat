@@ -15,6 +15,7 @@ import Feather from "@expo/vector-icons/Feather";
 import { useTheme } from "@/constants/theme-provider";
 import { api } from "@/lib/api";
 import { removeToken } from "@/lib/secureStorage";
+import { disconnectSocket } from "@/lib/socket";
 import Toast from "react-native-toast-message";
 import UserProfileCard from "@/components/profile/UserProfileCard";
 import SettingsCard from "@/components/profile/SettingsCard";
@@ -113,7 +114,10 @@ export default function UserSettings() {
           <ActivityIndicator color={BRAND_COLOR} size="large" />
         </View>
       ) : (
-        <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 32 }}>
+        <ScrollView
+          className="flex-1"
+          contentContainerStyle={{ paddingBottom: 32 }}
+        >
           <UserProfileCard
             username={user?.username ?? "User"}
             subtitle={user?.email}
@@ -143,6 +147,17 @@ export default function UserSettings() {
               title="Edit account"
               subtitle="Username, email, password"
               onPress={() => router.push("/editaccount")}
+            />
+            <SettingsCard
+              icon={<Feather name="log-out" size={20} color={BRAND_COLOR} />}
+              title="Log out"
+              subtitle="Sign out of this account"
+              onPress={async () => {
+                await removeToken("token");
+                disconnectSocket();
+                Toast.show({ type: "success", text1: "Signed out" });
+                router.replace("/");
+              }}
             />
             <SettingsCard
               tone="danger"
