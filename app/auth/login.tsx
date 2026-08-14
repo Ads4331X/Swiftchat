@@ -17,6 +17,7 @@ import Toast from "react-native-toast-message";
 import { Image } from "expo-image";
 import AntDesign from "@expo/vector-icons/AntDesign";
 import { setToken } from "@/lib/secureStorage";
+import { connectSocket, listenForNewMessages } from "@/lib/socket";
 
 type FormData = {
   email: string;
@@ -53,7 +54,8 @@ export default function LoginScreen() {
       });
 
       await setToken("token", response.data.token);
-
+      await connectSocket();
+      listenForNewMessages();
       router.push("/chat");
     } catch (err: any) {
       Toast.show({

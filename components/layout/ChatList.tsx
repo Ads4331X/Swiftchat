@@ -5,6 +5,7 @@ import type { ChatCategory } from "./PillsNav";
 import type { Chat } from "@/hooks/useChats";
 import ChatCard from "./ChatCard";
 import { useRouter } from "expo-router";
+import { joinConversation } from "@/lib/socket";
 
 type ChatListProps = {
   filteredMode: ChatCategory;
@@ -63,15 +64,19 @@ export default function ChatList({
       {visibleChats.map((chat, index) => (
         <ChatCard
           key={chat.id}
-          onPress={() =>
+          onPress={() => {
+            const id = String(chat.id);
+            joinConversation({ id });
             router.push({
               pathname: "/chat/[id]",
               params: { id: String(chat.id), username: displayName(chat) },
-            })
-          }
+            });
+          }}
           username={displayName(chat)}
           lastMessage={chat.lastMessage?.text}
-          time={chat.lastMessage ? formatTime(chat.lastMessage.sentAt) : undefined}
+          time={
+            chat.lastMessage ? formatTime(chat.lastMessage.sentAt) : undefined
+          }
           showDivider={index < visibleChats.length - 1}
         />
       ))}
