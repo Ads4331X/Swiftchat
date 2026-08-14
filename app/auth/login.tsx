@@ -55,7 +55,6 @@ export default function LoginScreen() {
 
       await setToken("token", response.data.token);
       await connectSocket();
-      listenForNewMessages();
       router.push("/chat");
     } catch (err: any) {
       Toast.show({

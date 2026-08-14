@@ -1,5 +1,6 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { api } from "@/lib/api";
+import { listenForNewMessages } from "@/lib/socket";
 
 export type ChatMember = {
   id: number;
@@ -33,6 +34,21 @@ function dedupe(chats: Chat[]): Chat[] {
 export default function useChats() {
   const [chats, setChats] = useState<Chat[]>([]);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    listenForNewMessages((message) => {
+      setChats((currentChats) => {
+        const chat = currentChats.find((c) => c.id === message.conversationId);
+        if (!chat) return currentChats;
+        const updatedChat = {
+          ...chat,
+          lastMessage: message,
+        };
+        const otherChats = currentChats.filter((c) => c.id !== chat.id);
+        return [updatedChat, ...otherChats];
+      });
+    });
+  }, []);
 
   const refetch = useCallback(async () => {
     if (chats.length === 0) setLoading(true);

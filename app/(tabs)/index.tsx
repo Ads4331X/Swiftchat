@@ -3,14 +3,14 @@ import { View } from "react-native";
 import { getToken } from "@/lib/secureStorage";
 import { useRouter } from "expo-router";
 import { useEffect } from "react";
-
+import { connectSocket } from "@/lib/socket";
 export default function HomeScreen() {
   const router = useRouter();
 
   useEffect(() => {
     const checkToken = async () => {
       const token = await getToken("token");
-
+      await connectSocket();
       if (token) {
         router.replace("/chat");
       }

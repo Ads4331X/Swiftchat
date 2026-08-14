@@ -4,6 +4,8 @@ import { io, Socket as SocketType } from "socket.io-client";
 let Socket: SocketType | null = null;
 
 export async function connectSocket() {
+  if (Socket) return;
+
   const token = await getToken("token");
 
   if (!token) {
@@ -27,11 +29,8 @@ export function joinConversation({ id }: { id: string }) {
   Socket?.emit("join-conversation", id);
 }
 
-export function listenForNewMessages() {
-  Socket?.on("new-message", (message) => {
-    console.log("New message:", message);
-    // add sql lite and update ui
-  });
+export function listenForNewMessages(callback: (message: any) => void) {
+  Socket?.on("new-message", callback);
 }
 
 export function disconnectSocket() {
