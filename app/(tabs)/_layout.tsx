@@ -1,26 +1,34 @@
 import { Tabs } from "expo-router";
-import React from "react";
-
-import { IconSymbol } from "@/components/ui/icon-symbol";
+import Feather from "@expo/vector-icons/Feather";
 import { useTheme } from "@/constants/theme-provider";
 
-export default function TabLayout() {
+export default function TabsLayout() {
   const { colors } = useTheme();
 
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: colors.tint,
         headerShown: false,
-        sceneStyle: { backgroundColor: colors.background },
+        tabBarActiveTintColor: colors.tint ?? "#29A195",
+        tabBarStyle: { backgroundColor: colors.background },
       }}
     >
       <Tabs.Screen
-        name="index"
+        name="chat"
         options={{
-          title: "Home",
-          tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="house.fill" color={color} />
+          title: "Chats",
+          tabBarIcon: ({ color, size }) => (
+            <Feather name="message-circle" color={color} size={size} />
+          ),
+        }}
+      />
+
+      <Tabs.Screen
+        name="usersetting"
+        options={{
+          title: "Settings",
+          tabBarIcon: ({ color, size }) => (
+            <Feather name="settings" color={color} size={size} />
           ),
         }}
       />

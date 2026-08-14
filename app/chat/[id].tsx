@@ -3,25 +3,26 @@ import { useState, useEffect, useRef } from "react";
 import {
   ActivityIndicator,
   FlatList,
+  Keyboard,
+  KeyboardAvoidingView,
   Platform,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
   View,
-  Keyboard,
-  LayoutAnimation,
+  InputAccessoryView,
 } from "react-native";
-import { KeyboardAvoidingView } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import Feather from "@expo/vector-icons/Feather";
 import { useTheme } from "@/constants/theme-provider";
 import useChatMessages, { type Message } from "@/hooks/useChatMessages";
 import { getToken } from "@/lib/secureStorage";
 
 const BRAND_COLOR = "#29A195";
-const INPUT_BAR_HEIGHT = 64;
 
 async function getCurrentUserId(): Promise<number | null> {
   const token = await getToken("token");
@@ -84,34 +85,32 @@ export default function UserChat() {
   } = useTheme();
   const { messages, loading, sendMessage } = useChatMessages(id);
   const insets = useSafeAreaInsets();
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const [inputHeight, setInputHeight] = useState(40);
+  const ACCESSORY_ID = "chat_input_accessory";
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const listRef = useRef<FlatList<Message>>(null);
 
   useEffect(() => {
     getCurrentUserId().then(setCurrentUserId);
   }, []);
 
+  // Only used to nudge the list to the end when the keyboard appears/disappears.
+  // We do NOT track keyboard height for padding purposes anymore — the input
+  // bar is a normal flex sibling of the FlatList, so KeyboardAvoidingView +
+  // flexbox already resize the list correctly, WhatsApp-style.
   useEffect(() => {
     const showEvent =
       Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
     const hideEvent =
       Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
 
-    const onShow = (e: any) => {
-      const h = e?.endCoordinates?.height ?? 0;
-      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      setKeyboardHeight(h);
+    const onShow = () => {
+      setKeyboardVisible(true);
       setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 60);
     };
-
-    const onHide = () => {
-      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      setKeyboardHeight(0);
-    };
+    const onHide = () => setKeyboardVisible(false);
 
     const subShow = Keyboard.addListener(showEvent, onShow);
     const subHide = Keyboard.addListener(hideEvent, onHide);
@@ -129,163 +128,161 @@ export default function UserChat() {
     try {
       await sendMessage(draft);
       setDraft("");
-      // ensure we scroll to the end after sending to avoid empty space
       setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
     } finally {
       setSending(false);
     }
   };
 
+  const renderInputBar = () => (
+    <View
+      className="w-full flex-row items-end gap-3 px-3 py-2"
+      style={{
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: dividerColor,
+        backgroundColor: colors.background,
+        // account for the home indicator / nav bar exactly once, right here —
+        // but skip it while the keyboard is open, since the keyboard already
+        // covers that area and adding it would create a gap above the keyboard
+        paddingBottom: keyboardVisible
+          ? 8
+          : (insets?.bottom ?? 0) > 0
+            ? insets.bottom
+            : 8,
+      }}
+    >
+      <Pressable className="p-1 mb-2">
+        <Feather name="camera" size={22} color={subtleText} />
+      </Pressable>
+
+      <TextInput
+        {...(Platform.OS === "ios"
+          ? { inputAccessoryViewID: ACCESSORY_ID }
+          : {})}
+        value={draft}
+        onChangeText={setDraft}
+        onFocus={() =>
+          setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 80)
+        }
+        placeholder="Message"
+        placeholderTextColor={placeholderColor}
+        multiline
+        className="flex-1 rounded-2xl px-4"
+        style={{
+          backgroundColor: inputBg,
+          color: colors.text,
+          borderWidth: 1,
+          borderColor: inputBorderColor,
+          minHeight: 40,
+          maxHeight: 120,
+          paddingVertical: 8,
+          textAlignVertical: "top",
+        }}
+      />
+
+      <Pressable className="p-1 mb-2">
+        <Feather name="mic" size={22} color={subtleText} />
+      </Pressable>
+
+      <Pressable
+        onPress={handleSend}
+        disabled={sending || !draft.trim()}
+        className="w-10 h-10 mb-2 rounded-full items-center justify-center"
+        style={{
+          backgroundColor: !draft.trim() || sending ? subtleText : BRAND_COLOR,
+        }}
+      >
+        {sending ? (
+          <ActivityIndicator color="#fff" size="small" />
+        ) : (
+          <Feather name="send" size={18} color="#fff" />
+        )}
+      </Pressable>
+    </View>
+  );
+
   return (
     <SafeAreaView
       className="flex-1"
+      edges={["top", "left", "right"]}
       style={{ backgroundColor: colors.background }}
     >
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
         keyboardVerticalOffset={0}
       >
-        <View style={{ flex: 1, position: "relative" }}>
-          <View
-            className="w-full px-4 py-3 flex-row items-center"
-            style={{
-              borderBottomWidth: StyleSheet.hairlineWidth,
-              borderBottomColor: dividerColor,
-            }}
+        <View
+          className="w-full px-4 py-3 flex-row items-center"
+          style={{
+            borderBottomWidth: StyleSheet.hairlineWidth,
+            borderBottomColor: dividerColor,
+          }}
+        >
+          <Pressable onPress={() => router.back()} className="p-1">
+            <Feather name="arrow-left" size={24} color={colors.text} />
+          </Pressable>
+
+          <Text
+            numberOfLines={1}
+            style={{ color: colors.text }}
+            className="flex-1 text-center font-bold text-lg"
           >
-            <Pressable onPress={() => router.back()} className="p-1">
-              <Feather name="arrow-left" size={24} color={colors.text} />
+            {username || "Chat"}
+          </Text>
+
+          <View className="flex-row items-center gap-4">
+            <Pressable>
+              <Feather name="phone" size={22} color={BRAND_COLOR} />
             </Pressable>
-
-            <Text
-              numberOfLines={1}
-              style={{ color: colors.text }}
-              className="flex-1 text-center font-bold text-lg"
-            >
-              {username || "Chat"}
-            </Text>
-
-            <View className="flex-row items-center gap-4">
-              <Pressable>
-                <Feather name="phone" size={22} color={BRAND_COLOR} />
-              </Pressable>
-              <Pressable>
-                <Feather name="video" size={24} color={BRAND_COLOR} />
-              </Pressable>
-            </View>
-          </View>
-
-          {loading ? (
-            <View className="flex-1 items-center justify-center">
-              <ActivityIndicator color={BRAND_COLOR} size="large" />
-            </View>
-          ) : messages.length === 0 ? (
-            <View className="flex-1 items-center justify-center">
-              <Text style={{ color: subtleText }} className="text-base">
-                No messages yet
-              </Text>
-            </View>
-          ) : (
-            <FlatList
-              ref={listRef}
-              data={messages}
-              keyExtractor={(message) => String(message.id)}
-              renderItem={({ item }) => (
-                <MessageBubble
-                  message={item}
-                  isMine={item.senderId === currentUserId}
-                  textColor={colors.text}
-                  bubbleColor={inputBg}
-                />
-              )}
-              style={{ flex: 1 }}
-              contentContainerStyle={{
-                paddingVertical: 12,
-                paddingBottom:
-                  Math.max(INPUT_BAR_HEIGHT, inputHeight + 20) +
-                  (insets?.bottom ?? 0) +
-                  12,
-              }}
-              keyboardShouldPersistTaps="handled"
-              keyboardDismissMode="on-drag"
-              onContentSizeChange={() =>
-                setTimeout(
-                  () => listRef.current?.scrollToEnd({ animated: true }),
-                  50,
-                )
-              }
-            />
-          )}
-
-          {/* Input bar (stacked below FlatList) */}
-          <View
-            className="w-full flex-row items-center gap-3 px-3 py-3"
-            style={{
-              height: Math.max(INPUT_BAR_HEIGHT, inputHeight + 20),
-              borderTopWidth: StyleSheet.hairlineWidth,
-              borderTopColor: dividerColor,
-              backgroundColor: colors.background,
-              alignItems: "center",
-              paddingVertical: 6,
-            }}
-          >
-            <Pressable className="p-1">
-              <Feather name="camera" size={22} color={subtleText} />
-            </Pressable>
-
-            <TextInput
-              value={draft}
-              onChangeText={setDraft}
-              onFocus={() =>
-                setTimeout(
-                  () => listRef.current?.scrollToEnd({ animated: true }),
-                  80,
-                )
-              }
-              onContentSizeChange={(e) => {
-                const h = e.nativeEvent.contentSize.height;
-                // include small padding and cap height to avoid overly large input
-                const newH = Math.min(200, Math.max(40, Math.round(h + 6)));
-                setInputHeight(newH);
-              }}
-              placeholder="Message"
-              placeholderTextColor={placeholderColor}
-              multiline
-              className="flex-1 rounded-full px-4"
-              style={{
-                backgroundColor: inputBg,
-                color: colors.text,
-                borderWidth: 1,
-                borderColor: inputBorderColor,
-                minHeight: 40,
-                height: inputHeight,
-                paddingVertical: 8,
-                textAlignVertical: "top",
-              }}
-            />
-
-            <Pressable className="p-1">
-              <Feather name="mic" size={22} color={subtleText} />
-            </Pressable>
-
-            <Pressable
-              onPress={handleSend}
-              disabled={sending || !draft.trim()}
-              className="w-10 h-10 rounded-full items-center justify-center"
-              style={{
-                backgroundColor:
-                  !draft.trim() || sending ? subtleText : BRAND_COLOR,
-              }}
-            >
-              {sending ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <Feather name="send" size={18} color="#fff" />
-              )}
+            <Pressable>
+              <Feather name="video" size={24} color={BRAND_COLOR} />
             </Pressable>
           </View>
         </View>
+
+        {loading ? (
+          <View className="flex-1 items-center justify-center">
+            <ActivityIndicator color={BRAND_COLOR} size="large" />
+          </View>
+        ) : messages.length === 0 ? (
+          <View className="flex-1 items-center justify-center">
+            <Text style={{ color: subtleText }} className="text-base">
+              No messages yet
+            </Text>
+          </View>
+        ) : (
+          <FlatList
+            ref={listRef}
+            data={messages}
+            keyExtractor={(message) => String(message.id)}
+            renderItem={({ item }) => (
+              <MessageBubble
+                message={item}
+                isMine={item.senderId === currentUserId}
+                textColor={colors.text}
+                bubbleColor={inputBg}
+              />
+            )}
+            style={{ flex: 1 }}
+            contentContainerStyle={{
+              paddingVertical: 12,
+            }}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            onContentSizeChange={() =>
+              setTimeout(
+                () => listRef.current?.scrollToEnd({ animated: true }),
+                50,
+              )
+            }
+          />
+        )}
+
+        {Platform.OS === "ios" && (
+          <InputAccessoryView nativeID={ACCESSORY_ID} />
+        )}
+        {renderInputBar()}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
