@@ -168,6 +168,16 @@ export default function AccountPassword() {
             />
 
             <Pressable
+              onPress={() => router.push("/auth/forgot-password")}
+              className="self-end py-1"
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            >
+              <Text className="text-[#00A896] font-medium text-sm">
+                Forgot password?
+              </Text>
+            </Pressable>
+
+            <Pressable
               onPress={handleVerify}
               disabled={verifying}
               className="rounded-2xl bg-[#008378] py-4 items-center active:opacity-90 mt-2"
