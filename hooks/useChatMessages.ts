@@ -1,4 +1,5 @@
 import { api } from "@/lib/api";
+import { deleteMsg, readMsgs, saveMessage, updateMsg } from "@/lib/db";
 import {
   connectSocket,
   joinConversation,
@@ -41,7 +42,13 @@ export default function useChatMessages(id: string | number) {
         if (Number(newMessage.conversationId) !== Number(id)) {
           return;
         }
-
+        saveMessage({
+          messageId: newMessage.id,
+          message: newMessage.text,
+          sentAt: newMessage.sentAt,
+          SenderId: newMessage.senderId,
+          ConversationId: newMessage.conversationId,
+        });
         setMessages((currentMsg) => {
           const existingMessage = currentMsg.find(
             (message) => message.id === newMessage.id,
@@ -58,6 +65,11 @@ export default function useChatMessages(id: string | number) {
       const unsubscribeMessageUpdate = listenForMessageUpdates(
         (updatedMessage) => {
           if (Number(updatedMessage.conversationId) !== Number(id)) return;
+          updateMsg({
+            messageId: Number(updatedMessage.id),
+            message: updatedMessage.text,
+            editedAt: String(new Date()),
+          });
 
           setMessages((currentMsg) =>
             currentMsg.map((message) =>
@@ -69,6 +81,7 @@ export default function useChatMessages(id: string | number) {
 
       const unsubscribeMessageDelete = listenForMessageDeletes(
         ({ id: deletedId }) => {
+          deleteMsg({ messageId: Number(deletedId) });
           setMessages((currentMsg) =>
             currentMsg.filter((message) => message.id !== deletedId),
           );
@@ -78,12 +91,30 @@ export default function useChatMessages(id: string | number) {
       const getMessages = async () => {
         setLoading(true);
         try {
+          const cache = await readMsgs({
+            conversationId: Number(id),
+          });
+          if (active && cache.length > 0) {
+            setMessages(cache as Message[]);
+            setLoading(false);
+          }
           const response = await api.get(
             `/api/conversations/messages/${id}?limit=30`,
           );
+
           if (active) {
             setMessages(response.data);
           }
+
+          response.data.forEach((msg: Message) => {
+            saveMessage({
+              messageId: Number(msg.id),
+              message: msg.text,
+              sentAt: String(msg.sentAt),
+              ConversationId: Number(msg.conversationId),
+              SenderId: Number(msg.senderId),
+            });
+          });
         } finally {
           if (active) {
             setLoading(false);
@@ -136,6 +167,13 @@ export default function useChatMessages(id: string | number) {
         conversationId: Number(id),
       });
 
+      saveMessage({
+        messageId: Number(response.data.id),
+        message: response.data.text,
+        sentAt: response.data.sentAt,
+        SenderId: response.data.senderId,
+        ConversationId: response.data.conversationId,
+      });
       setMessages((prev) => {
         const withoutOptimistic = prev.filter((m) => m.id !== tempId);
         const alreadyPresent = withoutOptimistic.some(

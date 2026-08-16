@@ -10,18 +10,18 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.Swiftchat"
+      "bundleIdentifier": "com.anonymous.swiftchat",
+      "buildNumber": "1"
     },
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/favicon.png",
-        "backgroundImage": "./assets/images/favicon.png",
-        "monochromeImage": "./assets/images/favicon.png"
+        "foregroundImage": "./assets/images/logo.png"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.Swiftchat"
+      "package": "com.anonymous.swiftchat",
+      "versionCode": 1
     },
     "web": {
       "bundler": "metro",
@@ -42,7 +42,19 @@
           }
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-sqlite",
+        {
+          "enableFTS": true,
+          "useSQLCipher": true,
+          "ios": {
+            "customBuildFlags": [
+              "-DSQLITE_ENABLE_DBSTAT_VTAB=1 -DSQLITE_ENABLE_SNAPSHOT=1"
+            ]
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
