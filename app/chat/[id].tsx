@@ -20,20 +20,9 @@ import {
 import Feather from "@expo/vector-icons/Feather";
 import { useTheme } from "@/constants/theme-provider";
 import useChatMessages, { type Message } from "@/hooks/useChatMessages";
-import { getToken } from "@/lib/secureStorage";
+import { getCurrentUserId } from "@/lib/auth";
 
 const BRAND_COLOR = "#29A195";
-
-async function getCurrentUserId(): Promise<number | null> {
-  const token = await getToken("token");
-  if (!token) return null;
-  try {
-    const payload = JSON.parse(atob(token.split(".")[1]));
-    return payload.userId ?? null;
-  } catch {
-    return null;
-  }
-}
 
 function MessageBubble({
   message,

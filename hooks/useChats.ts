@@ -1,7 +1,8 @@
 import { useState, useCallback, useEffect } from "react";
 import { api } from "@/lib/api";
 import { listenForNewMessages, joinConversations } from "@/lib/socket";
-
+import { getConversations, saveConversation } from "@/lib/db";
+import { getCurrentUserId } from "@/lib/auth";
 export type ChatMember = {
   id: number;
   username: string;
@@ -53,10 +54,23 @@ export default function useChats() {
   const refetch = useCallback(async () => {
     if (chats.length === 0) setLoading(true);
     try {
+      const currentUserId = await getCurrentUserId();
+      const cache = await getConversations();
+      if (cache.length) setChats(cache);
       const response = await api.get(`/api/conversations`);
       const fetched = dedupe(response.data);
       setChats(fetched);
       joinConversations(fetched.map((chat) => chat.id));
+
+      fetched.forEach((chat) => {
+        const otherMember = chat.members.find((m) => m.id !== currentUserId);
+        saveConversation({
+          id: chat.id,
+          otherUsername: otherMember?.username ?? "Unknown",
+          lastMessageText: chat.lastMessage?.text ?? "",
+          lastMessageSentAt: chat.lastMessage?.sentAt ?? "",
+        });
+      });
     } finally {
       setLoading(false);
     }

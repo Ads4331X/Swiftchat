@@ -7,6 +7,7 @@ async function getDb() {
     db = await SQLite.openDatabaseAsync("Message");
     await db.execAsync(`
       PRAGMA journal_mode = WAL;
+
       CREATE TABLE IF NOT EXISTS Message (
         id INTEGER PRIMARY KEY,
         conversationId INTEGER NOT NULL,
@@ -14,14 +15,20 @@ async function getDb() {
         text TEXT NOT NULL,
         sentAt TEXT NOT NULL,
         editedAt TEXT
-      )
+      );
+
+      CREATE TABLE IF NOT EXISTS Conversation (
+        id INTEGER PRIMARY KEY,
+        otherUsername TEXT,
+        lastMessageText TEXT,
+        lastMessageSentAt TEXT
+      );
     `);
     console.log("SQLite database initialized");
   }
   return db;
 }
 
-// save msg locally
 type SaveMsgParams = {
   messageId: number;
   message: string;
@@ -83,4 +90,59 @@ export async function readMsgs({ conversationId }: ReadMsgs) {
   );
 
   return messages;
+}
+
+// save conversation locally
+type SaveConversationParams = {
+  id: number;
+  otherUsername: string;
+  lastMessageText: string;
+  lastMessageSentAt: string;
+};
+
+export async function saveConversation({
+  id,
+  otherUsername,
+  lastMessageText,
+  lastMessageSentAt,
+}: SaveConversationParams) {
+  const db = await getDb();
+  await db.runAsync(
+    `INSERT OR REPLACE INTO Conversation (id, otherUsername, lastMessageText, lastMessageSentAt) VALUES (?, ?, ?, ?)`,
+    [id, otherUsername, lastMessageText, lastMessageSentAt],
+  );
+}
+
+// read all cached conversations
+export type CachedConversation = {
+  id: number;
+  members: { id: number; username: string }[];
+  lastMessage: {
+    id: number;
+    text: string;
+    sentAt: string;
+    senderId: number;
+  } | null;
+};
+
+export async function getConversations(): Promise<CachedConversation[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{
+    id: number;
+    otherUsername: string | null;
+    lastMessageText: string | null;
+    lastMessageSentAt: string | null;
+  }>(`SELECT * FROM Conversation ORDER BY lastMessageSentAt DESC`);
+  return rows.map((c) => ({
+    id: c.id,
+    members: [{ id: -1, username: c.otherUsername ?? "Unknown" }],
+    lastMessage: c.lastMessageText
+      ? {
+          id: -1,
+          text: c.lastMessageText,
+          sentAt: c.lastMessageSentAt ?? "",
+          senderId: -1,
+        }
+      : null,
+  }));
 }
