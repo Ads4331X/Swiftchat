@@ -8,6 +8,8 @@ import { type ColorSchemeName } from "react-native";
 const tintColorLight = "#0a7ea4";
 const tintColorDark = "#fff";
 
+export const BRAND_COLOR = "#29A195";
+
 export const Colors = {
   light: {
     text: "#11181C",

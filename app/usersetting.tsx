@@ -19,8 +19,7 @@ import { disconnectSocket } from "@/lib/socket";
 import Toast from "react-native-toast-message";
 import UserProfileCard from "@/components/profile/UserProfileCard";
 import SettingsCard from "@/components/profile/SettingsCard";
-
-const BRAND_COLOR = "#29A195";
+import { BRAND_COLOR } from "@/constants/theme";
 
 type UserDetails = {
   username: string;

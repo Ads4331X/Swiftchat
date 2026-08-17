@@ -2,8 +2,8 @@ import { Pressable, Text, View } from "react-native";
 import type { ReactNode } from "react";
 import Feather from "@expo/vector-icons/Feather";
 import { useTheme } from "@/constants/theme-provider";
+import { BRAND_COLOR } from "@/constants/theme";
 
-const BRAND_COLOR = "#29A195";
 const DANGER_COLOR = "#EF4444";
 
 type SettingsCardProps = {

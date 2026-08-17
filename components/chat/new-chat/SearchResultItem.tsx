@@ -1,8 +1,7 @@
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import Feather from "@expo/vector-icons/Feather";
 import { useTheme } from "@/constants/theme-provider";
-
-const BRAND_COLOR = "#29A195";
+import { BRAND_COLOR } from "@/constants/theme";
 
 type SearchResultItemProps = {
   username: string;

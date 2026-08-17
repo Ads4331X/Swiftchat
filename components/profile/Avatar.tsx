@@ -1,6 +1,5 @@
 import { Image, Text, View } from "react-native";
-
-const BRAND_COLOR = "#29A195";
+import { BRAND_COLOR } from "@/constants/theme";
 
 type AvatarProps = {
   username: string;

@@ -16,8 +16,7 @@ import { api } from "@/lib/api";
 import AppTextField from "@/components/profile/AppTextField";
 import SettingsCard from "@/components/profile/SettingsCard";
 import Toast from "react-native-toast-message";
-
-const BRAND_COLOR = "#29A195";
+import { BRAND_COLOR } from "@/constants/theme";
 
 export default function EditAccount() {
   const router = useRouter();

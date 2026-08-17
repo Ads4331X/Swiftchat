@@ -1,7 +1,7 @@
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { useTheme } from "@/constants/theme-provider";
+import { BRAND_COLOR } from "@/constants/theme";
 
-const BRAND_COLOR = "#29A195";
 const ONLINE_COLOR = "#25D366";
 
 type ChatCardProps = {

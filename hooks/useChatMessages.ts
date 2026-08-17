@@ -176,6 +176,26 @@ export default function useChatMessages(id: string | number) {
     };
   }, [id]);
 
+  const editMessage = async (messageId: string | number, text: string) => {
+    const editedMsg = await api.patch(
+      `/api/conversations/messages/${messageId}`,
+      {
+        text: text,
+      },
+    );
+    await updateMsg({
+      messageId: Number(messageId),
+      editedAt: String(new Date().toISOString()),
+      message: text,
+    });
+  };
+
+  const deleteMessage = async (messageId: string | number) => {
+    const deletedMsg = await api.delete(
+      `/api/conversations/messages/${messageId}`,
+    );
+    await deleteMsg({ messageId: Number(messageId) });
+  };
   const sendMessage = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed) return;
@@ -232,5 +252,7 @@ export default function useChatMessages(id: string | number) {
     }
   };
 
-  return { messages, loading, sendMessage };
+  {
+    return { messages, loading, sendMessage, editMessage, deleteMessage };
+  }
 }
