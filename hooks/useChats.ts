@@ -1,7 +1,11 @@
 import { useState, useCallback, useEffect } from "react";
 import { api } from "@/lib/api";
 import { listenForNewMessages, joinConversations } from "@/lib/socket";
-import { getConversations, saveConversation } from "@/lib/db";
+import {
+  getConversations,
+  saveConversation,
+  updateConversationPreview,
+} from "@/lib/db";
 import { getCurrentUserId } from "@/lib/auth";
 export type ChatMember = {
   id: number;
@@ -45,6 +49,14 @@ export default function useChats() {
           ...chat,
           lastMessage: message,
         };
+        // Keep the local Conversation cache in sync so refetch() (which shows
+        // cached rows first, then the server rows) doesn't flash the stale
+        // preview/ordering for a moment before it settles.
+        updateConversationPreview({
+          id: message.conversationId,
+          lastMessageText: message.text,
+          lastMessageSentAt: message.sentAt,
+        }).catch(() => {});
         const otherChats = currentChats.filter((c) => c.id !== chat.id);
         return [updatedChat, ...otherChats];
       });
@@ -55,8 +67,12 @@ export default function useChats() {
     if (chats.length === 0) setLoading(true);
     try {
       const currentUserId = await getCurrentUserId();
-      const cache = await getConversations();
-      if (cache.length) setChats(cache);
+      try {
+        const cache = await getConversations();
+        if (cache.length) setChats(cache);
+      } catch {
+        // cache unavailable (e.g. web OPFS locked); fall through to server
+      }
       const response = await api.get(`/api/conversations`);
       const fetched = dedupe(response.data);
       setChats(fetched);
@@ -69,7 +85,7 @@ export default function useChats() {
           otherUsername: otherMember?.username ?? "Unknown",
           lastMessageText: chat.lastMessage?.text ?? "",
           lastMessageSentAt: chat.lastMessage?.sentAt ?? "",
-        });
+        }).catch(() => {});
       });
     } finally {
       setLoading(false);

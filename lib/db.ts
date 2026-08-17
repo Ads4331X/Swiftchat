@@ -1,32 +1,67 @@
 import * as SQLite from "expo-sqlite";
+import { Platform } from "react-native";
 
-let db: SQLite.SQLiteDatabase;
+const isWeb = Platform.OS === "web";
 
-async function getDb() {
-  if (!db) {
-    db = await SQLite.openDatabaseAsync("Message");
-    await db.execAsync(`
-      PRAGMA journal_mode = WAL;
+// Promise-cached so the database file is only ever opened once. On web the
+// underlying OPFS handle is exclusive, so opening it again (e.g. from a
+// Fast Refresh / hot-reload that left the old worker's handle behind) throws
+// `NoModificationAllowedError`. Retrying with a small backoff lets the old
+// worker release its handle before we try again.
+let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
-      CREATE TABLE IF NOT EXISTS Message (
-        id INTEGER PRIMARY KEY,
-        conversationId INTEGER NOT NULL,
-        senderId INTEGER NOT NULL,
-        text TEXT NOT NULL,
-        sentAt TEXT NOT NULL,
-        editedAt TEXT
-      );
+const SCHEMA = `
+  CREATE TABLE IF NOT EXISTS Message (
+    id INTEGER PRIMARY KEY,
+    conversationId INTEGER NOT NULL,
+    senderId INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    sentAt TEXT NOT NULL,
+    editedAt TEXT
+  );
 
-      CREATE TABLE IF NOT EXISTS Conversation (
-        id INTEGER PRIMARY KEY,
-        otherUsername TEXT,
-        lastMessageText TEXT,
-        lastMessageSentAt TEXT
-      );
-    `);
-    console.log("SQLite database initialized");
+  CREATE TABLE IF NOT EXISTS Conversation (
+    id INTEGER PRIMARY KEY,
+    otherUsername TEXT,
+    lastMessageText TEXT,
+    lastMessageSentAt TEXT
+  );
+`;
+
+async function openDbOnce(): Promise<SQLite.SQLiteDatabase> {
+  const maxAttempts = isWeb ? 5 : 1;
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const database = await SQLite.openDatabaseAsync("Message");
+      // WAL needs shared-memory support that wa-sqlite's OPFS adapter only
+      // gets with exclusive locking, and it adds extra files to the OPFS
+      // pool (which has a hard capacity). On web the default journal mode is
+      // plenty for a local cache, so skip WAL there.
+      const pragmas = isWeb ? "" : "PRAGMA journal_mode = WAL;";
+      await database.execAsync(`${pragmas}\n${SCHEMA}`);
+      console.log("SQLite database initialized");
+      return database;
+    } catch (error) {
+      lastError = error;
+      if (!isWeb || attempt >= maxAttempts - 1) break;
+      await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+    }
   }
-  return db;
+
+  console.error("SQLite database failed to open", lastError);
+  throw lastError;
+}
+
+function getDb(): Promise<SQLite.SQLiteDatabase> {
+  if (!dbPromise) {
+    dbPromise = openDbOnce().catch((error) => {
+      dbPromise = null;
+      throw error;
+    });
+  }
+  return dbPromise;
 }
 
 type SaveMsgParams = {
@@ -110,6 +145,25 @@ export async function saveConversation({
   await db.runAsync(
     `INSERT OR REPLACE INTO Conversation (id, otherUsername, lastMessageText, lastMessageSentAt) VALUES (?, ?, ?, ?)`,
     [id, otherUsername, lastMessageText, lastMessageSentAt],
+  );
+}
+
+// Update only the last-message preview of a cached conversation so the list
+// stays in sync with incoming/sent messages without needing the full member
+// data (unlike saveConversation).
+export async function updateConversationPreview({
+  id,
+  lastMessageText,
+  lastMessageSentAt,
+}: {
+  id: number;
+  lastMessageText: string;
+  lastMessageSentAt: string;
+}) {
+  const db = await getDb();
+  await db.runAsync(
+    `UPDATE Conversation SET lastMessageText = ?, lastMessageSentAt = ? WHERE id = ?`,
+    [lastMessageText, lastMessageSentAt, id],
   );
 }
 

@@ -1,5 +1,11 @@
 import { api } from "@/lib/api";
-import { deleteMsg, readMsgs, saveMessage, updateMsg } from "@/lib/db";
+import {
+  deleteMsg,
+  readMsgs,
+  saveMessage,
+  updateConversationPreview,
+  updateMsg,
+} from "@/lib/db";
 import {
   connectSocket,
   joinConversation,
@@ -22,6 +28,10 @@ export default function useChatMessages(id: string | number) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const tempIdRef = useRef(-1); // negative ids for optimistic (not-yet-confirmed) messages
+  // tempId -> text of every optimistic message that is still waiting for the
+  // server to confirm it. Used to recognise the socket echo of our own send
+  // so it replaces the temp bubble in place instead of appending a duplicate.
+  const pendingRef = useRef(new Map<number, string>());
 
   useEffect(() => {
     if (!id) return;
@@ -42,13 +52,18 @@ export default function useChatMessages(id: string | number) {
         if (Number(newMessage.conversationId) !== Number(id)) {
           return;
         }
+        updateConversationPreview({
+          id: Number(id),
+          lastMessageText: newMessage.text,
+          lastMessageSentAt: newMessage.sentAt,
+        }).catch(() => {});
         saveMessage({
           messageId: newMessage.id,
           message: newMessage.text,
           sentAt: newMessage.sentAt,
           SenderId: newMessage.senderId,
           ConversationId: newMessage.conversationId,
-        });
+        }).catch(() => {});
         setMessages((currentMsg) => {
           const existingMessage = currentMsg.find(
             (message) => message.id === newMessage.id,
@@ -56,6 +71,19 @@ export default function useChatMessages(id: string | number) {
 
           if (existingMessage) {
             return currentMsg;
+          }
+
+          // If this is the server's echo of a message we optimistically
+          // rendered (we're the sender), swap the temp bubble for the real one
+          // in place. Otherwise the temp + real bubble briefly coexist and the
+          // list visibly jumps up/down when the temp is removed.
+          for (const [tempId, text] of pendingRef.current) {
+            if (text === newMessage.text) {
+              pendingRef.current.delete(tempId);
+              return currentMsg.map((message) =>
+                message.id === tempId ? newMessage : message,
+              );
+            }
           }
 
           return [...currentMsg, newMessage];
@@ -69,7 +97,7 @@ export default function useChatMessages(id: string | number) {
             messageId: Number(updatedMessage.id),
             message: updatedMessage.text,
             editedAt: String(new Date()),
-          });
+          }).catch(() => {});
 
           setMessages((currentMsg) =>
             currentMsg.map((message) =>
@@ -81,7 +109,7 @@ export default function useChatMessages(id: string | number) {
 
       const unsubscribeMessageDelete = listenForMessageDeletes(
         ({ id: deletedId }) => {
-          deleteMsg({ messageId: Number(deletedId) });
+          deleteMsg({ messageId: Number(deletedId) }).catch(() => {});
           setMessages((currentMsg) =>
             currentMsg.filter((message) => message.id !== deletedId),
           );
@@ -91,11 +119,16 @@ export default function useChatMessages(id: string | number) {
       const getMessages = async () => {
         setLoading(true);
         try {
-          const cache = await readMsgs({
-            conversationId: Number(id),
-          });
+          let cache: Message[] = [];
+          try {
+            cache = (await readMsgs({
+              conversationId: Number(id),
+            })) as Message[];
+          } catch {
+            // cache unavailable (e.g. web OPFS locked); fall through to server
+          }
           if (active && cache.length > 0) {
-            setMessages(cache as Message[]);
+            setMessages(cache);
             setLoading(false);
           }
           const response = await api.get(
@@ -113,7 +146,7 @@ export default function useChatMessages(id: string | number) {
               sentAt: String(msg.sentAt),
               ConversationId: Number(msg.conversationId),
               SenderId: Number(msg.senderId),
-            });
+            }).catch(() => {});
           });
         } finally {
           if (active) {
@@ -150,6 +183,7 @@ export default function useChatMessages(id: string | number) {
     // Optimistic bubble so the message appears instantly, before the
     // network round trip completes.
     const tempId = tempIdRef.current--;
+    pendingRef.current.set(tempId, trimmed);
     const optimisticMessage: Message = {
       id: tempId,
       text: trimmed,
@@ -167,13 +201,20 @@ export default function useChatMessages(id: string | number) {
         conversationId: Number(id),
       });
 
+      pendingRef.current.delete(tempId);
+
       saveMessage({
         messageId: Number(response.data.id),
         message: response.data.text,
         sentAt: response.data.sentAt,
         SenderId: response.data.senderId,
         ConversationId: response.data.conversationId,
-      });
+      }).catch(() => {});
+      updateConversationPreview({
+        id: Number(id),
+        lastMessageText: response.data.text,
+        lastMessageSentAt: response.data.sentAt,
+      }).catch(() => {});
       setMessages((prev) => {
         const withoutOptimistic = prev.filter((m) => m.id !== tempId);
         const alreadyPresent = withoutOptimistic.some(
@@ -185,6 +226,7 @@ export default function useChatMessages(id: string | number) {
       });
     } catch (err) {
       // Roll back the optimistic bubble if the send actually failed
+      pendingRef.current.delete(tempId);
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
       throw err;
     }
