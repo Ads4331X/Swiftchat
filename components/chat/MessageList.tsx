@@ -64,6 +64,7 @@ export default function MessageList({
           isMine={item.senderId === currentUserId}
           textColor={textColor}
           bubbleColor={bubbleColor}
+          subtleText={subtleText}
           hidden={item.id === selectedMessageId}
           onLongPress={(position) => onMessageLongPress(item, position)}
         />

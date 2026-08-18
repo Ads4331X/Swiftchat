@@ -1,7 +1,15 @@
 import { useLocalSearchParams } from "expo-router";
 import { useState, useEffect, useRef } from "react";
-import { Keyboard, Platform, FlatList } from "react-native";
-
+import {
+  Keyboard,
+  Platform,
+  FlatList,
+  View,
+  Text,
+  Pressable,
+  StyleSheet,
+} from "react-native";
+import Feather from "@expo/vector-icons/Feather";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 
 import Animated, {
@@ -48,7 +56,8 @@ export default function UserChat() {
     placeholderColor,
   } = useTheme();
 
-  const { messages, loading, sendMessage, deleteMessage } = useChatMessages(id);
+  const { messages, loading, sendMessage, deleteMessage, editMessage } =
+    useChatMessages(id);
 
   const insets = useSafeAreaInsets();
 
@@ -61,6 +70,7 @@ export default function UserChat() {
   const listRef = useRef<FlatList<Message>>(null);
 
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
+  const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
 
   const [menuPosition, setMenuPosition] = useState<Position | null>(null);
 
@@ -118,10 +128,13 @@ export default function UserChat() {
       return;
     }
 
-    setSending(true);
-
     try {
-      await sendMessage(draft);
+      if (editingMessageId) {
+        await editMessage(editingMessageId, draft);
+        setEditingMessageId(null);
+      } else {
+        await sendMessage(draft);
+      }
 
       setDraft("");
 
@@ -155,8 +168,14 @@ export default function UserChat() {
     if (!selectedMessage) {
       return;
     }
+    setEditingMessageId(selectedMessage.id);
 
     setDraft(selectedMessage.text);
+  };
+
+  const cancelEdit = () => {
+    setEditingMessageId(null);
+    setDraft("");
   };
 
   return (
@@ -195,7 +214,24 @@ export default function UserChat() {
             selectedMessageId={selectedMessage?.id ?? null}
             onMessageLongPress={handleLongPress}
           />
-
+          {/* Editing banner */}
+          {editingMessageId && (
+            <View
+              className="flex-row items-center justify-between px-4 py-2"
+              style={{
+                backgroundColor: inputBg,
+                borderTopWidth: StyleSheet.hairlineWidth,
+                borderTopColor: dividerColor,
+              }}
+            >
+              <Text style={{ color: subtleText }} className="text-sm flex-1">
+                Editing message
+              </Text>
+              <Pressable onPress={cancelEdit}>
+                <Feather name="x" size={18} color={subtleText} />
+              </Pressable>
+            </View>
+          )}
           {/* Input */}
           <ChatInputBar
             draft={draft}

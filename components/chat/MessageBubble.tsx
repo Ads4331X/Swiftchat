@@ -15,6 +15,7 @@ type MessageBubbleProps = {
   isMine: boolean;
   textColor: string;
   bubbleColor: string;
+  subtleText: string;
   onLongPress: (position: Position) => void;
   /** True while this exact message is "lifted" into the action sheet, so
    * only the floating copy is visible and the list doesn't show a duplicate.
@@ -27,7 +28,18 @@ type MessageBubbleContentProps = {
   isMine: boolean;
   textColor: string;
   bubbleColor: string;
+  editedAt?: string;
+  sentAt?: string;
+  subtleText?: string;
 };
+
+function formatBubbleTime(iso: string): string {
+  const date = new Date(iso);
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 /**
  * The actual bubble visuals — pulled out so the action sheet's floating
@@ -40,7 +52,13 @@ export function MessageBubbleContent({
   isMine,
   textColor,
   bubbleColor,
+  editedAt,
+  sentAt,
+  subtleText,
 }: MessageBubbleContentProps) {
+  const wasEdited =
+    editedAt && sentAt && new Date(editedAt).getTime() > new Date(sentAt).getTime();
+
   return (
     <View
       className="max-w-[100%] self-start px-3 py-2 rounded-2xl"
@@ -56,6 +74,25 @@ export function MessageBubbleContent({
       >
         {text}
       </Text>
+
+      <View className="flex-row items-center gap-1 mt-1 self-end">
+        {wasEdited && (
+          <Text
+            className="text-[10px]"
+            style={{ color: isMine ? "rgba(255,255,255,0.55)" : subtleText }}
+          >
+            Edited
+          </Text>
+        )}
+        {sentAt && (
+          <Text
+            className="text-[10px]"
+            style={{ color: isMine ? "rgba(255,255,255,0.55)" : subtleText }}
+          >
+            {formatBubbleTime(sentAt)}
+          </Text>
+        )}
+      </View>
     </View>
   );
 }
@@ -65,6 +102,7 @@ export default function MessageBubble({
   isMine,
   textColor,
   bubbleColor,
+  subtleText,
   onLongPress,
   hidden,
 }: MessageBubbleProps) {
@@ -91,6 +129,9 @@ export default function MessageBubble({
             isMine={isMine}
             textColor={textColor}
             bubbleColor={bubbleColor}
+            subtleText={subtleText}
+            editedAt={message.editedAt}
+            sentAt={message.sentAt}
           />
         </View>
       </View>
