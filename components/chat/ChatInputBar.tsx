@@ -1,23 +1,26 @@
 import {
   ActivityIndicator,
+  Keyboard,
   Platform,
   Pressable,
   StyleSheet,
   TextInput,
   View,
 } from "react-native";
-import { type EdgeInsets } from "react-native-safe-area-context";
-import Feather from "@expo/vector-icons/Feather";
-import { BRAND_COLOR } from "@/constants/theme";
 
-const ACCESSORY_ID = "chat_input_accessory";
+import { useEffect, useState } from "react";
+
+import { type EdgeInsets } from "react-native-safe-area-context";
+
+import Feather from "@expo/vector-icons/Feather";
+
+import { BRAND_COLOR } from "@/constants/theme";
 
 type ChatInputBarProps = {
   draft: string;
   onDraftChange: (text: string) => void;
   onSend: () => void;
   sending: boolean;
-  keyboardVisible: boolean;
   insets: EdgeInsets;
   inputBg: string;
   inputBorderColor: string;
@@ -34,7 +37,6 @@ export default function ChatInputBar({
   onDraftChange,
   onSend,
   sending,
-  keyboardVisible,
   insets,
   inputBg,
   inputBorderColor,
@@ -45,28 +47,43 @@ export default function ChatInputBar({
   backgroundColor,
   onFocus,
 }: ChatInputBarProps) {
+  const [keyboardUp, setKeyboardUp] = useState(false);
+
+  useEffect(() => {
+    const showEvt =
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvt =
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+
+    const subShow = Keyboard.addListener(showEvt, () => setKeyboardUp(true));
+    const subHide = Keyboard.addListener(hideEvt, () => setKeyboardUp(false));
+
+    return () => {
+      subShow.remove();
+      subHide.remove();
+    };
+  }, []);
+
   return (
     <View
       className="w-full flex-row items-end gap-3 px-3 py-2"
       style={{
         borderTopWidth: StyleSheet.hairlineWidth,
+
         borderTopColor: dividerColor,
+
         backgroundColor,
-        paddingBottom: keyboardVisible
-          ? 8
-          : (insets?.bottom ?? 0) > 0
-            ? insets.bottom
-            : 8,
+
+        paddingBottom: keyboardUp ? 8 : (insets?.bottom ?? 0) || 8,
       }}
     >
+      {/* Camera */}
       <Pressable className="p-1 mb-2">
         <Feather name="camera" size={22} color={subtleText} />
       </Pressable>
 
+      {/* Text input */}
       <TextInput
-        {...(Platform.OS === "ios"
-          ? { inputAccessoryViewID: ACCESSORY_ID }
-          : {})}
         value={draft}
         onChangeText={onDraftChange}
         onFocus={onFocus}
@@ -77,19 +94,25 @@ export default function ChatInputBar({
         style={{
           backgroundColor: inputBg,
           color: textColor,
+
           borderWidth: 1,
           borderColor: inputBorderColor,
+
           minHeight: 40,
           maxHeight: 120,
+
           paddingVertical: 8,
+
           textAlignVertical: "top",
         }}
       />
 
+      {/* Microphone */}
       <Pressable className="p-1 mb-2">
         <Feather name="mic" size={22} color={subtleText} />
       </Pressable>
 
+      {/* Send */}
       <Pressable
         onPress={onSend}
         disabled={sending || !draft.trim()}
@@ -107,5 +130,3 @@ export default function ChatInputBar({
     </View>
   );
 }
-
-export { ACCESSORY_ID };

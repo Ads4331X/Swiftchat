@@ -1,27 +1,28 @@
 import { useLocalSearchParams } from "expo-router";
 import { useState, useEffect, useRef } from "react";
-import {
-  Keyboard,
-  KeyboardAvoidingView,
-  Platform,
-  FlatList,
-  InputAccessoryView,
-} from "react-native";
+import { Keyboard, Platform, FlatList } from "react-native";
+
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withSpring,
   interpolate,
 } from "react-native-reanimated";
+
 import {
   SafeAreaView,
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
+
 import { useTheme } from "@/constants/theme-provider";
 import useChatMessages, { type Message } from "@/hooks/useChatMessages";
+
 import { getCurrentUserId } from "@/lib/auth";
+
 import ChatHeader from "@/components/chat/ChatHeader";
-import ChatInputBar, { ACCESSORY_ID } from "@/components/chat/ChatInputBar";
+import ChatInputBar from "@/components/chat/ChatInputBar";
 import MessageList from "@/components/chat/MessageList";
 import { MessageActionSheet } from "@/components/chat/MessageActionSheet";
 
@@ -37,6 +38,7 @@ export default function UserChat() {
     id: string;
     username?: string;
   }>();
+
   const {
     colors,
     subtleText,
@@ -45,87 +47,135 @@ export default function UserChat() {
     inputBorderColor,
     placeholderColor,
   } = useTheme();
+
   const { messages, loading, sendMessage, deleteMessage } = useChatMessages(id);
+
   const insets = useSafeAreaInsets();
+
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+
   const [draft, setDraft] = useState("");
+
   const [sending, setSending] = useState(false);
-  const [keyboardVisible, setKeyboardVisible] = useState(false);
+
   const listRef = useRef<FlatList<Message>>(null);
 
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
+
   const [menuPosition, setMenuPosition] = useState<Position | null>(null);
 
-  // Drives the "rest of the chat recedes" effect: a subtle scale-down of
-  // everything behind the action sheet, synced with its own open/close
-  // timing via onDismissStart so the two never feel out of step.
+  /*
+   * Background chat recede animation
+   */
   const pressProgress = useSharedValue(0);
+
   const chatRecedeStyle = useAnimatedStyle(() => {
     const scale = interpolate(pressProgress.value, [0, 1], [1, 0.96]);
-    return { flex: 1, transform: [{ scale }] };
+
+    return {
+      flex: 1,
+      transform: [{ scale }],
+    };
   });
 
+  /*
+   * Current user
+   */
   useEffect(() => {
     getCurrentUserId().then(setCurrentUserId);
   }, []);
 
+  /*
+   * Keyboard events
+   *
+   * We only use these events to scroll the message
+   * list. We do NOT use them to move the input.
+   *
+   * KeyboardAvoidingView handles the actual layout.
+   */
   useEffect(() => {
     const showEvent =
       Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
-    const hideEvent =
-      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
 
-    const onShow = () => {
-      setKeyboardVisible(true);
-      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 60);
-    };
-    const onHide = () => setKeyboardVisible(false);
-
-    const subShow = Keyboard.addListener(showEvent, onShow);
-    const subHide = Keyboard.addListener(hideEvent, onHide);
+    const subShow = Keyboard.addListener(showEvent, () => {
+      setTimeout(() => {
+        listRef.current?.scrollToEnd({
+          animated: true,
+        });
+      }, 80);
+    });
 
     return () => {
       subShow.remove();
-      subHide.remove();
     };
   }, []);
 
+  /*
+   * Send message
+   */
   const handleSend = async () => {
-    if (!draft.trim() || sending) return;
+    if (!draft.trim() || sending) {
+      return;
+    }
+
     setSending(true);
+
     try {
       await sendMessage(draft);
+
       setDraft("");
-      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
+
+      setTimeout(() => {
+        listRef.current?.scrollToEnd({
+          animated: true,
+        });
+      }, 50);
     } finally {
       setSending(false);
     }
   };
 
+  /*
+   * Long press
+   */
   const handleLongPress = (message: Message, position: Position) => {
     setSelectedMessage(message);
     setMenuPosition(position);
-    pressProgress.value = withSpring(1, { damping: 22, stiffness: 200 });
+
+    pressProgress.value = withSpring(1, {
+      damping: 22,
+      stiffness: 200,
+    });
   };
 
+  /*
+   * Edit message
+   */
   const handleEdit = () => {
-    if (selectedMessage) {
-      setDraft(selectedMessage.text);
+    if (!selectedMessage) {
+      return;
     }
+
+    setDraft(selectedMessage.text);
   };
 
   return (
     <SafeAreaView
       className="flex-1"
       edges={["top", "left", "right"]}
-      style={{ backgroundColor: colors.background }}
+      style={{
+        backgroundColor: colors.background,
+      }}
     >
-      <Animated.View style={chatRecedeStyle}>
-        <KeyboardAvoidingView
-          style={{ flex: 1 }}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          keyboardVerticalOffset={0}
-        >
+      <KeyboardAvoidingView
+        style={{
+          flex: 1,
+        }}
+        behavior="translate-with-padding"
+        keyboardVerticalOffset={0}
+      >
+        <Animated.View style={chatRecedeStyle}>
+          {/* Header */}
           <ChatHeader
             username={username}
             textColor={colors.text}
@@ -133,6 +183,7 @@ export default function UserChat() {
             backgroundColor={colors.background}
           />
 
+          {/* Messages */}
           <MessageList
             messages={messages}
             loading={loading}
@@ -145,16 +196,12 @@ export default function UserChat() {
             onMessageLongPress={handleLongPress}
           />
 
-          {Platform.OS === "ios" && (
-            <InputAccessoryView nativeID={ACCESSORY_ID} />
-          )}
-
+          {/* Input */}
           <ChatInputBar
             draft={draft}
             onDraftChange={setDraft}
             onSend={handleSend}
             sending={sending}
-            keyboardVisible={keyboardVisible}
             insets={insets}
             inputBg={inputBg}
             inputBorderColor={inputBorderColor}
@@ -163,16 +210,18 @@ export default function UserChat() {
             subtleText={subtleText}
             dividerColor={dividerColor}
             backgroundColor={colors.background}
-            onFocus={() =>
-              setTimeout(
-                () => listRef.current?.scrollToEnd({ animated: true }),
-                80,
-              )
-            }
+            onFocus={() => {
+              setTimeout(() => {
+                listRef.current?.scrollToEnd({
+                  animated: true,
+                });
+              }, 100);
+            }}
           />
-        </KeyboardAvoidingView>
-      </Animated.View>
+        </Animated.View>
+      </KeyboardAvoidingView>
 
+      {/* Message action sheet */}
       <MessageActionSheet
         visible={!!selectedMessage}
         isMine={selectedMessage?.senderId === currentUserId}
@@ -191,7 +240,10 @@ export default function UserChat() {
         onForward={() => {}}
         onPin={() => {}}
         onDismissStart={() => {
-          pressProgress.value = withSpring(0, { damping: 22, stiffness: 200 });
+          pressProgress.value = withSpring(0, {
+            damping: 22,
+            stiffness: 200,
+          });
         }}
         onClose={() => {
           setSelectedMessage(null);
