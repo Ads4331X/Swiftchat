@@ -86,51 +86,51 @@ type Layout = {
 // Pure layout math, lifted out of the component so it isn't re-declared (or
 // accidentally called with stale hook state) on every render.
 function computeLayout(p: Position, isMine: boolean): Layout {
-  const SAFE = 140;
-  const cy = SCREEN.height / 2;
-  // A little slack to make sure the reaction bar / menu clear the bubble
-  // even once it pops up to its ~1.04 scale.
-  const effectiveHeight = p.height * 1.08;
-
-  let rowTop = p.pageY;
-  if (p.pageY + p.height + SAFE > SCREEN.height) {
-    rowTop = Math.max(SCREEN_PAD, cy - p.height / 2 - 20);
-  } else if (p.pageY < SAFE) {
-    rowTop = Math.min(cy - p.height / 2, SCREEN.height - p.height - SCREEN_PAD);
-  }
-
-  const reactionBarWidth =
-    REACTIONS.length * REACTION_SIZE +
-    (REACTIONS.length - 1) * REACTION_GAP +
-    REACTION_BAR_PADDING_H * 2;
-  let reactionTop = rowTop - REACTION_BAR_HEIGHT - FLOAT_GAP;
-  let reactionLeft = p.pageX + p.width / 2 - reactionBarWidth / 2;
-  if (reactionTop < SCREEN_PAD) {
-    reactionTop = rowTop + effectiveHeight + FLOAT_GAP;
-  }
-  reactionLeft = Math.max(
-    SCREEN_PAD,
-    Math.min(reactionLeft, SCREEN.width - reactionBarWidth - SCREEN_PAD),
-  );
-
   const menuRows = (
     isMine
       ? ["reply", "edit", "copy", "pin", "delete", "more"]
       : ["reply", "copy", "forward", "more"]
   ).length;
+
   const menuHeight = menuRows * MENU_ROW_HEIGHT + MENU_PADDING_V * 2;
-  let menuTop = rowTop + effectiveHeight + FLOAT_GAP;
+  const reactionBarWidth =
+    REACTIONS.length * REACTION_SIZE +
+    (REACTIONS.length - 1) * REACTION_GAP +
+    REACTION_BAR_PADDING_H * 2;
+
+  // Treat reactions + message + menu as one group. This prevents the
+  // middle-of-screen collision caused by positioning each piece separately.
+  // The whole group moves up for low messages and down for high messages,
+  // matching the Instagram-style long-press behaviour.
+  const effectiveHeight = p.height * 1.08;
+  const groupHeight =
+    REACTION_BAR_HEIGHT + FLOAT_GAP + effectiveHeight + FLOAT_GAP + menuHeight;
+
+  const originalGroupTop = p.pageY - REACTION_BAR_HEIGHT - FLOAT_GAP;
+  const maxGroupTop = Math.max(
+    SCREEN_PAD,
+    SCREEN.height - groupHeight - SCREEN_PAD,
+  );
+  const groupTop = Math.max(
+    SCREEN_PAD,
+    Math.min(originalGroupTop, maxGroupTop),
+  );
+
+  const reactionTop = groupTop;
+  const rowTop = reactionTop + REACTION_BAR_HEIGHT + FLOAT_GAP;
+  const menuTop = rowTop + effectiveHeight + FLOAT_GAP;
+
+  let reactionLeft = p.pageX + p.width / 2 - reactionBarWidth / 2;
+  reactionLeft = Math.max(
+    SCREEN_PAD,
+    Math.min(reactionLeft, SCREEN.width - reactionBarWidth - SCREEN_PAD),
+  );
+
   let menuLeft =
     p.pageX + p.width / 2 > SCREEN.width / 2
-      ? Math.max(SCREEN_PAD, p.pageX + p.width - MENU_WIDTH)
-      : Math.min(SCREEN.width - MENU_WIDTH - SCREEN_PAD, p.pageX);
+      ? p.pageX + p.width - MENU_WIDTH
+      : p.pageX;
 
-  if (menuTop + menuHeight + SCREEN_PAD > SCREEN.height) {
-    menuTop = reactionTop - menuHeight - FLOAT_GAP;
-    if (menuTop < SCREEN_PAD) {
-      menuTop = rowTop + effectiveHeight + FLOAT_GAP;
-    }
-  }
   menuLeft = Math.max(
     SCREEN_PAD,
     Math.min(menuLeft, SCREEN.width - MENU_WIDTH - SCREEN_PAD),
@@ -240,10 +240,8 @@ export function MessageActionSheet({
     setMounted(true);
     isDismissingRef.current = false;
 
-    // Start the row exactly on top of the real bubble's row — this is what
-    // makes the lift feel anchored to the gesture instead of a jump. The
-    // row's horizontal layout (px-3 + justify-end/start) is identical to
-    // the list, so no horizontal translation is ever needed.
+    // Start at the original message position, then animate the selected
+    // message to the calculated Instagram-style resting position.
     rowTranslateY.value = position.pageY;
     msgScale.value = 1;
     overlayOpacity.value = 0;
