@@ -95,7 +95,7 @@ export default function ChatInputBar({
         disabled={sending || !draft.trim()}
         className="w-10 h-10 mb-2 rounded-full items-center justify-center"
         style={{
-          backgroundColor: !draft.trim() || sending ? textColor : BRAND_COLOR,
+          backgroundColor: !draft.trim() || sending ? subtleText : BRAND_COLOR,
         }}
       >
         {sending ? (

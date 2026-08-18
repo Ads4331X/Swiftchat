@@ -4,6 +4,13 @@ import { type Message } from "@/hooks/useChatMessages";
 import MessageBubble from "./MessageBubble";
 import { BRAND_COLOR } from "@/constants/theme";
 
+type Position = {
+  pageX: number;
+  pageY: number;
+  width: number;
+  height: number;
+};
+
 type MessageListProps = {
   messages: Message[];
   loading: boolean;
@@ -12,6 +19,9 @@ type MessageListProps = {
   textColor: string;
   bubbleColor: string;
   subtleText: string;
+  onMessageLongPress: (message: Message, position: Position) => void;
+  /** id of the message currently lifted into the action sheet, if any. */
+  selectedMessageId?: number | null;
 };
 
 export default function MessageList({
@@ -22,6 +32,8 @@ export default function MessageList({
   textColor,
   bubbleColor,
   subtleText,
+  onMessageLongPress,
+  selectedMessageId,
 }: MessageListProps) {
   if (loading) {
     return (
@@ -52,6 +64,8 @@ export default function MessageList({
           isMine={item.senderId === currentUserId}
           textColor={textColor}
           bubbleColor={bubbleColor}
+          hidden={item.id === selectedMessageId}
+          onLongPress={(position) => onMessageLongPress(item, position)}
         />
       )}
       style={{ flex: 1 }}
@@ -59,10 +73,7 @@ export default function MessageList({
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="on-drag"
       onContentSizeChange={() =>
-        setTimeout(
-          () => listRef.current?.scrollToEnd({ animated: true }),
-          50,
-        )
+        setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50)
       }
     />
   );

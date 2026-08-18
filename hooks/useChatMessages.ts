@@ -177,12 +177,9 @@ export default function useChatMessages(id: string | number) {
   }, [id]);
 
   const editMessage = async (messageId: string | number, text: string) => {
-    const editedMsg = await api.patch(
-      `/api/conversations/messages/${messageId}`,
-      {
-        text: text,
-      },
-    );
+    await api.patch(`/api/conversations/messages/${messageId}`, {
+      text: text,
+    });
     await updateMsg({
       messageId: Number(messageId),
       editedAt: String(new Date().toISOString()),
@@ -191,9 +188,7 @@ export default function useChatMessages(id: string | number) {
   };
 
   const deleteMessage = async (messageId: string | number) => {
-    const deletedMsg = await api.delete(
-      `/api/conversations/messages/${messageId}`,
-    );
+    await api.delete(`/api/conversations/messages/${messageId}`);
     await deleteMsg({ messageId: Number(messageId) });
   };
   const sendMessage = async (text: string) => {
