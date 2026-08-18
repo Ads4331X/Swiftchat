@@ -28,6 +28,12 @@ import { useTheme } from "@/constants/theme-provider";
 import useChatMessages, { type Message } from "@/hooks/useChatMessages";
 
 import { getCurrentUserId } from "@/lib/auth";
+import {
+  emitTyping,
+  emitStopTyping,
+  listenForTyping,
+  listenForStopTyping,
+} from "@/lib/socket";
 
 import ChatHeader from "@/components/chat/ChatHeader";
 import ChatInputBar from "@/components/chat/ChatInputBar";
@@ -73,6 +79,11 @@ export default function UserChat() {
   const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
 
   const [menuPosition, setMenuPosition] = useState<Position | null>(null);
+
+  const [isOtherUserTyping, setIsOtherUserTyping] = useState(false);
+
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isTypingRef = useRef(false);
 
   /*
    * Background chat recede animation
@@ -136,6 +147,7 @@ export default function UserChat() {
         await sendMessage(draft);
       }
 
+      emitStopTyping(Number(id));
       setDraft("");
 
       setTimeout(() => {
@@ -178,6 +190,40 @@ export default function UserChat() {
     setDraft("");
   };
 
+  /*
+   * Typing indicators — emit when local user types,
+   * listen for remote user typing.
+   */
+  useEffect(() => {
+    const subTyping = listenForTyping(({ conversationId, userId }) => {
+      if (Number(conversationId) === Number(id) && userId !== currentUserId) {
+        setIsOtherUserTyping(true);
+      }
+    });
+
+    const subStopTyping = listenForStopTyping(({ conversationId, userId }) => {
+      if (Number(conversationId) === Number(id) && userId !== currentUserId) {
+        setIsOtherUserTyping(false);
+      }
+    });
+
+    return () => {
+      subTyping?.();
+      subStopTyping?.();
+    };
+  }, [id, currentUserId]);
+
+  const handleDraftChange = (text: string) => {
+    setDraft(text);
+
+    emitTyping(Number(id));
+
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    typingTimerRef.current = setTimeout(() => {
+      emitStopTyping(Number(id));
+    }, 2000);
+  };
+
   return (
     <SafeAreaView
       className="flex-1"
@@ -197,6 +243,7 @@ export default function UserChat() {
           {/* Header */}
           <ChatHeader
             username={username}
+            isTyping={isOtherUserTyping}
             textColor={colors.text}
             dividerColor={dividerColor}
             backgroundColor={colors.background}
@@ -235,7 +282,7 @@ export default function UserChat() {
           {/* Input */}
           <ChatInputBar
             draft={draft}
-            onDraftChange={setDraft}
+            onDraftChange={handleDraftChange}
             onSend={handleSend}
             sending={sending}
             insets={insets}

@@ -65,3 +65,25 @@ export function disconnectSocket() {
   Socket?.disconnect();
   Socket = null;
 }
+
+export function emitTyping(conversationId: number) {
+  return Socket?.emit("typing-start", { conversationId });
+}
+
+export function emitStopTyping(conversationId: number) {
+  return Socket?.emit("typing-stop", { conversationId });
+}
+
+export function listenForTyping(
+  callback: (data: { conversationId: number; userId: number }) => void,
+) {
+  Socket?.on("typing-start", callback);
+  return () => Socket?.off("typing-start", callback);
+}
+
+export function listenForStopTyping(
+  callback: (data: { conversationId: number; userId: number }) => void,
+) {
+  Socket?.on("typing-stop", callback);
+  return () => Socket?.off("typing-stop", callback);
+}
