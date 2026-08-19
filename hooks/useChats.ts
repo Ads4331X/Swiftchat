@@ -10,6 +10,7 @@ import { getCurrentUserId } from "@/lib/auth";
 export type ChatMember = {
   id: number;
   username: string;
+  avatar?: string;
 };
 
 export type Chat = {
@@ -83,6 +84,7 @@ export default function useChats() {
         saveConversation({
           id: chat.id,
           otherUsername: otherMember?.username ?? "Unknown",
+          otherAvatarUrl: otherMember?.avatar ?? "",
           lastMessageText: chat.lastMessage?.text ?? "",
           lastMessageSentAt: chat.lastMessage?.sentAt ?? "",
         }).catch(() => {});

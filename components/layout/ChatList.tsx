@@ -80,20 +80,27 @@ export default function ChatList({
       ? chat.members.map((member) => member.username).join(", ")
       : (chat.members[0]?.username ?? "Chat");
 
+  const otherAvatar = (chat: Chat) =>
+    chat.members.length === 1 ? (chat.members[0]?.avatar ?? "") : "";
+
   return (
     <View>
       {visibleChats.map((chat, index) => (
         <ChatCard
           key={chat.id}
           onPress={() => {
-            const id = String(chat.id);
-            joinConversation({ id });
+            joinConversation({ id: String(chat.id) });
             router.push({
               pathname: "/chat/[id]",
-              params: { id: String(chat.id), username: displayName(chat) },
+              params: {
+                id: String(chat.id),
+                username: displayName(chat),
+                avatarUrl: otherAvatar(chat),
+              },
             });
           }}
           username={displayName(chat)}
+          avatarUrl={otherAvatar(chat)}
           lastMessage={chat.lastMessage?.text}
           typing={typingMap[chat.id]}
           time={

@@ -23,6 +23,7 @@ const SCHEMA = `
   CREATE TABLE IF NOT EXISTS Conversation (
     id INTEGER PRIMARY KEY,
     otherUsername TEXT,
+    otherAvatarUrl TEXT,
     lastMessageText TEXT,
     lastMessageSentAt TEXT
   );
@@ -41,6 +42,14 @@ async function openDbOnce(): Promise<SQLite.SQLiteDatabase> {
       // plenty for a local cache, so skip WAL there.
       const pragmas = isWeb ? "" : "PRAGMA journal_mode = WAL;";
       await database.execAsync(`${pragmas}\n${SCHEMA}`);
+      // Migration: add otherAvatarUrl if missing (existing DBs)
+      try {
+        await database.execAsync(
+          `ALTER TABLE Conversation ADD COLUMN otherAvatarUrl TEXT`,
+        );
+      } catch {
+        // column already exists — ignore
+      }
       console.log("SQLite database initialized");
       return database;
     } catch (error) {
@@ -127,10 +136,36 @@ export async function readMsgs({ conversationId }: ReadMsgs) {
   return messages;
 }
 
+// read messages paginated (for infinite scroll — fetch older messages)
+type ReadMsgsPaginated = {
+  conversationId: number;
+  before?: string; // sentAt cursor — fetch messages older than this
+  limit?: number;
+};
+
+export async function readMsgsPaginated({
+  conversationId,
+  before,
+  limit = 50,
+}: ReadMsgsPaginated) {
+  const db = await getDb();
+  if (before) {
+    return db.getAllAsync(
+      `SELECT * FROM Message WHERE conversationId = ? AND sentAt < ? ORDER BY sentAt ASC LIMIT ?`,
+      [conversationId, before, limit],
+    );
+  }
+  return db.getAllAsync(
+    `SELECT * FROM Message WHERE conversationId = ? ORDER BY sentAt ASC LIMIT ?`,
+    [conversationId, limit],
+  );
+}
+
 // save conversation locally
 type SaveConversationParams = {
   id: number;
   otherUsername: string;
+  otherAvatarUrl?: string;
   lastMessageText: string;
   lastMessageSentAt: string;
 };
@@ -138,13 +173,14 @@ type SaveConversationParams = {
 export async function saveConversation({
   id,
   otherUsername,
+  otherAvatarUrl,
   lastMessageText,
   lastMessageSentAt,
 }: SaveConversationParams) {
   const db = await getDb();
   await db.runAsync(
-    `INSERT OR REPLACE INTO Conversation (id, otherUsername, lastMessageText, lastMessageSentAt) VALUES (?, ?, ?, ?)`,
-    [id, otherUsername, lastMessageText, lastMessageSentAt],
+    `INSERT OR REPLACE INTO Conversation (id, otherUsername, otherAvatarUrl, lastMessageText, lastMessageSentAt) VALUES (?, ?, ?, ?, ?)`,
+    [id, otherUsername, otherAvatarUrl ?? "", lastMessageText, lastMessageSentAt],
   );
 }
 
@@ -170,7 +206,7 @@ export async function updateConversationPreview({
 // read all cached conversations
 export type CachedConversation = {
   id: number;
-  members: { id: number; username: string }[];
+  members: { id: number; username: string; avatar?: string }[];
   lastMessage: {
     id: number;
     text: string;
@@ -184,12 +220,19 @@ export async function getConversations(): Promise<CachedConversation[]> {
   const rows = await db.getAllAsync<{
     id: number;
     otherUsername: string | null;
+    otherAvatarUrl: string | null;
     lastMessageText: string | null;
     lastMessageSentAt: string | null;
   }>(`SELECT * FROM Conversation ORDER BY lastMessageSentAt DESC`);
   return rows.map((c) => ({
     id: c.id,
-    members: [{ id: -1, username: c.otherUsername ?? "Unknown" }],
+    members: [
+      {
+        id: -1,
+        username: c.otherUsername ?? "Unknown",
+        avatar: c.otherAvatarUrl ?? undefined,
+      },
+    ],
     lastMessage: c.lastMessageText
       ? {
           id: -1,

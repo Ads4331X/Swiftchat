@@ -2,6 +2,7 @@ import { api } from "@/lib/api";
 import {
   deleteMsg,
   readMsgs,
+  readMsgsPaginated,
   saveMessage,
   updateConversationPreview,
   updateMsg,
@@ -13,7 +14,7 @@ import {
   listenForMessageUpdates,
   listenForNewMessages,
 } from "@/lib/socket";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 
 export type Message = {
   id: number;
@@ -24,18 +25,27 @@ export type Message = {
   conversationId: number;
 };
 
-export default function useChatMessages(id: string | number) {
+const PAGE_SIZE = 50;
+
+export default function useChatMessages(
+  id: string | number,
+  currentUserId: number | null,
+) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
-  const tempIdRef = useRef(-1); // negative ids for optimistic (not-yet-confirmed) messages
-  // tempId -> text of every optimistic message that is still waiting for the
-  // server to confirm it. Used to recognise the socket echo of our own send
-  // so it replaces the temp bubble in place instead of appending a duplicate.
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const tempIdRef = useRef(-1);
   const pendingRef = useRef(new Map<number, string>());
+  const fetchedServerRef = useRef(false);
 
   useEffect(() => {
     if (!id) return;
     let active = true;
+
+    // Reset state when conversation changes
+    fetchedServerRef.current = false;
+    setHasMore(true);
 
     const init = async () => {
       await connectSocket();
@@ -45,10 +55,6 @@ export default function useChatMessages(id: string | number) {
       joinConversation({ id: String(id) });
 
       const unsubscribeNewMessage = listenForNewMessages((newMessage) => {
-        // Compare as numbers on both sides — the socket payload's
-        // conversationId can come through as a string depending on how the
-        // server serializes it, and a strict !== here silently drops every
-        // incoming real-time message if the types don't match.
         if (Number(newMessage.conversationId) !== Number(id)) {
           return;
         }
@@ -73,10 +79,6 @@ export default function useChatMessages(id: string | number) {
             return currentMsg;
           }
 
-          // If this is the server's echo of a message we optimistically
-          // rendered (we're the sender), swap the temp bubble for the real one
-          // in place. Otherwise the temp + real bubble briefly coexist and the
-          // list visibly jumps up/down when the temp is removed.
           for (const [tempId, text] of pendingRef.current) {
             if (text === newMessage.text) {
               pendingRef.current.delete(tempId);
@@ -119,27 +121,41 @@ export default function useChatMessages(id: string | number) {
       const getMessages = async () => {
         setLoading(true);
         try {
+          // 1. Load from local cache first (instant display)
           let cache: Message[] = [];
           try {
-            cache = (await readMsgs({
+            cache = (await readMsgsPaginated({
               conversationId: Number(id),
+              limit: 200,
             })) as Message[];
           } catch {
-            // cache unavailable (e.g. web OPFS locked); fall through to server
+            // cache unavailable
           }
           if (active && cache.length > 0) {
             setMessages(cache);
             setLoading(false);
           }
+
+          // 2. Fetch latest messages from server
           const response = await api.get(
-            `/api/conversations/messages/${id}?limit=30`,
+            `/api/conversations/messages/${id}?limit=${PAGE_SIZE}`,
           );
+          if (!active) return;
 
-          if (active) {
-            setMessages(response.data);
-          }
+          const serverMessages: Message[] = response.data;
 
-          response.data.forEach((msg: Message) => {
+          // 3. Merge: replace local with server data (server is authoritive for latest)
+          setMessages((prev) => {
+            const serverIds = new Set(serverMessages.map((m) => m.id));
+            // Keep any local-only messages (optimistic sends not yet confirmed)
+            const localOnly = prev.filter(
+              (m) => m.id < 0 || !serverIds.has(m.id),
+            );
+            return [...localOnly, ...serverMessages];
+          });
+
+          // 4. Save server messages to local cache
+          serverMessages.forEach((msg: Message) => {
             saveMessage({
               messageId: Number(msg.id),
               message: msg.text,
@@ -148,6 +164,13 @@ export default function useChatMessages(id: string | number) {
               SenderId: Number(msg.senderId),
             }).catch(() => {});
           });
+
+          // 5. If we got fewer than PAGE_SIZE, there's nothing older to load
+          if (serverMessages.length < PAGE_SIZE) {
+            setHasMore(false);
+          }
+
+          fetchedServerRef.current = true;
         } finally {
           if (active) {
             setLoading(false);
@@ -176,6 +199,89 @@ export default function useChatMessages(id: string | number) {
     };
   }, [id]);
 
+  // Load older messages (infinite scroll — called when user scrolls to top)
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore || !id) return;
+
+    setLoadingMore(true);
+    try {
+      // Get the oldest message's sentAt as cursor
+      const oldest = messages[0];
+      if (!oldest) {
+        setHasMore(false);
+        return;
+      }
+
+      // Try server first
+      const response = await api.get(
+        `/api/conversations/messages/${id}?limit=${PAGE_SIZE}&before=${oldest.id}`,
+      );
+      const olderMessages: Message[] = response.data;
+
+      if (olderMessages.length === 0) {
+        setHasMore(false);
+        return;
+      }
+
+      // Merge: prepend older messages, dedup by id
+      setMessages((prev) => {
+        const existingIds = new Set(prev.map((m) => m.id));
+        const newMessages = olderMessages.filter(
+          (m) => !existingIds.has(m.id),
+        );
+        return [...newMessages, ...prev];
+      });
+
+      // Save to local cache
+      olderMessages.forEach((msg: Message) => {
+        saveMessage({
+          messageId: Number(msg.id),
+          message: msg.text,
+          sentAt: String(msg.sentAt),
+          ConversationId: Number(msg.conversationId),
+          SenderId: Number(msg.senderId),
+        }).catch(() => {});
+      });
+
+      if (olderMessages.length < PAGE_SIZE) {
+        setHasMore(false);
+      }
+    } catch {
+      // Server unavailable — try local cache as fallback
+      try {
+        const oldest = messages[0];
+        if (!oldest) return;
+
+        const localOlder = await readMsgsPaginated({
+          conversationId: Number(id),
+          before: oldest.sentAt,
+          limit: PAGE_SIZE,
+        });
+
+        if (localOlder.length === 0) {
+          setHasMore(false);
+          return;
+        }
+
+        setMessages((prev) => {
+          const existingIds = new Set(prev.map((m) => m.id));
+          const newMessages = (localOlder as Message[]).filter(
+            (m) => !existingIds.has(m.id),
+          );
+          return [...newMessages, ...prev];
+        });
+
+        if (localOlder.length < PAGE_SIZE) {
+          setHasMore(false);
+        }
+      } catch {
+        // local cache also failed
+      }
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [id, messages, loadingMore, hasMore]);
+
   const editMessage = async (messageId: string | number, text: string) => {
     await api.patch(`/api/conversations/messages/${messageId}`, {
       text: text,
@@ -195,8 +301,6 @@ export default function useChatMessages(id: string | number) {
     const trimmed = text.trim();
     if (!trimmed) return;
 
-    // Optimistic bubble so the message appears instantly, before the
-    // network round trip completes.
     const tempId = tempIdRef.current--;
     pendingRef.current.set(tempId, trimmed);
     const optimisticMessage: Message = {
@@ -204,7 +308,7 @@ export default function useChatMessages(id: string | number) {
       text: trimmed,
       sentAt: new Date().toISOString(),
       editedAt: new Date().toISOString(),
-      senderId: -1, // replaced once the real response comes back
+      senderId: currentUserId ?? -1,
       conversationId: Number(id),
     };
 
@@ -240,7 +344,6 @@ export default function useChatMessages(id: string | number) {
           : [...withoutOptimistic, response.data];
       });
     } catch (err) {
-      // Roll back the optimistic bubble if the send actually failed
       pendingRef.current.delete(tempId);
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
       throw err;
@@ -248,6 +351,15 @@ export default function useChatMessages(id: string | number) {
   };
 
   {
-    return { messages, loading, sendMessage, editMessage, deleteMessage };
+    return {
+      messages,
+      loading,
+      loadingMore,
+      hasMore,
+      sendMessage,
+      editMessage,
+      deleteMessage,
+      loadMore,
+    };
   }
 }

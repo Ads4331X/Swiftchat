@@ -1,4 +1,4 @@
-import { Keyboard, Pressable, Text, View } from "react-native";
+import { Keyboard, Image, Pressable, Text, View } from "react-native";
 import { type Message } from "@/hooks/useChatMessages";
 import { BRAND_COLOR } from "@/constants/theme";
 import { useRef } from "react";
@@ -18,6 +18,9 @@ type MessageBubbleProps = {
   subtleText: string;
   onLongPress: (position: Position) => void;
   hidden?: boolean;
+  showAvatar?: boolean;
+  avatarUrl?: string;
+  otherUsername?: string;
 };
 
 type MessageBubbleContentProps = {
@@ -110,8 +113,12 @@ export default function MessageBubble({
   subtleText,
   onLongPress,
   hidden,
+  showAvatar,
+  avatarUrl,
+  otherUsername,
 }: MessageBubbleProps) {
   const bubbleRef = useRef<View>(null);
+  const AVATAR_SIZE = 28;
 
   const handleLongPress = () => {
     const measure = () => {
@@ -140,6 +147,44 @@ export default function MessageBubble({
       <View
         className={`flex-row px-1 py-[1px] ${isMine ? "justify-end" : "justify-start"}`}
       >
+        {/* Avatar space — only on other person's last-in-group message */}
+        {!isMine ? (
+          <View
+            style={{
+              width: AVATAR_SIZE + 4,
+              justifyContent: "flex-end",
+              alignItems: "center",
+              marginRight: 2,
+            }}
+          >
+            {showAvatar && avatarUrl ? (
+              <Image
+                source={{ uri: avatarUrl }}
+                style={{
+                  width: AVATAR_SIZE,
+                  height: AVATAR_SIZE,
+                  borderRadius: AVATAR_SIZE / 2,
+                }}
+              />
+            ) : showAvatar ? (
+              <View
+                style={{
+                  width: AVATAR_SIZE,
+                  height: AVATAR_SIZE,
+                  borderRadius: AVATAR_SIZE / 2,
+                  backgroundColor: BRAND_COLOR,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Text style={{ color: "#fff", fontSize: 12, fontWeight: "bold" }}>
+                  {otherUsername?.[0]?.toUpperCase() ?? "?"}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+
         <View
           ref={bubbleRef}
           style={{
