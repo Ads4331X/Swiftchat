@@ -5,7 +5,6 @@ import { BRAND_COLOR } from "@/constants/theme";
 
 type ChatHeaderProps = {
   username?: string;
-  isTyping?: boolean;
   textColor: string;
   dividerColor: string;
   backgroundColor: string;
@@ -13,7 +12,6 @@ type ChatHeaderProps = {
 
 export default function ChatHeader({
   username,
-  isTyping,
   textColor,
   dividerColor,
   backgroundColor,
@@ -33,24 +31,13 @@ export default function ChatHeader({
         <Feather name="arrow-left" size={24} color={textColor} />
       </Pressable>
 
-      <View className="flex-1 items-center">
-        <Text
-          numberOfLines={1}
-          style={{ color: textColor }}
-          className="font-bold text-lg"
-        >
-          {username || "Chat"}
-        </Text>
-        {isTyping && (
-          <Text
-            numberOfLines={1}
-            style={{ color: BRAND_COLOR }}
-            className="text-xs"
-          >
-            typing...
-          </Text>
-        )}
-      </View>
+      <Text
+        numberOfLines={1}
+        style={{ color: textColor }}
+        className="flex-1 text-center font-bold text-lg"
+      >
+        {username || "Chat"}
+      </Text>
 
       <View className="flex-row items-center gap-4">
         <Pressable>

@@ -11,6 +11,7 @@ type ChatCardProps = {
   time?: string;
   unreadCount?: number;
   online?: boolean;
+  typing?: boolean;
   onPress?: () => void;
   showDivider?: boolean;
 };
@@ -58,6 +59,7 @@ export default function ChatCard({
   time,
   unreadCount = 0,
   online,
+  typing,
   onPress,
   showDivider = true,
 }: ChatCardProps) {
@@ -85,7 +87,15 @@ export default function ChatCard({
             {username}
           </Text>
 
-          {lastMessage ? (
+          {typing ? (
+            <Text
+              numberOfLines={1}
+              style={{ color: BRAND_COLOR }}
+              className="text-sm mt-0.5"
+            >
+              typing...
+            </Text>
+          ) : lastMessage ? (
             <Text
               numberOfLines={1}
               style={{ color: subtleText }}

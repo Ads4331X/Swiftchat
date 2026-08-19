@@ -131,6 +131,14 @@ export default function UserChat() {
     };
   }, []);
 
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      listRef.current?.scrollToEnd({ animated: true });
+    }, 50); // small delay to let the layout animation settle first
+
+    return () => clearTimeout(timer);
+  }, [isOtherUserTyping]);
+
   /*
    * Send message
    */
@@ -243,7 +251,6 @@ export default function UserChat() {
           {/* Header */}
           <ChatHeader
             username={username}
-            isTyping={isOtherUserTyping}
             textColor={colors.text}
             dividerColor={dividerColor}
             backgroundColor={colors.background}
@@ -260,6 +267,7 @@ export default function UserChat() {
             subtleText={subtleText}
             selectedMessageId={selectedMessage?.id ?? null}
             onMessageLongPress={handleLongPress}
+            isOtherUserTyping={isOtherUserTyping}
           />
           {/* Editing banner */}
           {editingMessageId && (

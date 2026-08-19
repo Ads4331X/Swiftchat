@@ -4,7 +4,7 @@ export function TypingIndicator() {
   const colors = useTheme().colors;
   return (
     <View
-      className="flex-row items-center space-x-1.5 px-4 py-3 rounded-2xl self-start"
+      className="flex-row items-center space-x-1.5 px-4 py-3 rounded-2xl w-min self-start"
       style={{ backgroundColor: colors.background }}
     >
       <View className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" />

@@ -1,11 +1,16 @@
 import { View, Text } from "react-native";
+import { useState, useEffect } from "react";
 import SkeletonLoader from "./SkeletonLoader";
 import { useTheme } from "@/constants/theme-provider";
 import type { ChatCategory } from "./PillsNav";
 import type { Chat } from "@/hooks/useChats";
 import ChatCard from "./ChatCard";
 import { useRouter } from "expo-router";
-import { joinConversation } from "@/lib/socket";
+import {
+  joinConversation,
+  listenForTyping,
+  listenForStopTyping,
+} from "@/lib/socket";
 
 type ChatListProps = {
   filteredMode: ChatCategory;
@@ -34,6 +39,22 @@ export default function ChatList({
 }: ChatListProps) {
   const router = useRouter();
   const { colors } = useTheme();
+  const [typingMap, setTypingMap] = useState<Record<number, boolean>>({});
+
+  useEffect(() => {
+    const subTyping = listenForTyping(({ conversationId }) => {
+      setTypingMap((prev) => ({ ...prev, [conversationId]: true }));
+    });
+
+    const subStopTyping = listenForStopTyping(({ conversationId }) => {
+      setTypingMap((prev) => ({ ...prev, [conversationId]: false }));
+    });
+
+    return () => {
+      subTyping?.();
+      subStopTyping?.();
+    };
+  }, []);
 
   if (loading) {
     return <SkeletonLoader />;
@@ -74,6 +95,7 @@ export default function ChatList({
           }}
           username={displayName(chat)}
           lastMessage={chat.lastMessage?.text}
+          typing={typingMap[chat.id]}
           time={
             chat.lastMessage ? formatTime(chat.lastMessage.sentAt) : undefined
           }

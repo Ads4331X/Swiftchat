@@ -1,4 +1,4 @@
-import { Pressable, Text, View } from "react-native";
+import { Keyboard, Pressable, Text, View } from "react-native";
 import { type Message } from "@/hooks/useChatMessages";
 import { BRAND_COLOR } from "@/constants/theme";
 import { useRef } from "react";
@@ -17,9 +17,6 @@ type MessageBubbleProps = {
   bubbleColor: string;
   subtleText: string;
   onLongPress: (position: Position) => void;
-  /** True while this exact message is "lifted" into the action sheet, so
-   * only the floating copy is visible and the list doesn't show a duplicate.
-   * Layout space is preserved (opacity only) so nothing reflows. */
   hidden?: boolean;
 };
 
@@ -41,12 +38,6 @@ function formatBubbleTime(iso: string): string {
   });
 }
 
-/**
- * The actual bubble visuals — pulled out so the action sheet's floating
- * preview can render *exactly* this, with the same padding, radius, and
- * font. Any drift here (e.g. a hardcoded padding value elsewhere) is what
- * causes the floating copy to reflow text differently than the real bubble.
- */
 export function MessageBubbleContent({
   text,
   isMine,
@@ -57,7 +48,9 @@ export function MessageBubbleContent({
   subtleText,
 }: MessageBubbleContentProps) {
   const wasEdited =
-    editedAt && sentAt && new Date(editedAt).getTime() > new Date(sentAt).getTime();
+    editedAt &&
+    sentAt &&
+    new Date(editedAt).getTime() > new Date(sentAt).getTime();
 
   return (
     <View
@@ -66,11 +59,15 @@ export function MessageBubbleContent({
         backgroundColor: isMine ? BRAND_COLOR : bubbleColor,
         borderBottomRightRadius: isMine ? 4 : 16,
         borderBottomLeftRadius: isMine ? 16 : 4,
+        overflow: "hidden",
       }}
     >
       <Text
         className="text-[15px] leading-5"
-        style={{ color: isMine ? "#fff" : textColor }}
+        style={{
+          color: isMine ? "#fff" : textColor,
+          flexShrink: 1,
+        }}
       >
         {text}
       </Text>
@@ -97,6 +94,14 @@ export function MessageBubbleContent({
   );
 }
 
+let keyboardVisible = false;
+Keyboard.addListener("keyboardDidShow", () => {
+  keyboardVisible = true;
+});
+Keyboard.addListener("keyboardDidHide", () => {
+  keyboardVisible = false;
+});
+
 export default function MessageBubble({
   message,
   isMine,
@@ -109,21 +114,40 @@ export default function MessageBubble({
   const bubbleRef = useRef<View>(null);
 
   const handleLongPress = () => {
-    bubbleRef.current?.measureInWindow(
-      (pageX: number, pageY: number, width: number, height: number) => {
-        if (width > 0 && height > 0) {
-          onLongPress({ pageX, pageY, width, height });
-        }
-      },
-    );
+    const measure = () => {
+      bubbleRef.current?.measureInWindow(
+        (pageX: number, pageY: number, width: number, height: number) => {
+          if (width > 0 && height > 0) {
+            onLongPress({ pageX, pageY, width, height });
+          }
+        },
+      );
+    };
+
+    if (keyboardVisible) {
+      const sub = Keyboard.addListener("keyboardDidHide", () => {
+        sub.remove();
+        measure();
+      });
+      Keyboard.dismiss();
+    } else {
+      measure();
+    }
   };
 
   return (
     <Pressable onLongPress={handleLongPress} delayLongPress={400}>
       <View
-        className={`flex-row  px-1 py-[1px] ${isMine ? "justify-end" : "justify-start"}`}
+        className={`flex-row px-1 py-[1px] ${isMine ? "justify-end" : "justify-start"}`}
       >
-        <View ref={bubbleRef} style={{ opacity: hidden ? 0 : 1 }}>
+        <View
+          ref={bubbleRef}
+          style={{
+            opacity: hidden ? 0 : 1,
+            maxWidth: "80%",
+            alignSelf: isMine ? "flex-end" : "flex-start",
+          }}
+        >
           <MessageBubbleContent
             text={message.text}
             isMine={isMine}

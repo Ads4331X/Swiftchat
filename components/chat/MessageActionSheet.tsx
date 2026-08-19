@@ -2,6 +2,7 @@ import {
   Alert,
   Dimensions,
   Pressable,
+  ScrollView,
   Text,
   View,
   StyleSheet,
@@ -48,8 +49,6 @@ type MessageActionSheetProps = {
   onForward?: () => void;
   onPin?: () => void;
   onClose: () => void;
-  /** Fired the instant the exit animation begins (before it finishes), so the
-   * parent screen can kick off any synced "background recede" animation. */
   onDismissStart?: () => void;
 };
 
@@ -61,14 +60,9 @@ const REACTION_BAR_HEIGHT = REACTION_SIZE + REACTION_BAR_PADDING_H * 2;
 const MENU_WIDTH = 200;
 const MENU_ROW_HEIGHT = 44;
 const MENU_PADDING_V = 6;
-// Gap between the floating bubble and the reaction bar / menu. Padded out a
-// bit extra to comfortably clear the bubble's ~4% pop-scale so nothing ever
-// overlaps the message text.
 const FLOAT_GAP = 14;
 const SCREEN_PAD = 12;
 
-// Tuned to feel close to Instagram's message long-press: quick, slightly
-// underdamped springs for the bubble/menu, calmer timing for the backdrop.
 const SPRING_MSG = { damping: 24, stiffness: 320, mass: 0.9 };
 const SPRING_MENU = { damping: 20, stiffness: 280, mass: 0.8 };
 const SPRING_REACT = { damping: 14, stiffness: 300, mass: 0.7 };
@@ -81,10 +75,9 @@ type Layout = {
   reactionLeft: number;
   menuTop: number;
   menuLeft: number;
+  maxBubbleHeight: number;
 };
 
-// Pure layout math, lifted out of the component so it isn't re-declared (or
-// accidentally called with stale hook state) on every render.
 function computeLayout(p: Position, isMine: boolean): Layout {
   const menuRows = (
     isMine
@@ -98,11 +91,15 @@ function computeLayout(p: Position, isMine: boolean): Layout {
     (REACTIONS.length - 1) * REACTION_GAP +
     REACTION_BAR_PADDING_H * 2;
 
-  // Treat reactions + message + menu as one group. This prevents the
-  // middle-of-screen collision caused by positioning each piece separately.
-  // The whole group moves up for low messages and down for high messages,
-  // matching the Instagram-style long-press behaviour.
-  const effectiveHeight = p.height * 1.08;
+  const availableHeight = SCREEN.height - SCREEN_PAD * 2;
+  const fixedChrome = REACTION_BAR_HEIGHT + FLOAT_GAP * 2 + menuHeight;
+
+  // Never let the bubble claim more than the screen minus reaction bar,
+  // menu, and gaps — long messages scroll internally instead of pushing
+  // everything else off-screen.
+  const maxBubbleHeight = Math.max(80, availableHeight - fixedChrome);
+  const effectiveHeight = Math.min(p.height * 1.08, maxBubbleHeight);
+
   const groupHeight =
     REACTION_BAR_HEIGHT + FLOAT_GAP + effectiveHeight + FLOAT_GAP + menuHeight;
 
@@ -136,7 +133,14 @@ function computeLayout(p: Position, isMine: boolean): Layout {
     Math.min(menuLeft, SCREEN.width - MENU_WIDTH - SCREEN_PAD),
   );
 
-  return { rowTop, reactionTop, reactionLeft, menuTop, menuLeft };
+  return {
+    rowTop,
+    reactionTop,
+    reactionLeft,
+    menuTop,
+    menuLeft,
+    maxBubbleHeight,
+  };
 }
 
 export function MessageActionSheet({
@@ -155,9 +159,6 @@ export function MessageActionSheet({
   onClose,
   onDismissStart,
 }: MessageActionSheetProps) {
-  // Keeps the Modal mounted through the exit animation; only unmounts once
-  // the animation has actually finished, avoiding the "flicker" of the
-  // native Modal disappearing instantly while things are still animating.
   const [mounted, setMounted] = useState(visible);
   const isDismissingRef = useRef(false);
 
@@ -202,8 +203,6 @@ export function MessageActionSheet({
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     onDismissStart?.();
 
-    // Bubble eases back down to exactly where it was picked up from, and
-    // shrinks back to its resting scale — the reverse of the entrance.
     msgScale.value = withSpring(1, SPRING_MSG);
     rowTranslateY.value = withSpring(position.pageY, SPRING_MSG);
 
@@ -240,8 +239,6 @@ export function MessageActionSheet({
     setMounted(true);
     isDismissingRef.current = false;
 
-    // Start at the original message position, then animate the selected
-    // message to the calculated Instagram-style resting position.
     rowTranslateY.value = position.pageY;
     msgScale.value = 1;
     overlayOpacity.value = 0;
@@ -282,15 +279,10 @@ export function MessageActionSheet({
     opacity: overlayOpacity.value,
   }));
 
-  // Only vertical movement here — the row spans the full screen width and
-  // mirrors the list's own row markup, so horizontal alignment matches
-  // exactly without needing any translateX math.
   const rowAnimStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: rowTranslateY.value }],
   }));
 
-  // Scale is applied to the bubble itself (not the full-width row), so it
-  // pops from its own center instead of the row's center.
   const bubbleScaleStyle = useAnimatedStyle(() => ({
     transform: [{ scale: msgScale.value }],
   }));
@@ -336,9 +328,6 @@ export function MessageActionSheet({
     ]);
   };
 
-  // Purely decorative blur/dim layers must never intercept touches — only
-  // the dedicated backdrop Pressable should. Missing this was why tapping
-  // outside the sheet couldn't dismiss it.
   const renderBlur = (bStyle: any, intensity = 40) => (
     <Animated.View
       pointerEvents="none"
@@ -374,8 +363,6 @@ export function MessageActionSheet({
           pointerEvents="box-none"
           style={[StyleSheet.absoluteFill, { zIndex: 10 }]}
         >
-          {/* Row: identical horizontal layout to the real list row, so the
-              floating bubble lines up pixel-for-pixel with no drift. */}
           <Animated.View
             pointerEvents="box-none"
             style={[
@@ -388,11 +375,14 @@ export function MessageActionSheet({
             ]}
           >
             <View
-              className={`flex-row px-3 ${isMine ? "justify-end" : "justify-start"}`}
+              className={`flex-row px-1 ${isMine ? "justify-end" : "justify-start"}`}
             >
               <Animated.View
                 style={[
                   {
+                    maxWidth: "80%",
+                    maxHeight: layout.maxBubbleHeight,
+                    alignSelf: isMine ? "flex-end" : "flex-start",
                     shadowColor: "#000",
                     shadowOpacity: 0.3,
                     shadowRadius: 16,
@@ -402,12 +392,17 @@ export function MessageActionSheet({
                   bubbleScaleStyle,
                 ]}
               >
-                <MessageBubbleContent
-                  text={message}
-                  isMine={isMine}
-                  textColor={textColor}
-                  bubbleColor={bubbleColor}
-                />
+                <ScrollView
+                  bounces={false}
+                  showsVerticalScrollIndicator={false}
+                >
+                  <MessageBubbleContent
+                    text={message}
+                    isMine={isMine}
+                    textColor={textColor}
+                    bubbleColor={bubbleColor}
+                  />
+                </ScrollView>
               </Animated.View>
             </View>
           </Animated.View>
