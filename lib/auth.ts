@@ -1,5 +1,4 @@
 import { getToken } from "@/lib/secureStorage";
-
 export async function getCurrentUserId(): Promise<number | null> {
   const token = await getToken("token");
   if (!token) return null;
