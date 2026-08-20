@@ -43,6 +43,7 @@
         }
       ],
       "expo-secure-store",
+      ["react-native-libsodium", {}],
       [
         "expo-sqlite",
         {
