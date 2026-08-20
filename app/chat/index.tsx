@@ -42,6 +42,7 @@ export default function Chat() {
         contentContainerStyle={{
           paddingBottom: 120,
         }}
+        removeClippedSubviews={true}
       >
         <ChatList
           filteredMode={activeChatCategory}

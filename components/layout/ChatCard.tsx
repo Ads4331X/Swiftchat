@@ -1,4 +1,5 @@
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { memo } from "react";
 import { useTheme } from "@/constants/theme-provider";
 import { BRAND_COLOR } from "@/constants/theme";
 
@@ -52,7 +53,9 @@ function Avatar({
   );
 }
 
-export default function ChatCard({
+const MemoizedAvatar = memo(Avatar);
+
+export default memo(function ChatCard({
   username,
   avatarUrl,
   lastMessage,
@@ -71,7 +74,7 @@ export default function ChatCard({
       className="w-full px-4 py-3 active:opacity-60"
     >
       <View className="flex-row items-center gap-3">
-        <Avatar
+        <MemoizedAvatar
           username={username}
           avatarUrl={avatarUrl}
           online={online}
@@ -134,4 +137,4 @@ export default function ChatCard({
       ) : null}
     </Pressable>
   );
-}
+});

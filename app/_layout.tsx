@@ -1,28 +1,31 @@
 import "../global.css";
+
 import {
   DarkTheme,
   DefaultTheme,
   ThemeProvider,
 } from "@react-navigation/native";
+
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import * as SystemUI from "expo-system-ui";
 import "react-native-reanimated";
+
 import Toast from "react-native-toast-message";
 import { toastConfig } from "@/lib/toastConfig";
+
 import {
   SafeAreaProvider,
   SafeAreaView,
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
+
 import { AppThemeProvider, useTheme } from "@/constants/theme-provider";
+
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
-import { useEffect, useMemo } from "react";
 
-export const unstable_settings = {
-  anchor: "(tabs)",
-};
+import { useEffect, useMemo } from "react";
 
 function ToastSafeAreaWrapper() {
   const insets = useSafeAreaInsets();
@@ -52,6 +55,7 @@ function AppNavigator() {
 
   const navigationTheme = useMemo(() => {
     const base = isDark ? DarkTheme : DefaultTheme;
+
     return {
       ...base,
       colors: {
@@ -67,13 +71,19 @@ function AppNavigator() {
       <Stack
         screenOptions={{
           headerShown: false,
-          contentStyle: { backgroundColor: colors.background },
+          contentStyle: {
+            backgroundColor: colors.background,
+          },
         }}
       >
-        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="index" />
         <Stack.Screen name="auth" />
+        <Stack.Screen name="chat/index" />
+        <Stack.Screen name="chat/[id]" />
       </Stack>
+
       <ToastSafeAreaWrapper />
+
       <StatusBar style="auto" />
     </ThemeProvider>
   );

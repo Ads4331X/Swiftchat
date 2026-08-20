@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { api } from "@/lib/api";
 import { listenForNewMessages, joinConversations } from "@/lib/socket";
 import {
@@ -40,6 +40,8 @@ function dedupe(chats: Chat[]): Chat[] {
 export default function useChats() {
   const [chats, setChats] = useState<Chat[]>([]);
   const [loading, setLoading] = useState(true);
+  const chatsRef = useRef(chats);
+  chatsRef.current = chats;
 
   useEffect(() => {
     listenForNewMessages((message) => {
@@ -65,7 +67,7 @@ export default function useChats() {
   }, []);
 
   const refetch = useCallback(async () => {
-    if (chats.length === 0) setLoading(true);
+    if (chatsRef.current.length === 0) setLoading(true);
     try {
       const currentUserId = await getCurrentUserId();
       try {
@@ -92,7 +94,7 @@ export default function useChats() {
     } finally {
       setLoading(false);
     }
-  }, [chats.length]);
+  }, []);
 
   return { chats, loading, refetch };
 }

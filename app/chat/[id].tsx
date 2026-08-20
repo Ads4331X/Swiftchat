@@ -1,19 +1,10 @@
 import { useLocalSearchParams } from "expo-router";
 import { useState, useEffect, useRef } from "react";
-import {
-  FlatList,
-  View,
-  Text,
-  Pressable,
-  StyleSheet,
-} from "react-native";
+import { FlatList, View, Text, Pressable, StyleSheet } from "react-native";
 import Feather from "@expo/vector-icons/Feather";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 
-import Animated, {
-  useSharedValue,
-  withSpring,
-} from "react-native-reanimated";
+import Animated, { useSharedValue, withSpring } from "react-native-reanimated";
 
 import {
   SafeAreaView,
@@ -35,6 +26,7 @@ import ChatHeader from "@/components/chat/ChatHeader";
 import ChatInputBar from "@/components/chat/ChatInputBar";
 import MessageList from "@/components/chat/MessageList";
 import { MessageActionSheet } from "@/components/chat/MessageActionSheet";
+import { getUserPublicKey } from "@/lib/user";
 
 type Position = {
   pageX: number;
@@ -44,10 +36,11 @@ type Position = {
 };
 
 export default function UserChat() {
-  const { id, username, avatarUrl } = useLocalSearchParams<{
+  const { id, username, avatarUrl, otherUserId } = useLocalSearchParams<{
     id: string;
     username?: string;
     avatarUrl?: string;
+    otherUserId?: string;
   }>();
 
   const {
@@ -90,6 +83,9 @@ export default function UserChat() {
 
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
+
+  const targatedUserPublicKey = getUserPublicKey(Number(otherUserId));
+  console.log(targatedUserPublicKey);
 
   /*
    * Background chat recede animation
@@ -250,10 +246,7 @@ export default function UserChat() {
       )}
 
       {/* Input — only this moves with keyboard, header stays fixed */}
-      <KeyboardAvoidingView
-        behavior="padding"
-        keyboardVerticalOffset={0}
-      >
+      <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={0}>
         <ChatInputBar
           draft={draft}
           onDraftChange={handleDraftChange}

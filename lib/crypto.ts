@@ -1,4 +1,4 @@
-import sodium from "react-native-libsodium";
+import sodium from "./sodium";
 import { Base64 } from "js-base64";
 import { api } from "./api";
 import {
