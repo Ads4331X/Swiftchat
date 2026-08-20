@@ -86,7 +86,6 @@ export default function NewChatSheet({
 
       onChatCreated?.();
       closeSheet();
-      router.push("/chat");
     } catch (err: any) {
       setErrorMessage(err.response?.data?.error ?? "Something went wrong");
     } finally {

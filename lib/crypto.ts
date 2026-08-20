@@ -1,7 +1,12 @@
 import sodium from "react-native-libsodium";
 import { Base64 } from "js-base64";
 import { api } from "./api";
-import { getPrivateKey, setPrivateKey, setPublicKey } from "./secureStorage";
+import {
+  getPrivateKey,
+  getPublicKey,
+  setPrivateKey,
+  setPublicKey,
+} from "./secureStorage";
 export async function generateKeyPair() {
   await sodium.ready;
   const { publicKey, privateKey } = sodium.crypto_box_keypair();
@@ -18,8 +23,9 @@ export async function initializeKeys() {
     const base64PrivateKey = Base64.fromUint8Array(privateKey);
     await setPublicKey("publicKey", base64PublicKey);
     await setPrivateKey("privateKey", base64PrivateKey);
-    await api.put("/api/user/public-key", {
-      publicKey: base64PublicKey,
-    });
   }
+  const publicKey = await getPublicKey("publicKey");
+  await api.put("/api/user/public-key", {
+    publicKey: publicKey,
+  });
 }

@@ -18,6 +18,7 @@ import { Image } from "expo-image";
 import AntDesign from "@expo/vector-icons/AntDesign";
 import { setToken } from "@/lib/secureStorage";
 import { connectSocket } from "@/lib/socket";
+import { initializeKeys } from "@/lib/crypto";
 
 type FormData = {
   email: string;
@@ -46,25 +47,40 @@ export default function LoginScreen() {
         email: data.email,
         password: data.password,
       });
-
-      Toast.show({
-        type: "success",
-        text1: "Welcome back!",
-        text2: "You're logged in",
-      });
-
       await setToken("token", response.data.token);
-      await connectSocket();
-      router.push("/chat");
     } catch (err: any) {
       Toast.show({
         type: "error",
         text1: "Login failed",
         text2: err.response?.data?.error ?? "Something went wrong",
       });
+      return; // stop here — actual login failed, don't proceed
     }
-  };
 
+    // Login succeeded. Everything below is best-effort setup —
+    // it should never re-label itself as a "login failure".
+    try {
+      await initializeKeys();
+    } catch (err) {
+      console.warn("Key initialization failed, will retry later:", err);
+      // optional: queue a retry, or silently continue —
+      // the user is still logged in, keys can init later
+    }
+
+    try {
+      await connectSocket();
+    } catch (err) {
+      console.warn("Socket connection failed, will retry:", err);
+    }
+
+    Toast.show({
+      type: "success",
+      text1: "Welcome back!",
+      text2: "You're logged in",
+    });
+
+    router.replace("/chat");
+  };
   const {
     subtleText,
     inputBorderColor,
