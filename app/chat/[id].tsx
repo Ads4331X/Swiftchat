@@ -36,11 +36,11 @@ type Position = {
 };
 
 export default function UserChat() {
-  const { id, username, avatarUrl, otherUserId } = useLocalSearchParams<{
+  const { id, username, avatarUrl, memberIds } = useLocalSearchParams<{
     id: string;
     username?: string;
     avatarUrl?: string;
-    otherUserId?: string;
+    memberIds?: string;
   }>();
 
   const {
@@ -84,7 +84,7 @@ export default function UserChat() {
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
 
-  const targatedUserPublicKey = getUserPublicKey(Number(otherUserId));
+  const targatedUserPublicKey = getUserPublicKey(Number(memberIds));
   console.log(targatedUserPublicKey);
 
   /*

@@ -96,7 +96,9 @@ export default function ChatList({
                 id: String(chat.id),
                 username: displayName(chat),
                 avatarUrl: otherAvatar(chat),
-                otherUserId: String(chat.members[0]?.id),
+                memberIds: String(
+                  chat.members.flatMap((member) => String(member.id)).join(","),
+                ),
               },
             });
           }}
