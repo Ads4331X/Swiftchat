@@ -88,10 +88,6 @@ export default function UserChat() {
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
 
-  // const [targetedUserPublicKey, setTargetedUserPublicKey] = useState<
-  //   string | null
-  // >(null);
-
   useEffect(() => {
     const chatMembers = memberIds?.split(",").map(Number);
     async function encryptKey() {
@@ -114,16 +110,6 @@ export default function UserChat() {
     }
     encryptKey();
   }, []);
-  // useEffect(() => {
-  //   if (!memberIds) {
-  //     return;
-  //   }
-  //   getUserPublicKey(Number(memberIds))
-  //     .then(setTargetedUserPublicKey)
-  //     .catch((error) => {
-  //       console.warn("Failed to load target user public key:", error);
-  //     });
-  // }, [memberIds]);
 
   /*
    * Background chat recede animation
