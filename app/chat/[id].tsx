@@ -27,6 +27,10 @@ import ChatInputBar from "@/components/chat/ChatInputBar";
 import MessageList from "@/components/chat/MessageList";
 import { MessageActionSheet } from "@/components/chat/MessageActionSheet";
 import { getUserPublicKey } from "@/lib/user";
+import { generateConversationKey, generateEncryptedKey } from "@/lib/crypto";
+import sodium from "libsodium-wrappers";
+import { Base64 } from "js-base64";
+import { api } from "@/lib/api";
 
 type Position = {
   pageX: number;
@@ -84,8 +88,42 @@ export default function UserChat() {
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
 
-  const targatedUserPublicKey = getUserPublicKey(Number(memberIds));
-  console.log(targatedUserPublicKey);
+  // const [targetedUserPublicKey, setTargetedUserPublicKey] = useState<
+  //   string | null
+  // >(null);
+
+  useEffect(() => {
+    const chatMembers = memberIds?.split(",").map(Number);
+    async function encryptKey() {
+      if (!chatMembers) return; // or throw, or handle appropriately
+      const conversationKey = await generateConversationKey();
+      for (let i = 0; i < chatMembers.length; i++) {
+        const publicKey = await api.get(
+          `/api/user/${chatMembers[i]}/public-key`,
+        );
+        const publicKeyToArray8 = Base64.toUint8Array(publicKey.data.publicKey);
+        const encryptedKey = await generateEncryptedKey(
+          conversationKey,
+          publicKeyToArray8,
+        );
+        const encryptedKeyString = Base64.fromUint8Array(encryptedKey);
+        await api.put(`/api/conversations/${id}/key/${chatMembers[i]}`, {
+          encryptedKey: encryptedKeyString,
+        });
+      }
+    }
+    encryptKey();
+  }, []);
+  // useEffect(() => {
+  //   if (!memberIds) {
+  //     return;
+  //   }
+  //   getUserPublicKey(Number(memberIds))
+  //     .then(setTargetedUserPublicKey)
+  //     .catch((error) => {
+  //       console.warn("Failed to load target user public key:", error);
+  //     });
+  // }, [memberIds]);
 
   /*
    * Background chat recede animation

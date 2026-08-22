@@ -1,16 +1,30 @@
 import { Platform } from "react-native";
 import * as SecureStore from "expo-secure-store";
 
+/*
+ * During Expo Router static rendering (SSR), Platform.OS is "web" but there
+ * is no window. Storage must be a no-op there to avoid crashing the server.
+ */
+function isWebServer(): boolean {
+  return Platform.OS === "web" && typeof window === "undefined";
+}
+
 export async function getToken(key: string): Promise<string | null> {
   if (Platform.OS === "web") {
-    return localStorage.getItem(key);
+    if (isWebServer()) {
+      return null;
+    }
+    return window.localStorage.getItem(key);
   }
   return SecureStore.getItemAsync(key);
 }
 
 export async function setToken(key: string, value: string): Promise<void> {
   if (Platform.OS === "web") {
-    localStorage.setItem(key, value);
+    if (isWebServer()) {
+      return;
+    }
+    window.localStorage.setItem(key, value);
     return;
   }
   await SecureStore.setItemAsync(key, value);
@@ -18,17 +32,24 @@ export async function setToken(key: string, value: string): Promise<void> {
 
 export async function removeToken(key: string): Promise<void> {
   if (Platform.OS === "web") {
-    localStorage.removeItem(key);
+    if (isWebServer()) {
+      return;
+    }
+    window.localStorage.removeItem(key);
     return;
   }
   await SecureStore.deleteItemAsync(key);
 }
+
 export async function setPrivateKey(
   key: string,
   privateKey: string,
 ): Promise<void> {
   if (Platform.OS === "web") {
-    localStorage.setItem(key, privateKey);
+    if (isWebServer()) {
+      return;
+    }
+    window.localStorage.setItem(key, privateKey);
     return;
   }
 
@@ -37,7 +58,10 @@ export async function setPrivateKey(
 
 export async function getPrivateKey(key: string): Promise<string | null> {
   if (Platform.OS === "web") {
-    return localStorage.getItem(key);
+    if (isWebServer()) {
+      return null;
+    }
+    return window.localStorage.getItem(key);
   }
 
   return SecureStore.getItemAsync(key);
@@ -45,18 +69,25 @@ export async function getPrivateKey(key: string): Promise<string | null> {
 
 export async function removePrivateKey(key: string): Promise<void> {
   if (Platform.OS === "web") {
-    localStorage.removeItem(key);
+    if (isWebServer()) {
+      return;
+    }
+    window.localStorage.removeItem(key);
     return;
   }
 
   await SecureStore.deleteItemAsync(key);
 }
+
 export async function setPublicKey(
   key: string,
   publicKey: string,
 ): Promise<void> {
   if (Platform.OS === "web") {
-    localStorage.setItem(key, publicKey);
+    if (isWebServer()) {
+      return;
+    }
+    window.localStorage.setItem(key, publicKey);
     return;
   }
 
@@ -65,7 +96,10 @@ export async function setPublicKey(
 
 export async function getPublicKey(key: string): Promise<string | null> {
   if (Platform.OS === "web") {
-    return localStorage.getItem(key);
+    if (isWebServer()) {
+      return null;
+    }
+    return window.localStorage.getItem(key);
   }
 
   return SecureStore.getItemAsync(key);
@@ -73,7 +107,10 @@ export async function getPublicKey(key: string): Promise<string | null> {
 
 export async function removePublicKey(key: string): Promise<void> {
   if (Platform.OS === "web") {
-    localStorage.removeItem(key);
+    if (isWebServer()) {
+      return;
+    }
+    window.localStorage.removeItem(key);
     return;
   }
 
