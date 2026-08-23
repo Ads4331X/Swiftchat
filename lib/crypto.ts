@@ -12,22 +12,37 @@ const sodium = (sodiumModule as any).default ?? sodiumModule;
 
 export async function generateKeyPair() {
   await sodium.ready;
-  console.log(Object.keys(sodium));
+
+  if (typeof sodium.crypto_box_keypair !== "function") {
+    throw new Error("libsodium crypto_box_keypair is unavailable in this runtime");
+  }
+
   const { publicKey, privateKey } = sodium.crypto_box_keypair();
   return { publicKey, privateKey };
 }
 
 export async function initializeKeys() {
-  const checkPrivateKey = await getPrivateKey("privateKey");
-  if (!checkPrivateKey) {
-    const { publicKey, privateKey } = await generateKeyPair();
-    const base64PublicKey = Base64.fromUint8Array(publicKey);
-    const base64PrivateKey = Base64.fromUint8Array(privateKey);
+  let privateKey = await getPrivateKey("privateKey");
+  let publicKey = await getPublicKey("publicKey");
+
+  if (!privateKey || !publicKey) {
+    const generated = await generateKeyPair();
+    const base64PublicKey = Base64.fromUint8Array(generated.publicKey);
+    const base64PrivateKey = Base64.fromUint8Array(generated.privateKey);
+
     await setPublicKey("publicKey", base64PublicKey);
     await setPrivateKey("privateKey", base64PrivateKey);
+
+    publicKey = await getPublicKey("publicKey");
+    privateKey = await getPrivateKey("privateKey");
   }
-  const publicKey = await getPublicKey("publicKey");
+
+  if (!publicKey || !privateKey) {
+    throw new Error("Failed to initialize encryption keys");
+  }
+
   await api.put("/api/user/public-key", { publicKey });
+  return { publicKey, privateKey };
 }
 
 export async function generateConversationKey() {
@@ -87,8 +102,6 @@ export async function decryptConversationKey({
     receiverPrivateKey,
   );
 
-  console.log("Decrypted conversation key:", conversationKey);
-
   return { conversationKey };
 }
 
@@ -102,6 +115,8 @@ export async function getOrCreateConversationKey(
   conversationId: string,
   memberIds: number[],
 ) {
+  await initializeKeys();
+
   // 1. Try to fetch an existing key for this conversation
   const { encryptedConversationKey, nonce, createdById } =
     await getEncryptedConversationKey(conversationId);

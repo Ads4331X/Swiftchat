@@ -1,9 +1,17 @@
-let sodiumModule: any;
+import { Platform } from "react-native";
 
-if (typeof navigator !== "undefined" && navigator.product === "ReactNative") {
-  sodiumModule = require("./sodium.native").default;
-} else {
-  sodiumModule = require("./sodium.web").default;
+let sodiumModule: any = null;
+
+try {
+  if (Platform.OS !== "web") {
+    sodiumModule = require("react-native-libsodium");
+  }
+} catch {
+  sodiumModule = null;
 }
 
-export default sodiumModule;
+if (!sodiumModule) {
+  sodiumModule = require("libsodium-wrappers");
+}
+
+export default sodiumModule.default ?? sodiumModule;

@@ -229,6 +229,7 @@ export type CachedConversation = {
   lastMessage: {
     id: number;
     text: string;
+    nonce?: string;
     sentAt: string;
     senderId: number;
   } | null;
