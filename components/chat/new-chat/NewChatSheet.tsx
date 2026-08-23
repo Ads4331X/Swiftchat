@@ -4,7 +4,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "@/constants/theme-provider";
 import { Controller, useForm } from "react-hook-form";
 import { useRef, useState } from "react";
-import { router } from "expo-router";
 import { api } from "@/lib/api";
 import NewChatSheetHeader from "./NewChatSheetHeader";
 import UsernameSearchInput from "./UsernameSearchInput";

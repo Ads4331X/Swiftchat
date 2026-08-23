@@ -4,7 +4,7 @@ import { FlatList, View, Text, Pressable, StyleSheet } from "react-native";
 import Feather from "@expo/vector-icons/Feather";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 
-import Animated, { useSharedValue, withSpring } from "react-native-reanimated";
+import { useSharedValue, withSpring } from "react-native-reanimated";
 
 import {
   SafeAreaView,
@@ -21,17 +21,11 @@ import {
   listenForTyping,
   listenForStopTyping,
 } from "@/lib/socket";
-
 import ChatHeader from "@/components/chat/ChatHeader";
 import ChatInputBar from "@/components/chat/ChatInputBar";
 import MessageList from "@/components/chat/MessageList";
 import { MessageActionSheet } from "@/components/chat/MessageActionSheet";
-import { getUserPublicKey } from "@/lib/user";
-import { generateConversationKey, generateEncryptedKey } from "@/lib/crypto";
-import sodium from "libsodium-wrappers";
-import { Base64 } from "js-base64";
-import { api } from "@/lib/api";
-import { getPrivateKey } from "@/lib/secureStorage";
+import { getOrCreateConversationKey, initializeKeys } from "@/lib/crypto";
 
 type Position = {
   pageX: number;
@@ -87,44 +81,51 @@ export default function UserChat() {
   const [isOtherUserTyping, setIsOtherUserTyping] = useState(false);
 
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isTypingRef = useRef(false);
 
   useEffect(() => {
-    const chatMembers = memberIds?.split(",").map(Number);
-    async function encryptKey() {
-      if (!chatMembers) return; // or throw, or handle appropriately
-      const conversationKey = await generateConversationKey();
-      for (let i = 0; i < chatMembers.length; i++) {
-        const publicKey = await api.get(
-          `/api/user/${chatMembers[i]}/public-key`,
-        );
-        const receiverPublicKeyToArray8 = Base64.toUint8Array(
-          publicKey.data.publicKey,
-        );
-        const senderPrivateKey = await getPrivateKey("privateKey");
-        if (!senderPrivateKey) {
-          throw new Error("Private key not found");
-        }
+    let isMounted = true;
 
-        const senderPrivateKeyToArray8 = Base64.toUint8Array(senderPrivateKey);
-        const encryptedKey = await generateEncryptedKey({
-          conversationKey,
-          receiverPublicKey: receiverPublicKeyToArray8,
-          senderPrivateKey: senderPrivateKeyToArray8,
-        });
-        const encryptedKeyString = Base64.fromUint8Array(
-          encryptedKey.encryptedKey,
+    async function loadKey() {
+      if (!id || !memberIds) return;
+
+      try {
+        await initializeKeys(); // ensures local keypair exists (mobile fix from earlier)
+
+        const currentUserId = await getCurrentUserId();
+        const chatMembers = memberIds
+          .split(",")
+          .map(Number)
+          .filter(Number.isFinite);
+
+        const allMembers = Array.from(
+          new Set(
+            [currentUserId, ...chatMembers].filter(
+              (v): v is number => v !== null && v !== undefined,
+            ),
+          ),
         );
-        const nonceString = Base64.fromUint8Array(encryptedKey.nonce);
-        await api.put(`/api/conversations/${id}/key/${chatMembers[i]}`, {
-          encryptedKey: encryptedKeyString,
-          nonce: nonceString,
-        });
+
+        const conversationKey = await getOrCreateConversationKey(
+          String(id),
+          allMembers,
+        );
+
+        if (isMounted) {
+          console.log("Conversation key ready:", conversationKey);
+          // TODO: store conversationKey in state/context here so you can
+          // encrypt outgoing messages and decrypt incoming ones with it
+        }
+      } catch (error) {
+        console.error("Failed to load conversation key:", error);
       }
     }
-    encryptKey();
-  }, []);
 
+    loadKey();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [id, memberIds]);
   /*
    * Background chat recede animation
    */

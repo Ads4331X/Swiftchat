@@ -5,7 +5,7 @@ import {
   Text,
   View,
 } from "react-native";
-import { type RefObject, useCallback, useMemo, useRef, useState } from "react";
+import { type RefObject, useCallback, useMemo, useState } from "react";
 import Feather from "@expo/vector-icons/Feather";
 import { type Message } from "@/hooks/useChatMessages";
 import MessageBubble from "./MessageBubble";
