@@ -31,6 +31,7 @@ import { generateConversationKey, generateEncryptedKey } from "@/lib/crypto";
 import sodium from "libsodium-wrappers";
 import { Base64 } from "js-base64";
 import { api } from "@/lib/api";
+import { getPrivateKey } from "@/lib/secureStorage";
 
 type Position = {
   pageX: number;
@@ -97,14 +98,27 @@ export default function UserChat() {
         const publicKey = await api.get(
           `/api/user/${chatMembers[i]}/public-key`,
         );
-        const publicKeyToArray8 = Base64.toUint8Array(publicKey.data.publicKey);
-        const encryptedKey = await generateEncryptedKey(
-          conversationKey,
-          publicKeyToArray8,
+        const receiverPublicKeyToArray8 = Base64.toUint8Array(
+          publicKey.data.publicKey,
         );
-        const encryptedKeyString = Base64.fromUint8Array(encryptedKey);
+        const senderPrivateKey = await getPrivateKey("privateKey");
+        if (!senderPrivateKey) {
+          throw new Error("Private key not found");
+        }
+
+        const senderPrivateKeyToArray8 = Base64.toUint8Array(senderPrivateKey);
+        const encryptedKey = await generateEncryptedKey({
+          conversationKey,
+          receiverPublicKey: receiverPublicKeyToArray8,
+          senderPrivateKey: senderPrivateKeyToArray8,
+        });
+        const encryptedKeyString = Base64.fromUint8Array(
+          encryptedKey.encryptedKey,
+        );
+        const nonceString = Base64.fromUint8Array(encryptedKey.nonce);
         await api.put(`/api/conversations/${id}/key/${chatMembers[i]}`, {
           encryptedKey: encryptedKeyString,
+          nonce: nonceString,
         });
       }
     }
