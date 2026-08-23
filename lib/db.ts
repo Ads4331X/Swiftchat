@@ -16,6 +16,7 @@ const SCHEMA = `
     conversationId INTEGER NOT NULL,
     senderId INTEGER NOT NULL,
     text TEXT NOT NULL,
+    nonce TEXT NOT NULL,
     sentAt TEXT NOT NULL,
     editedAt TEXT
   );
@@ -50,6 +51,11 @@ async function openDbOnce(): Promise<SQLite.SQLiteDatabase> {
       } catch {
         // column already exists — ignore
       }
+      try {
+        await database.execAsync(`ALTER TABLE Message ADD COLUMN nonce TEXT`);
+      } catch {
+        // column already exists — ignore
+      }
       console.log("SQLite database initialized");
       return database;
     } catch (error) {
@@ -79,6 +85,7 @@ type SaveMsgParams = {
   sentAt: string;
   SenderId: number;
   ConversationId: number;
+  nonce: string;
 };
 
 export async function saveMessage({
@@ -87,11 +94,12 @@ export async function saveMessage({
   SenderId,
   ConversationId,
   messageId,
+  nonce,
 }: SaveMsgParams) {
   const db = await getDb();
   await db.runAsync(
-    `INSERT OR REPLACE INTO Message (id, text, sentAt, senderId, conversationId) VALUES (?, ?, ?, ?, ?)`,
-    [messageId, message, sentAt, SenderId, ConversationId],
+    `INSERT OR REPLACE INTO Message (id, text, sentAt, senderId, conversationId , nonce) VALUES (?, ?, ?, ?, ? , ?)`,
+    [messageId, message, sentAt, SenderId, ConversationId, nonce],
   );
 }
 
@@ -100,15 +108,20 @@ type UpdateMsg = {
   messageId: number;
   editedAt: string;
   message: string;
+  nonce: string;
 };
 
-export async function updateMsg({ messageId, editedAt, message }: UpdateMsg) {
+export async function updateMsg({
+  messageId,
+  editedAt,
+  message,
+  nonce,
+}: UpdateMsg) {
   const db = await getDb();
-  await db.runAsync(`UPDATE Message SET text = ?, editedAt = ? WHERE id = ?`, [
-    message,
-    editedAt,
-    messageId,
-  ]);
+  await db.runAsync(
+    `UPDATE Message SET text = ?, editedAt = ? , nonce = ? WHERE id = ?`,
+    [message, editedAt, nonce, messageId],
+  );
 }
 
 // delete message locally
@@ -180,7 +193,13 @@ export async function saveConversation({
   const db = await getDb();
   await db.runAsync(
     `INSERT OR REPLACE INTO Conversation (id, otherUsername, otherAvatarUrl, lastMessageText, lastMessageSentAt) VALUES (?, ?, ?, ?, ?)`,
-    [id, otherUsername, otherAvatarUrl ?? "", lastMessageText, lastMessageSentAt],
+    [
+      id,
+      otherUsername,
+      otherAvatarUrl ?? "",
+      lastMessageText,
+      lastMessageSentAt,
+    ],
   );
 }
 

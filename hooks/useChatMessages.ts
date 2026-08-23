@@ -1,7 +1,7 @@
 import { api } from "@/lib/api";
+import { decryptMessage, encryptMessage } from "@/lib/crypto";
 import {
   deleteMsg,
-  readMsgs,
   readMsgsPaginated,
   saveMessage,
   updateConversationPreview,
@@ -20,9 +20,10 @@ export type Message = {
   id: number;
   text: string;
   sentAt: string;
-  editedAt: string;
+  editedAt: string | null;
   senderId: number;
   conversationId: number;
+  nonce: string;
 };
 
 const PAGE_SIZE = 50;
@@ -30,14 +31,34 @@ const PAGE_SIZE = 50;
 export default function useChatMessages(
   id: string | number,
   currentUserId: number | null,
+  decryptedConversationKey: Uint8Array | undefined,
 ) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const tempIdRef = useRef(-1);
-  const pendingRef = useRef(new Map<number, string>());
   const fetchedServerRef = useRef(false);
+
+  const decryptChatMessages = async ({
+    serverMessages,
+    decryptedConversationKey,
+  }: {
+    serverMessages: Message[];
+    decryptedConversationKey: Uint8Array;
+  }) => {
+    return await Promise.all(
+      serverMessages.map(async (message) => {
+        const { decryptMessage: decryptedText } = await decryptMessage({
+          encryptedMessage: message.text,
+          nonce: message.nonce,
+          decryptedConversationKey: decryptedConversationKey,
+        });
+
+        return { ...message, text: decryptedText };
+      }),
+    );
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -53,23 +74,34 @@ export default function useChatMessages(
       if (!active) return;
 
       joinConversation({ id: String(id) });
-
-      const unsubscribeNewMessage = listenForNewMessages((newMessage) => {
-        if (Number(newMessage.conversationId) !== Number(id)) {
+      const unsubscribeNewMessage = listenForNewMessages(async (newMessage) => {
+        if (
+          Number(newMessage.conversationId) !== Number(id) ||
+          !decryptedConversationKey
+        ) {
           return;
         }
+
+        const decryptNewMessage = await decryptChatMessages({
+          serverMessages: [newMessage],
+          decryptedConversationKey,
+        });
+
         updateConversationPreview({
           id: Number(id),
-          lastMessageText: newMessage.text,
+          lastMessageText: decryptNewMessage[0].text,
           lastMessageSentAt: newMessage.sentAt,
         }).catch(() => {});
+
         saveMessage({
           messageId: newMessage.id,
           message: newMessage.text,
           sentAt: newMessage.sentAt,
           SenderId: newMessage.senderId,
           ConversationId: newMessage.conversationId,
+          nonce: newMessage.nonce,
         }).catch(() => {});
+
         setMessages((currentMsg) => {
           const existingMessage = currentMsg.find(
             (message) => message.id === newMessage.id,
@@ -79,31 +111,35 @@ export default function useChatMessages(
             return currentMsg;
           }
 
-          for (const [tempId, text] of pendingRef.current) {
-            if (text === newMessage.text) {
-              pendingRef.current.delete(tempId);
-              return currentMsg.map((message) =>
-                message.id === tempId ? newMessage : message,
-              );
-            }
-          }
-
-          return [...currentMsg, newMessage];
+          return [...currentMsg, decryptNewMessage[0]];
         });
       });
-
       const unsubscribeMessageUpdate = listenForMessageUpdates(
-        (updatedMessage) => {
-          if (Number(updatedMessage.conversationId) !== Number(id)) return;
+        async (updatedMessage) => {
+          if (
+            Number(updatedMessage.conversationId) !== Number(id) ||
+            !decryptedConversationKey
+          ) {
+            return;
+          }
+
+          const decryptUpdatedMessage = await decryptChatMessages({
+            serverMessages: [updatedMessage],
+            decryptedConversationKey,
+          });
+
+          const message = decryptUpdatedMessage[0];
+
           updateMsg({
             messageId: Number(updatedMessage.id),
             message: updatedMessage.text,
-            editedAt: String(new Date()),
+            editedAt: updatedMessage.editedAt,
+            nonce: updatedMessage.nonce,
           }).catch(() => {});
 
           setMessages((currentMsg) =>
-            currentMsg.map((message) =>
-              message.id === updatedMessage.id ? updatedMessage : message,
+            currentMsg.map((current) =>
+              current.id === message.id ? message : current,
             ),
           );
         },
@@ -113,7 +149,7 @@ export default function useChatMessages(
         ({ id: deletedId }) => {
           deleteMsg({ messageId: Number(deletedId) }).catch(() => {});
           setMessages((currentMsg) =>
-            currentMsg.filter((message) => message.id !== deletedId),
+            currentMsg.filter((message) => message.id !== Number(deletedId)),
           );
         },
       );
@@ -123,16 +159,23 @@ export default function useChatMessages(
         try {
           // 1. Load from local cache first (instant display)
           let cache: Message[] = [];
+          let decryptedCache: Message[] = [];
           try {
             cache = (await readMsgsPaginated({
               conversationId: Number(id),
               limit: 200,
             })) as Message[];
+
+            if (!decryptedConversationKey) return;
+            decryptedCache = await decryptChatMessages({
+              serverMessages: cache,
+              decryptedConversationKey,
+            });
           } catch {
             // cache unavailable
           }
-          if (active && cache.length > 0) {
-            setMessages(cache);
+          if (active && decryptedCache.length > 0) {
+            setMessages(decryptedCache);
             setLoading(false);
           }
 
@@ -140,18 +183,21 @@ export default function useChatMessages(
           const response = await api.get(
             `/api/conversations/messages/${id}?limit=${PAGE_SIZE}`,
           );
-          if (!active) return;
-
+          if (!active || !decryptedConversationKey) return;
           const serverMessages: Message[] = response.data;
-
+          if (!decryptedConversationKey) return;
+          const decryptedServerMessages = await decryptChatMessages({
+            serverMessages,
+            decryptedConversationKey,
+          });
           // 3. Merge: replace local with server data (server is authoritive for latest)
           setMessages((prev) => {
-            const serverIds = new Set(serverMessages.map((m) => m.id));
+            const serverIds = new Set(decryptedServerMessages.map((m) => m.id));
             // Keep any local-only messages (optimistic sends not yet confirmed)
             const localOnly = prev.filter(
               (m) => m.id < 0 || !serverIds.has(m.id),
             );
-            return [...localOnly, ...serverMessages];
+            return [...localOnly, ...decryptedServerMessages];
           });
 
           // 4. Save server messages to local cache
@@ -162,11 +208,12 @@ export default function useChatMessages(
               sentAt: String(msg.sentAt),
               ConversationId: Number(msg.conversationId),
               SenderId: Number(msg.senderId),
+              nonce: msg.nonce,
             }).catch(() => {});
           });
 
           // 5. If we got fewer than PAGE_SIZE, there's nothing older to load
-          if (serverMessages.length < PAGE_SIZE) {
+          if (decryptedServerMessages.length < PAGE_SIZE) {
             setHasMore(false);
           }
 
@@ -197,7 +244,7 @@ export default function useChatMessages(
       active = false;
       if (cleanupFn) cleanupFn();
     };
-  }, [id]);
+  }, [id, decryptedConversationKey]);
 
   // Load older messages (infinite scroll — called when user scrolls to top)
   const loadMore = useCallback(async () => {
@@ -217,8 +264,12 @@ export default function useChatMessages(
         `/api/conversations/messages/${id}?limit=${PAGE_SIZE}&before=${oldest.id}`,
       );
       const olderMessages: Message[] = response.data;
-
-      if (olderMessages.length === 0) {
+      if (!decryptedConversationKey) return;
+      const decryptedOlderMessages = await decryptChatMessages({
+        serverMessages: olderMessages,
+        decryptedConversationKey,
+      });
+      if (decryptedOlderMessages.length === 0) {
         setHasMore(false);
         return;
       }
@@ -226,7 +277,7 @@ export default function useChatMessages(
       // Merge: prepend older messages, dedup by id
       setMessages((prev) => {
         const existingIds = new Set(prev.map((m) => m.id));
-        const newMessages = olderMessages.filter(
+        const newMessages = decryptedOlderMessages.filter(
           (m) => !existingIds.has(m.id),
         );
         return [...newMessages, ...prev];
@@ -240,10 +291,11 @@ export default function useChatMessages(
           sentAt: String(msg.sentAt),
           ConversationId: Number(msg.conversationId),
           SenderId: Number(msg.senderId),
+          nonce: msg.nonce,
         }).catch(() => {});
       });
 
-      if (olderMessages.length < PAGE_SIZE) {
+      if (decryptedOlderMessages.length < PAGE_SIZE) {
         setHasMore(false);
       }
     } catch {
@@ -252,26 +304,35 @@ export default function useChatMessages(
         const oldest = messages[0];
         if (!oldest) return;
 
-        const localOlder = await readMsgsPaginated({
+        const localOlder = (await readMsgsPaginated({
           conversationId: Number(id),
           before: oldest.sentAt,
           limit: PAGE_SIZE,
-        });
+        })) as Message[];
 
         if (localOlder.length === 0) {
           setHasMore(false);
           return;
         }
 
+        if (!decryptedConversationKey) return;
+
+        const decryptedLocalOlder = await decryptChatMessages({
+          serverMessages: localOlder,
+          decryptedConversationKey,
+        });
+
         setMessages((prev) => {
           const existingIds = new Set(prev.map((m) => m.id));
-          const newMessages = (localOlder as Message[]).filter(
+
+          const newMessages = decryptedLocalOlder.filter(
             (m) => !existingIds.has(m.id),
           );
+
           return [...newMessages, ...prev];
         });
 
-        if (localOlder.length < PAGE_SIZE) {
+        if (decryptedLocalOlder.length < PAGE_SIZE) {
           setHasMore(false);
         }
       } catch {
@@ -280,16 +341,24 @@ export default function useChatMessages(
     } finally {
       setLoadingMore(false);
     }
-  }, [id, messages, loadingMore, hasMore]);
+  }, [id, messages, loadingMore, hasMore, decryptedConversationKey]);
 
   const editMessage = async (messageId: string | number, text: string) => {
+    if (!decryptedConversationKey) return;
+    const { encryptedMessage: encryptEditedMessage, nonce: editedNonce } =
+      await encryptMessage({
+        message: text,
+        decryptedConversationKey,
+      });
     await api.patch(`/api/conversations/messages/${messageId}`, {
-      text: text,
+      text: encryptEditedMessage,
+      nonce: editedNonce,
     });
     await updateMsg({
       messageId: Number(messageId),
       editedAt: String(new Date().toISOString()),
-      message: text,
+      message: encryptEditedMessage,
+      nonce: editedNonce,
     });
   };
 
@@ -299,10 +368,13 @@ export default function useChatMessages(
   };
   const sendMessage = async (text: string) => {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed || !decryptedConversationKey) return;
 
+    const { encryptedMessage, nonce: encryptedNonce } = await encryptMessage({
+      message: trimmed,
+      decryptedConversationKey: decryptedConversationKey,
+    });
     const tempId = tempIdRef.current--;
-    pendingRef.current.set(tempId, trimmed);
     const optimisticMessage: Message = {
       id: tempId,
       text: trimmed,
@@ -310,17 +382,24 @@ export default function useChatMessages(
       editedAt: new Date().toISOString(),
       senderId: currentUserId ?? -1,
       conversationId: Number(id),
+      nonce: encryptedNonce,
     };
 
     setMessages((prev) => [...prev, optimisticMessage]);
 
     try {
       const response = await api.post(`/api/conversations/messages`, {
-        messageText: trimmed,
+        messageText: encryptedMessage,
         conversationId: Number(id),
+        nonce: encryptedNonce,
       });
 
-      pendingRef.current.delete(tempId);
+      const decryptedResponse = await decryptChatMessages({
+        serverMessages: [response.data],
+        decryptedConversationKey,
+      });
+
+      const confirmedMessage = decryptedResponse[0];
 
       saveMessage({
         messageId: Number(response.data.id),
@@ -328,23 +407,27 @@ export default function useChatMessages(
         sentAt: response.data.sentAt,
         SenderId: response.data.senderId,
         ConversationId: response.data.conversationId,
+        nonce: encryptedNonce,
       }).catch(() => {});
+
       updateConversationPreview({
         id: Number(id),
-        lastMessageText: response.data.text,
+        lastMessageText: confirmedMessage.text,
         lastMessageSentAt: response.data.sentAt,
       }).catch(() => {});
+
       setMessages((prev) => {
         const withoutOptimistic = prev.filter((m) => m.id !== tempId);
+
         const alreadyPresent = withoutOptimistic.some(
-          (m) => m.id === response.data.id,
+          (m) => m.id === confirmedMessage.id,
         );
+
         return alreadyPresent
           ? withoutOptimistic
-          : [...withoutOptimistic, response.data];
+          : [...withoutOptimistic, confirmedMessage];
       });
     } catch (err) {
-      pendingRef.current.delete(tempId);
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
       throw err;
     }

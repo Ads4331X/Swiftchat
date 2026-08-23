@@ -52,6 +52,9 @@ export default function UserChat() {
   } = useTheme();
 
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+  const [decryptedConversationKey, setdecryptedConversationKey] = useState<
+    Uint8Array | undefined
+  >(undefined);
 
   const {
     messages,
@@ -62,7 +65,7 @@ export default function UserChat() {
     deleteMessage,
     editMessage,
     loadMore,
-  } = useChatMessages(id, currentUserId);
+  } = useChatMessages(id, currentUserId, decryptedConversationKey);
 
   const insets = useSafeAreaInsets();
 
@@ -111,9 +114,7 @@ export default function UserChat() {
         );
 
         if (isMounted) {
-          console.log("Conversation key ready:", conversationKey);
-          // TODO: store conversationKey in state/context here so you can
-          // encrypt outgoing messages and decrypt incoming ones with it
+          setdecryptedConversationKey(conversationKey);
         }
       } catch (error) {
         console.error("Failed to load conversation key:", error);

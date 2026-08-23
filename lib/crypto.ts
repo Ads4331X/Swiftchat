@@ -171,8 +171,9 @@ export async function encryptMessage({
   );
 
   const encryptMessageToString = Base64.fromUint8Array(encryptMessage);
+  const nonceToString = Base64.fromUint8Array(nonce);
 
-  return { encryptMessageToString, nonce };
+  return { encryptedMessage: encryptMessageToString, nonce: nonceToString };
 }
 
 export async function decryptMessage({
