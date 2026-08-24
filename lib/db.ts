@@ -314,10 +314,6 @@ export async function syncConversationsWithServer({
 }) {
   const localConversations = await getConversations();
 
-  const localConversationIds = new Set(
-    localConversations.map((conversation) => conversation.id),
-  );
-
   const serverConversationIds = new Set(
     serverConversations.map((conversation) => conversation.conversationId),
   );
