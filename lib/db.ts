@@ -23,6 +23,7 @@ const SCHEMA = `
 
   CREATE TABLE IF NOT EXISTS Conversation (
     id INTEGER PRIMARY KEY,
+    otherUserId INTEGER,
     otherUsername TEXT,
     otherAvatarUrl TEXT,
     lastMessageText TEXT,
@@ -44,6 +45,11 @@ async function openDbOnce(): Promise<SQLite.SQLiteDatabase> {
       const pragmas = isWeb ? "" : "PRAGMA journal_mode = WAL;";
       await database.execAsync(`${pragmas}\n${SCHEMA}`);
       // Migration: add otherAvatarUrl if missing (existing DBs)
+      try {
+        await database.execAsync(
+          `ALTER TABLE Conversation ADD COLUMN otherUserId INTEGER;`,
+        );
+      } catch {}
       try {
         await database.execAsync(
           `ALTER TABLE Conversation ADD COLUMN otherAvatarUrl TEXT`,
@@ -177,6 +183,7 @@ export async function readMsgsPaginated({
 // save conversation locally
 type SaveConversationParams = {
   id: number;
+  otherUserId: number;
   otherUsername: string;
   otherAvatarUrl?: string;
   lastMessageText: string;
@@ -185,6 +192,7 @@ type SaveConversationParams = {
 
 export async function saveConversation({
   id,
+  otherUserId,
   otherUsername,
   otherAvatarUrl,
   lastMessageText,
@@ -192,9 +200,10 @@ export async function saveConversation({
 }: SaveConversationParams) {
   const db = await getDb();
   await db.runAsync(
-    `INSERT OR REPLACE INTO Conversation (id, otherUsername, otherAvatarUrl, lastMessageText, lastMessageSentAt) VALUES (?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO Conversation (id, otherUserId, otherUsername, otherAvatarUrl, lastMessageText, lastMessageSentAt) VALUES (?, ?, ?, ?, ? , ?)`,
     [
       id,
+      otherUserId,
       otherUsername,
       otherAvatarUrl ?? "",
       lastMessageText,
@@ -237,35 +246,51 @@ export type CachedConversation = {
 
 export async function getConversations(): Promise<CachedConversation[]> {
   const db = await getDb();
+
   const rows = await db.getAllAsync<{
     id: number;
+    otherUserId: number | null;
     otherUsername: string | null;
     otherAvatarUrl: string | null;
     lastMessageText: string | null;
     lastMessageSentAt: string | null;
   }>(`SELECT * FROM Conversation ORDER BY lastMessageSentAt DESC`);
-  return rows.map((c) => ({
-    id: c.id,
-    members: [
-      {
-        id: -1,
-        username: c.otherUsername ?? "Unknown",
-        avatar: c.otherAvatarUrl ?? undefined,
-      },
-    ],
-    lastMessage: c.lastMessageText
-      ? {
-          id: -1,
-          text: c.lastMessageText,
-          sentAt: c.lastMessageSentAt ?? "",
-          senderId: -1,
-        }
-      : null,
-  }));
+
+  // Filter out rows with no valid user data — these are ghost entries caused
+  // by a failed sync and would show as "Unknown" in the UI when offline.
+  return rows
+    .filter(
+      (c) =>
+        c.otherUserId !== null &&
+        c.otherUserId > 0 &&
+        c.otherUsername !== null &&
+        c.otherUsername.trim() !== "",
+    )
+    .map((c) => ({
+      id: c.id,
+
+      members: [
+        {
+          id: c.otherUserId ?? -1,
+          username: c.otherUsername ?? "Unknown",
+          avatar: c.otherAvatarUrl ?? undefined,
+        },
+      ],
+
+      lastMessage: c.lastMessageText
+        ? {
+            id: -1,
+            text: c.lastMessageText,
+            sentAt: c.lastMessageSentAt ?? "",
+            senderId: -1,
+          }
+        : null,
+    }));
 }
 
 type Chat = {
   conversationId: number;
+  userId: number;
   username: string;
   avatarUrl?: string;
   lastMessageText: string;
@@ -296,16 +321,19 @@ export async function syncConversationsWithServer({
   const serverConversationIds = new Set(
     serverConversations.map((conversation) => conversation.conversationId),
   );
+
+  // Save every server conversation locally — not just new ones.
+  // saveConversation uses INSERT OR REPLACE, so existing rows with stale/bad
+  // data (e.g. missing username) get corrected on every sync.
   for (let conversation of serverConversations) {
-    if (!localConversationIds.has(conversation.conversationId)) {
-      await saveConversation({
-        id: conversation.conversationId,
-        otherAvatarUrl: conversation.avatarUrl,
-        otherUsername: conversation.username,
-        lastMessageSentAt: conversation.lastMessageSentAt,
-        lastMessageText: conversation.lastMessageText,
-      });
-    }
+    await saveConversation({
+      id: conversation.conversationId,
+      otherUserId: conversation.userId,
+      otherAvatarUrl: conversation.avatarUrl,
+      otherUsername: conversation.username,
+      lastMessageSentAt: conversation.lastMessageSentAt,
+      lastMessageText: conversation.lastMessageText,
+    });
   }
 
   for (let conversation of localConversations) {

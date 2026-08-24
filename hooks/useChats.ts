@@ -8,6 +8,7 @@ import {
 } from "@/lib/db";
 import { getCurrentUserId } from "@/lib/auth";
 import { decryptMessage, getOrCreateConversationKey } from "@/lib/crypto";
+import NetInfo from "@react-native-community/netinfo";
 
 export type ChatMember = {
   id: number;
@@ -50,6 +51,129 @@ export default function useChats() {
   const chatsRef = useRef(chats);
   chatsRef.current = chats;
 
+  const refetch = useCallback(async () => {
+    if (chatsRef.current.length === 0) {
+      setLoading(true);
+    }
+
+    try {
+      const currentUserId = await getCurrentUserId();
+
+      /*
+       * 1. Load local conversations first
+       */
+      try {
+        const cache = await getConversations();
+
+        if (cache.length) {
+          setChats(cache);
+        }
+      } catch {
+        // Local cache unavailable.
+      }
+
+      /*
+       * 2. Get conversations from server
+       */
+      const response = await api.get("/api/conversations");
+      await syncConversationsWithServer({
+        serverConversations: response.data,
+      });
+
+      const fetched: Chat[] = dedupe(response.data);
+
+      const decryptedChats: Chat[] = await Promise.all(
+        fetched.map(async (chat) => {
+          if (!chat.lastMessage) {
+            return chat;
+          }
+
+          if (!chat.lastMessage.nonce) {
+            return chat;
+          }
+
+          try {
+            const memberIds = [
+              currentUserId,
+              ...chat.members.map((member) => member.id),
+            ].filter((id): id is number => id !== null && id !== undefined);
+
+            const conversationKey = await getOrCreateConversationKey(
+              String(chat.id),
+              memberIds,
+            );
+
+            const decrypted = await decryptMessage({
+              encryptedMessage: chat.lastMessage.text,
+              nonce: chat.lastMessage.nonce,
+              decryptedConversationKey: conversationKey,
+            });
+
+            return {
+              ...chat,
+              lastMessage: {
+                ...chat.lastMessage,
+                text: decrypted.decryptMessage,
+              },
+            };
+          } catch (error) {
+            console.error(
+              "Could not decrypt conversation preview:",
+              chat.id,
+              error,
+            );
+            return chat;
+          }
+        }),
+      );
+
+      /*
+       * 3. Show server conversations with decrypted preview text
+       */
+      setChats(decryptedChats);
+
+      /*
+       * 4. Join their socket rooms
+       */
+      joinConversations(decryptedChats.map((chat) => chat.id));
+
+      /*
+       * 5. Save decrypted previews locally
+       */
+      for (const chat of decryptedChats) {
+        const otherMember = chat.members.find(
+          (member) => member.id !== currentUserId,
+        );
+
+        if (!otherMember) {
+          continue;
+        }
+
+        await saveConversation({
+          id: chat.id,
+          otherUserId: otherMember.id,
+          otherUsername: otherMember.username ?? "Unknown",
+          otherAvatarUrl: otherMember.avatar ?? "",
+          lastMessageText: chat.lastMessage?.text ?? "",
+          lastMessageSentAt: chat.lastMessage?.sentAt ?? "",
+        }).catch(() => {});
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      // console.log("Is connected?", state.isConnected);
+
+      if (state.isConnected) {
+        refetch();
+      }
+    });
+
+    return unsubscribe;
+  }, [refetch]);
   /*
    * New messages
    */
@@ -119,13 +243,19 @@ export default function useChats() {
           return [updatedChat, ...otherChats];
         });
 
+        const otherMember = chat.members.find(
+          (user) => user.id !== currentUserId,
+        );
+
+        if (!otherMember) {
+          return;
+        }
+
         await saveConversation({
           id: Number(message.conversationId),
-          otherUsername:
-            chat.members.find((m) => m.id !== currentUserId)?.username ??
-            "Unknown",
-          otherAvatarUrl:
-            chat.members.find((m) => m.id !== currentUserId)?.avatar ?? "",
+          otherUserId: otherMember.id,
+          otherUsername: otherMember.username,
+          otherAvatarUrl: otherMember.avatar ?? "",
           lastMessageText: decryptedText,
           lastMessageSentAt: message.sentAt,
         });
@@ -142,110 +272,6 @@ export default function useChats() {
   /*
    * Fetch conversations
    */
-  const refetch = useCallback(async () => {
-    if (chatsRef.current.length === 0) {
-      setLoading(true);
-    }
-
-    try {
-      const currentUserId = await getCurrentUserId();
-
-      /*
-       * 1. Load local conversations first
-       */
-      try {
-        const cache = await getConversations();
-
-        if (cache.length) {
-          setChats(cache);
-        }
-      } catch {
-        // Local cache unavailable.
-      }
-
-      /*
-       * 2. Get conversations from server
-       */
-      const response = await api.get("/api/conversations");
-      await syncConversationsWithServer({ serverConversations: response.data });
-
-      const fetched: Chat[] = dedupe(response.data);
-
-      const decryptedChats: Chat[] = await Promise.all(
-        fetched.map(async (chat) => {
-          if (!chat.lastMessage) {
-            return chat;
-          }
-
-          if (!chat.lastMessage.nonce) {
-            return chat;
-          }
-
-          try {
-            const memberIds = [
-              currentUserId,
-              ...chat.members.map((member) => member.id),
-            ].filter((id): id is number => id !== null && id !== undefined);
-
-            const conversationKey = await getOrCreateConversationKey(
-              String(chat.id),
-              memberIds,
-            );
-
-            const decrypted = await decryptMessage({
-              encryptedMessage: chat.lastMessage.text,
-              nonce: chat.lastMessage.nonce,
-              decryptedConversationKey: conversationKey,
-            });
-
-            return {
-              ...chat,
-              lastMessage: {
-                ...chat.lastMessage,
-                text: decrypted.decryptMessage,
-              },
-            };
-          } catch (error) {
-            console.error(
-              "Could not decrypt conversation preview:",
-              chat.id,
-              error,
-            );
-            return chat;
-          }
-        }),
-      );
-
-      /*
-       * 3. Show server conversations with decrypted preview text
-       */
-      setChats(decryptedChats);
-
-      /*
-       * 4. Join their socket rooms
-       */
-      joinConversations(decryptedChats.map((chat) => chat.id));
-
-      /*
-       * 5. Save decrypted previews locally
-       */
-      for (const chat of decryptedChats) {
-        const otherMember = chat.members.find(
-          (member) => member.id !== currentUserId,
-        );
-
-        await saveConversation({
-          id: chat.id,
-          otherUsername: otherMember?.username ?? "Unknown",
-          otherAvatarUrl: otherMember?.avatar ?? "",
-          lastMessageText: chat.lastMessage?.text ?? "",
-          lastMessageSentAt: chat.lastMessage?.sentAt ?? "",
-        }).catch(() => {});
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, []);
 
   return {
     chats,
