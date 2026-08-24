@@ -1,7 +1,11 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { api } from "@/lib/api";
 import { listenForNewMessages, joinConversations } from "@/lib/socket";
-import { getConversations, saveConversation } from "@/lib/db";
+import {
+  getConversations,
+  saveConversation,
+  syncConversationsWithServer,
+} from "@/lib/db";
 import { getCurrentUserId } from "@/lib/auth";
 import { decryptMessage, getOrCreateConversationKey } from "@/lib/crypto";
 
@@ -163,6 +167,7 @@ export default function useChats() {
        * 2. Get conversations from server
        */
       const response = await api.get("/api/conversations");
+      await syncConversationsWithServer({ serverConversations: response.data });
 
       const fetched: Chat[] = dedupe(response.data);
 

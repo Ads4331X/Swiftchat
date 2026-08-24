@@ -263,3 +263,54 @@ export async function getConversations(): Promise<CachedConversation[]> {
       : null,
   }));
 }
+
+type Chat = {
+  conversationId: number;
+  username: string;
+  avatarUrl?: string;
+  lastMessageText: string;
+  lastMessageSentAt: string;
+};
+
+export async function deleteConversation({
+  conversationId,
+}: {
+  conversationId: number;
+}) {
+  const db = await getDb();
+
+  await db.runAsync(`DELETE FROM Conversation WHERE id = ?`, [conversationId]);
+}
+
+export async function syncConversationsWithServer({
+  serverConversations,
+}: {
+  serverConversations: Chat[];
+}) {
+  const localConversations = await getConversations();
+
+  const localConversationIds = new Set(
+    localConversations.map((conversation) => conversation.id),
+  );
+
+  const serverConversationIds = new Set(
+    serverConversations.map((conversation) => conversation.conversationId),
+  );
+  for (let conversation of serverConversations) {
+    if (!localConversationIds.has(conversation.conversationId)) {
+      await saveConversation({
+        id: conversation.conversationId,
+        otherAvatarUrl: conversation.avatarUrl,
+        otherUsername: conversation.username,
+        lastMessageSentAt: conversation.lastMessageSentAt,
+        lastMessageText: conversation.lastMessageText,
+      });
+    }
+  }
+
+  for (let conversation of localConversations) {
+    if (!serverConversationIds.has(conversation.id)) {
+      await deleteConversation({ conversationId: conversation.id });
+    }
+  }
+}
