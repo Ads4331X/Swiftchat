@@ -29,6 +29,16 @@ const SCHEMA = `
     lastMessageText TEXT,
     lastMessageSentAt TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS PendingMessage (
+    id INTEGER PRIMARY KEY,
+    conversationId INTEGER NOT NULL,
+    senderId INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    nonce TEXT NOT NULL,
+    sentAt TEXT NOT NULL,
+    editedAt TEXT
+  )
 `;
 
 async function openDbOnce(): Promise<SQLite.SQLiteDatabase> {
@@ -337,4 +347,56 @@ export async function syncConversationsWithServer({
       await deleteConversation({ conversationId: conversation.id });
     }
   }
+}
+
+export async function savePendingMessage({
+  message,
+  sentAt,
+  SenderId,
+  ConversationId,
+  messageId,
+  nonce,
+}: SaveMsgParams) {
+  const db = await getDb();
+  await db.runAsync(
+    `INSERT OR REPLACE INTO PendingMessage (id, text, sentAt, senderId, conversationId , nonce) VALUES (?, ?, ?, ?, ? , ?)`,
+    [messageId, message, sentAt, SenderId, ConversationId, nonce],
+  );
+}
+
+export async function updatePendingMessage({
+  messageId,
+  editedAt,
+  message,
+  nonce,
+}: UpdateMsg) {
+  const db = await getDb();
+  await db.runAsync(
+    `UPDATE PendingMessage SET text = ?, editedAt = ? , nonce = ? WHERE id = ?`,
+    [message, editedAt, nonce, messageId],
+  );
+}
+
+export async function deletePendingMessage({ messageId }: DeleteMsg) {
+  const db = await getDb();
+  await db.runAsync(`DELETE FROM PendingMessage WHERE id = ?`, [messageId]);
+}
+export type PendingMessage = {
+  id: number;
+  conversationId: number;
+  senderId: number;
+  text: string;
+  nonce: string;
+  sentAt: string;
+  editedAt: string | null;
+};
+
+export async function getPendingMessages(): Promise<PendingMessage[]> {
+  const db = await getDb();
+
+  return db.getAllAsync<PendingMessage>(`
+    SELECT *
+    FROM PendingMessage
+    ORDER BY sentAt ASC
+  `);
 }

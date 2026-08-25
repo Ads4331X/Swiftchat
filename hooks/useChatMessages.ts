@@ -2,8 +2,11 @@ import { api } from "@/lib/api";
 import { decryptMessage, encryptMessage } from "@/lib/crypto";
 import {
   deleteMsg,
+  deletePendingMessage,
+  getPendingMessages,
   readMsgsPaginated,
   saveMessage,
+  savePendingMessage,
   updateConversationPreview,
   updateMsg,
 } from "@/lib/db";
@@ -15,6 +18,7 @@ import {
   listenForNewMessages,
 } from "@/lib/socket";
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useNetInfo } from "@react-native-community/netinfo";
 
 export type Message = {
   id: number;
@@ -60,6 +64,64 @@ export default function useChatMessages(
     );
   };
 
+  const { isConnected } = useNetInfo();
+
+  useEffect(() => {
+    if (isConnected) {
+      const pendingMsgs = async () => {
+        const pendingMessages = await getPendingMessages();
+        for (let pendingMessage of pendingMessages) {
+          try {
+            const result = await api.post("/api/conversations/messages", {
+              messageText: pendingMessage.text,
+              conversationId: pendingMessage.conversationId,
+              nonce: pendingMessage.nonce,
+            });
+
+            await saveMessage({
+              messageId: result.data.id,
+              message: result.data.text,
+              sentAt: result.data.sentAt,
+              SenderId: result.data.senderId,
+              ConversationId: result.data.conversationId,
+              nonce: result.data.nonce,
+            });
+
+            await deletePendingMessage({ messageId: pendingMessage.id });
+
+            if (
+              Number(pendingMessage.conversationId) === Number(id) &&
+              decryptedConversationKey
+            ) {
+              const [confirmedMessage] = await decryptChatMessages({
+                serverMessages: [result.data],
+                decryptedConversationKey,
+              });
+
+              setMessages((prev) => {
+                const withoutOptimistic = prev.filter(
+                  (m) => m.id !== pendingMessage.id,
+                );
+                const alreadyPresent = withoutOptimistic.some(
+                  (m) => m.id === confirmedMessage.id,
+                );
+                return alreadyPresent
+                  ? withoutOptimistic
+                  : [...withoutOptimistic, confirmedMessage];
+              });
+            }
+          } catch (error) {
+            console.error(
+              "Failed to sync pending message:",
+              pendingMessage.id,
+              error,
+            );
+          }
+        }
+      };
+      pendingMsgs();
+    }
+  }, [isConnected, id, decryptedConversationKey]);
   useEffect(() => {
     if (!id) return;
     let active = true;
@@ -366,6 +428,7 @@ export default function useChatMessages(
     await api.delete(`/api/conversations/messages/${messageId}`);
     await deleteMsg({ messageId: Number(messageId) });
   };
+
   const sendMessage = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || !decryptedConversationKey) return;
@@ -387,6 +450,15 @@ export default function useChatMessages(
 
     setMessages((prev) => [...prev, optimisticMessage]);
 
+    await savePendingMessage({
+      message: encryptedMessage,
+      nonce: encryptedNonce,
+      messageId: optimisticMessage.id,
+      SenderId: optimisticMessage.senderId,
+      ConversationId: optimisticMessage.conversationId,
+      sentAt: optimisticMessage.sentAt,
+    });
+
     try {
       const response = await api.post(`/api/conversations/messages`, {
         messageText: encryptedMessage,
@@ -401,15 +473,19 @@ export default function useChatMessages(
 
       const confirmedMessage = decryptedResponse[0];
 
-      saveMessage({
-        messageId: Number(response.data.id),
-        message: response.data.text,
-        sentAt: response.data.sentAt,
-        SenderId: response.data.senderId,
-        ConversationId: response.data.conversationId,
-        nonce: encryptedNonce,
-      }).catch(() => {});
-
+      try {
+        await saveMessage({
+          messageId: Number(response.data.id),
+          message: response.data.text,
+          sentAt: response.data.sentAt,
+          SenderId: response.data.senderId,
+          ConversationId: response.data.conversationId,
+          nonce: encryptedNonce,
+        });
+        await deletePendingMessage({ messageId: tempId });
+      } catch (err) {
+        console.error("Saved to server but failed to save locally:", err);
+      }
       updateConversationPreview({
         id: Number(id),
         lastMessageText: confirmedMessage.text,
@@ -427,22 +503,19 @@ export default function useChatMessages(
           ? withoutOptimistic
           : [...withoutOptimistic, confirmedMessage];
       });
-    } catch (err) {
-      setMessages((prev) => prev.filter((m) => m.id !== tempId));
-      throw err;
+    } catch {
+      console.log("Message saved as pending:", tempId);
     }
   };
 
-  {
-    return {
-      messages,
-      loading,
-      loadingMore,
-      hasMore,
-      sendMessage,
-      editMessage,
-      deleteMessage,
-      loadMore,
-    };
-  }
+  return {
+    messages,
+    loading,
+    loadingMore,
+    hasMore,
+    sendMessage,
+    editMessage,
+    deleteMessage,
+    loadMore,
+  };
 }

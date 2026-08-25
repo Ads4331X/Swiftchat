@@ -2,6 +2,7 @@ import { Keyboard, Image, Pressable, Text, View } from "react-native";
 import { type Message } from "@/hooks/useChatMessages";
 import { BRAND_COLOR } from "@/constants/theme";
 import { useRef } from "react";
+import Feather from "@expo/vector-icons/Feather";
 
 type Position = {
   pageX: number;
@@ -31,6 +32,7 @@ type MessageBubbleContentProps = {
   editedAt?: string;
   sentAt?: string;
   subtleText?: string;
+  isPending?: boolean;
 };
 
 function formatBubbleTime(iso: string): string {
@@ -49,11 +51,14 @@ export function MessageBubbleContent({
   editedAt,
   sentAt,
   subtleText,
+  isPending,
 }: MessageBubbleContentProps) {
   const wasEdited =
     editedAt &&
     sentAt &&
     new Date(editedAt).getTime() > new Date(sentAt).getTime();
+
+  const tickColor = isMine ? "rgba(255,255,255,0.55)" : subtleText;
 
   return (
     <View
@@ -76,21 +81,22 @@ export function MessageBubbleContent({
       </Text>
 
       <View className="flex-row items-center gap-1 mt-1 self-end">
-        {wasEdited && (
-          <Text
-            className="text-[10px]"
-            style={{ color: isMine ? "rgba(255,255,255,0.55)" : subtleText }}
-          >
+        {wasEdited && !isPending && (
+          <Text className="text-[10px]" style={{ color: tickColor }}>
             Edited
           </Text>
         )}
         {sentAt && (
-          <Text
-            className="text-[10px]"
-            style={{ color: isMine ? "rgba(255,255,255,0.55)" : subtleText }}
-          >
-            {formatBubbleTime(sentAt)}
+          <Text className="text-[10px]" style={{ color: tickColor }}>
+            {isPending ? "Sending…" : formatBubbleTime(sentAt)}
           </Text>
+        )}
+        {isMine && (
+          <Feather
+            name={isPending ? "clock" : "check"}
+            size={11}
+            color={tickColor}
+          />
         )}
       </View>
     </View>
@@ -177,7 +183,9 @@ export default function MessageBubble({
                   justifyContent: "center",
                 }}
               >
-                <Text style={{ color: "#fff", fontSize: 12, fontWeight: "bold" }}>
+                <Text
+                  style={{ color: "#fff", fontSize: 12, fontWeight: "bold" }}
+                >
                   {otherUsername?.[0]?.toUpperCase() ?? "?"}
                 </Text>
               </View>
@@ -199,8 +207,9 @@ export default function MessageBubble({
             textColor={textColor}
             bubbleColor={bubbleColor}
             subtleText={subtleText}
-            editedAt={message.editedAt}
+            editedAt={message.editedAt ?? undefined}
             sentAt={message.sentAt}
+            isPending={message.id < 0}
           />
         </View>
       </View>
