@@ -21,7 +21,7 @@ import {
   listenForTyping,
   listenForStopTyping,
 } from "@/lib/socket";
-import { getUser, upsertUser } from "@/lib/db";
+import { upsertUser, getConversationOtherUser } from "@/lib/db";
 import { api } from "@/lib/api";
 import ChatHeader from "@/components/chat/ChatHeader";
 import ChatInputBar from "@/components/chat/ChatInputBar";
@@ -147,51 +147,47 @@ export default function UserChat() {
   }, []);
 
   /*
-   * Other user details — load from local DB first, then refresh from server
+   * Other user details — load from local DB first, refresh from server
    */
   useEffect(() => {
-    const otherUserId = memberIds
-      ?.split(",")
-      .map(Number)
-      .find((n) => n !== currentUserId && Number.isFinite(n));
-
-    if (!otherUserId) return;
-
+    if (!id) return;
     let cancelled = false;
 
-    async function loadUser() {
-      // 1. try local DB
-      const cached = await getUser(otherUserId!);
-      if (!cancelled && cached) {
+    async function run() {
+      // 1. load from Conversation table
+      const cached = await getConversationOtherUser(Number(id));
+      if (!cancelled && cached?.otherUsername) {
         setOtherUser({
-          username: cached.username,
-          avatarUrl: cached.avatarUrl ?? undefined,
+          username: cached.otherUsername,
+          avatarUrl: cached.otherAvatarUrl ?? undefined,
         });
       }
 
-      // 2. fetch from server
+      // 2. refresh from server
       try {
+        const myId = await getCurrentUserId();
         const res = await api.get("/api/conversations");
-        const conv = res.data.find(
-          (c: any) => c.userId === otherUserId || c.members?.some?.((m: any) => m.id === otherUserId),
-        );
-        const member = conv?.members?.find?.((m: any) => m.id === otherUserId)
-          ?? (conv?.userId === otherUserId ? conv : null);
-
-        if (!cancelled && member) {
-          const data = {
-            username: member.username,
-            avatarUrl: member.avatarUrl ?? member.avatar ?? undefined,
-          };
-          setOtherUser(data);
-          await upsertUser(otherUserId!, data.username, data.avatarUrl);
+        const list: any[] = res.data;
+        for (const conv of list) {
+          if (String(conv.conversationId ?? conv.id) !== String(id)) continue;
+          const members = conv.members ?? [];
+          const match = members.find((m: any) => m.id !== myId);
+          if (match && !cancelled) {
+            const data = {
+              username: match.username,
+              avatarUrl: match.avatar ?? match.avatarUrl ?? undefined,
+            };
+            setOtherUser(data);
+            await upsertUser(match.id, data.username, data.avatarUrl);
+            break;
+          }
         }
       } catch {}
     }
 
-    loadUser();
+    run();
     return () => { cancelled = true; };
-  }, [id, memberIds, currentUserId]);
+  }, [id]);
 
   /*
    * Send message

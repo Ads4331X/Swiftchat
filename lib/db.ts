@@ -323,32 +323,57 @@ export async function deleteConversation({
   await db.runAsync(`DELETE FROM Conversation WHERE id = ?`, [conversationId]);
 }
 
+type ServerConversation = {
+  id: number;
+  conversationId?: number;
+  userId?: number;
+  username?: string;
+  avatarUrl?: string;
+  members?: { id: number; username: string; avatar?: string }[];
+  lastMessage?: { text: string; sentAt: string } | null;
+  lastMessageText?: string;
+  lastMessageSentAt?: string;
+};
+
 export async function syncConversationsWithServer({
   serverConversations,
 }: {
-  serverConversations: Chat[];
+  serverConversations: ServerConversation[];
 }) {
   const localConversations = await getConversations();
+  const myId = await (await import("@/lib/auth")).getCurrentUserId();
 
-  const serverConversationIds = new Set(
-    serverConversations.map((conversation) => conversation.conversationId),
-  );
+  const serverConversationIds = new Set<number>();
 
-  // Save every server conversation locally — not just new ones.
-  // saveConversation uses INSERT OR REPLACE, so existing rows with stale/bad
-  // data (e.g. missing username) get corrected on every sync.
-  for (let conversation of serverConversations) {
-    await saveConversation({
-      id: conversation.conversationId,
-      otherUserId: conversation.userId,
-      otherAvatarUrl: conversation.avatarUrl,
-      otherUsername: conversation.username,
-      lastMessageSentAt: conversation.lastMessageSentAt,
-      lastMessageText: conversation.lastMessageText,
-    });
+  for (const conv of serverConversations) {
+    const convId = conv.conversationId ?? conv.id;
+    serverConversationIds.add(convId);
+
+    // handle members array format (from API)
+    if (conv.members && conv.members.length > 0) {
+      const other = conv.members.find((m) => m.id !== myId) ?? conv.members[0];
+      await saveConversation({
+        id: convId,
+        otherUserId: other.id,
+        otherAvatarUrl: other.avatar,
+        otherUsername: other.username,
+        lastMessageSentAt: conv.lastMessage?.sentAt ?? conv.lastMessageSentAt ?? "",
+        lastMessageText: conv.lastMessage?.text ?? conv.lastMessageText ?? "",
+      });
+    } else if (conv.userId) {
+      // handle flat format
+      await saveConversation({
+        id: convId,
+        otherUserId: conv.userId,
+        otherAvatarUrl: conv.avatarUrl,
+        otherUsername: conv.username ?? "Unknown",
+        lastMessageSentAt: conv.lastMessageSentAt ?? "",
+        lastMessageText: conv.lastMessageText ?? "",
+      });
+    }
   }
 
-  for (let conversation of localConversations) {
+  for (const conversation of localConversations) {
     if (!serverConversationIds.has(conversation.id)) {
       await deleteConversation({ conversationId: conversation.id });
     }
@@ -420,5 +445,17 @@ export async function upsertUser(userId: number, username: string, avatarUrl?: s
   await db.runAsync(
     `INSERT OR REPLACE INTO User (id, username, avatarUrl) VALUES (?, ?, ?)`,
     [userId, username, avatarUrl ?? null],
+  );
+}
+
+export async function getConversationOtherUser(conversationId: number) {
+  const db = await getDb();
+  return db.getFirstAsync<{
+    otherUserId: number;
+    otherUsername: string;
+    otherAvatarUrl: string | null;
+  }>(
+    `SELECT otherUserId, otherUsername, otherAvatarUrl FROM Conversation WHERE id = ?`,
+    [conversationId],
   );
 }
