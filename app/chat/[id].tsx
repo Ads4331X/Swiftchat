@@ -21,6 +21,8 @@ import {
   listenForTyping,
   listenForStopTyping,
 } from "@/lib/socket";
+import { getUser, upsertUser } from "@/lib/db";
+import { api } from "@/lib/api";
 import ChatHeader from "@/components/chat/ChatHeader";
 import ChatInputBar from "@/components/chat/ChatInputBar";
 import MessageList from "@/components/chat/MessageList";
@@ -83,6 +85,11 @@ export default function UserChat() {
 
   const [isOtherUserTyping, setIsOtherUserTyping] = useState(false);
 
+  const [otherUser, setOtherUser] = useState<{
+    username: string;
+    avatarUrl?: string;
+  } | null>(null);
+
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -138,6 +145,53 @@ export default function UserChat() {
   useEffect(() => {
     getCurrentUserId().then(setCurrentUserId);
   }, []);
+
+  /*
+   * Other user details — load from local DB first, then refresh from server
+   */
+  useEffect(() => {
+    const otherUserId = memberIds
+      ?.split(",")
+      .map(Number)
+      .find((n) => n !== currentUserId && Number.isFinite(n));
+
+    if (!otherUserId) return;
+
+    let cancelled = false;
+
+    async function loadUser() {
+      // 1. try local DB
+      const cached = await getUser(otherUserId!);
+      if (!cancelled && cached) {
+        setOtherUser({
+          username: cached.username,
+          avatarUrl: cached.avatarUrl ?? undefined,
+        });
+      }
+
+      // 2. fetch from server
+      try {
+        const res = await api.get("/api/conversations");
+        const conv = res.data.find(
+          (c: any) => c.userId === otherUserId || c.members?.some?.((m: any) => m.id === otherUserId),
+        );
+        const member = conv?.members?.find?.((m: any) => m.id === otherUserId)
+          ?? (conv?.userId === otherUserId ? conv : null);
+
+        if (!cancelled && member) {
+          const data = {
+            username: member.username,
+            avatarUrl: member.avatarUrl ?? member.avatar ?? undefined,
+          };
+          setOtherUser(data);
+          await upsertUser(otherUserId!, data.username, data.avatarUrl);
+        }
+      } catch {}
+    }
+
+    loadUser();
+    return () => { cancelled = true; };
+  }, [id, memberIds, currentUserId]);
 
   /*
    * Send message
@@ -240,7 +294,8 @@ export default function UserChat() {
       }}
     >
       <ChatHeader
-        username={username}
+        username={otherUser?.username ?? username}
+        avatarUrl={otherUser?.avatarUrl ?? avatarUrl}
         textColor={colors.text}
         dividerColor={dividerColor}
         backgroundColor={colors.background}
@@ -262,8 +317,8 @@ export default function UserChat() {
         isOtherUserTyping={isOtherUserTyping}
         onLoadMore={loadMore}
         onScrollToEndRef={scrollToEndRef}
-        otherAvatarUrl={avatarUrl ?? ""}
-        otherUsername={username ?? ""}
+        otherAvatarUrl={otherUser?.avatarUrl ?? avatarUrl ?? ""}
+        otherUsername={otherUser?.username ?? username ?? ""}
       />
 
       {/* Editing banner */}

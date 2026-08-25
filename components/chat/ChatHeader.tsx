@@ -2,9 +2,11 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import Feather from "@expo/vector-icons/Feather";
 import { BRAND_COLOR } from "@/constants/theme";
+import Avatar from "@/components/profile/Avatar";
 
 type ChatHeaderProps = {
   username?: string;
+  avatarUrl?: string;
   textColor: string;
   dividerColor: string;
   backgroundColor: string;
@@ -12,6 +14,7 @@ type ChatHeaderProps = {
 
 export default function ChatHeader({
   username,
+  avatarUrl,
   textColor,
   dividerColor,
   backgroundColor,
@@ -31,10 +34,12 @@ export default function ChatHeader({
         <Feather name="arrow-left" size={24} color={textColor} />
       </Pressable>
 
+      <Avatar username={username ?? "?"} avatarUrl={avatarUrl} size={34} />
+
       <Text
         numberOfLines={1}
         style={{ color: textColor }}
-        className="flex-1 text-center font-bold text-lg"
+        className="flex-1 ml-3 font-bold text-lg"
       >
         {username || "Chat"}
       </Text>

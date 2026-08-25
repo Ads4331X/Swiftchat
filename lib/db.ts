@@ -38,6 +38,12 @@ const SCHEMA = `
     nonce TEXT NOT NULL,
     sentAt TEXT NOT NULL,
     editedAt TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS User (
+    id INTEGER PRIMARY KEY,
+    username TEXT NOT NULL,
+    avatarUrl TEXT
   )
 `;
 
@@ -399,4 +405,20 @@ export async function getPendingMessages(): Promise<PendingMessage[]> {
     FROM PendingMessage
     ORDER BY sentAt ASC
   `);
+}
+
+export async function getUser(userId: number) {
+  const db = await getDb();
+  return db.getFirstAsync<{ id: number; username: string; avatarUrl: string | null }>(
+    `SELECT * FROM User WHERE id = ?`,
+    [userId],
+  );
+}
+
+export async function upsertUser(userId: number, username: string, avatarUrl?: string) {
+  const db = await getDb();
+  await db.runAsync(
+    `INSERT OR REPLACE INTO User (id, username, avatarUrl) VALUES (?, ?, ?)`,
+    [userId, username, avatarUrl ?? null],
+  );
 }
