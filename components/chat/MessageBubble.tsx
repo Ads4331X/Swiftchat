@@ -149,7 +149,7 @@ export default function MessageBubble({
   };
 
   return (
-    <Pressable onLongPress={handleLongPress} delayLongPress={400}>
+    <Pressable onLongPress={handleLongPress} delayLongPress={300}>
       <View
         className={`flex-row px-1 py-[1px] ${isMine ? "justify-end" : "justify-start"}`}
       >

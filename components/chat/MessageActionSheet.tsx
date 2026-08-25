@@ -63,10 +63,10 @@ const MENU_PADDING_V = 6;
 const FLOAT_GAP = 14;
 const SCREEN_PAD = 12;
 
-const SPRING_MSG = { damping: 24, stiffness: 320, mass: 0.9 };
-const SPRING_MENU = { damping: 20, stiffness: 280, mass: 0.8 };
-const SPRING_REACT = { damping: 14, stiffness: 300, mass: 0.7 };
-const EXIT_DURATION = 180;
+const SPRING_MSG = { damping: 28, stiffness: 380, mass: 0.8 };
+const SPRING_MENU = { damping: 26, stiffness: 350, mass: 0.7 };
+const SPRING_REACT = { damping: 18, stiffness: 360, mass: 0.6 };
+const EXIT_DURATION = 150;
 const EXIT_EASING = REasing.out(REasing.cubic);
 
 type Layout = {
@@ -207,12 +207,12 @@ export function MessageActionSheet({
     rowTranslateY.value = withSpring(position.pageY, SPRING_MSG);
 
     reactionOpacity.value = withTiming(0, {
-      duration: 120,
+      duration: 100,
       easing: EXIT_EASING,
     });
-    reactionTranslateY.value = withTiming(8, { duration: 120 });
-    menuOpacity.value = withTiming(0, { duration: 120, easing: EXIT_EASING });
-    menuTranslateY.value = withTiming(8, { duration: 120 });
+    reactionTranslateY.value = withTiming(8, { duration: 100 });
+    menuOpacity.value = withTiming(0, { duration: 100, easing: EXIT_EASING });
+    menuTranslateY.value = withTiming(8, { duration: 100 });
 
     overlayOpacity.value = withTiming(
       0,
@@ -249,19 +249,19 @@ export function MessageActionSheet({
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-    overlayOpacity.value = withSpring(1, { damping: 30, stiffness: 200 });
+    overlayOpacity.value = withSpring(1, { damping: 30, stiffness: 280 });
     rowTranslateY.value = withSpring(layout.rowTop, SPRING_MSG);
-    msgScale.value = withSpring(1.04, SPRING_MSG);
+    msgScale.value = withSpring(1.03, SPRING_MSG);
     reactionOpacity.value = withDelay(
-      50,
-      withSpring(1, { damping: 20, stiffness: 200 }),
+      30,
+      withSpring(1, { damping: 24, stiffness: 280 }),
     );
-    reactionTranslateY.value = withDelay(50, withSpring(0, SPRING_REACT));
+    reactionTranslateY.value = withDelay(30, withSpring(0, SPRING_REACT));
     menuOpacity.value = withDelay(
-      90,
-      withSpring(1, { damping: 20, stiffness: 200 }),
+      60,
+      withSpring(1, { damping: 24, stiffness: 280 }),
     );
-    menuTranslateY.value = withDelay(90, withSpring(0, SPRING_MENU));
+    menuTranslateY.value = withDelay(60, withSpring(0, SPRING_MENU));
   }, [
     visible,
     position,
@@ -337,6 +337,7 @@ export function MessageActionSheet({
         intensity={intensity}
         tint="dark"
         style={StyleSheet.absoluteFill}
+        experimentalBlurMethod="dimezisBlurView"
       />
     </Animated.View>
   );

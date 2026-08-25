@@ -175,8 +175,8 @@ export default function UserChat() {
     setMenuPosition(position);
 
     pressProgress.value = withSpring(1, {
-      damping: 22,
-      stiffness: 200,
+      damping: 28,
+      stiffness: 300,
     });
   };
 
@@ -323,8 +323,8 @@ export default function UserChat() {
         onPin={() => {}}
         onDismissStart={() => {
           pressProgress.value = withSpring(0, {
-            damping: 22,
-            stiffness: 200,
+            damping: 28,
+            stiffness: 300,
           });
         }}
         onClose={() => {
