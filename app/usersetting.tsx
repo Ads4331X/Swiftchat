@@ -19,6 +19,8 @@ import { disconnectSocket } from "@/lib/socket";
 import Toast from "react-native-toast-message";
 import UserProfileCard from "@/components/profile/UserProfileCard";
 import SettingsCard from "@/components/profile/SettingsCard";
+import PinModal from "@/components/security/PinModal";
+import { useKeySetup } from "@/hooks/useKeySetup";
 import { BRAND_COLOR } from "@/constants/theme";
 
 type UserDetails = {
@@ -31,6 +33,15 @@ export default function UserSettings() {
   const { colors, dividerColor } = useTheme();
   const [user, setUser] = useState<UserDetails | null>(null);
   const [loading, setLoading] = useState(true);
+  const [pinError, setPinError] = useState<string | null>(null);
+  const {
+    needsPin,
+    pinMode,
+    busy: pinBusy,
+    setUpKeys,
+    initializeWithPin,
+    skip: skipPin,
+  } = useKeySetup();
 
   const refetch = useCallback(async () => {
     setLoading(true);
@@ -148,6 +159,15 @@ export default function UserSettings() {
               onPress={() => router.push("/editaccount")}
             />
             <SettingsCard
+              icon={<Feather name="key" size={20} color={BRAND_COLOR} />}
+              title="Recovery PIN"
+              subtitle="Protect your encrypted messages"
+              onPress={() => {
+                setPinError(null);
+                setUpKeys();
+              }}
+            />
+            <SettingsCard
               icon={<Feather name="log-out" size={20} color={BRAND_COLOR} />}
               title="Log out"
               subtitle="Sign out of this account"
@@ -168,6 +188,23 @@ export default function UserSettings() {
           </View>
         </ScrollView>
       )}
+
+      <PinModal
+        visible={needsPin}
+        mode={pinMode}
+        error={pinError}
+        loading={pinBusy}
+        onSubmit={async (pin) => {
+          const ok = await initializeWithPin(pin);
+          if (!ok) {
+            setPinError("Incorrect PIN. Please try again.");
+            return;
+          }
+          setPinError(null);
+          Toast.show({ type: "success", text1: "Recovery PIN saved" });
+        }}
+        onCancel={skipPin}
+      />
     </SafeAreaView>
   );
 }

@@ -27,7 +27,9 @@ import ChatHeader from "@/components/chat/ChatHeader";
 import ChatInputBar from "@/components/chat/ChatInputBar";
 import MessageList from "@/components/chat/MessageList";
 import { MessageActionSheet } from "@/components/chat/MessageActionSheet";
-import { getOrCreateConversationKey, initializeKeys } from "@/lib/crypto";
+import { getOrCreateConversationKey } from "@/lib/crypto";
+import { useKeySetup } from "@/hooks/useKeySetup";
+import PinModal from "@/components/security/PinModal";
 
 type Position = {
   pageX: number;
@@ -57,6 +59,17 @@ export default function UserChat() {
   const [decryptedConversationKey, setdecryptedConversationKey] = useState<
     Uint8Array | undefined
   >(undefined);
+
+  const {
+    needsPin,
+    pinMode,
+    busy: pinBusy,
+    setUpKeys,
+    initializeWithPin,
+    skip: skipPin,
+  } = useKeySetup();
+  const [pinError, setPinError] = useState<string | null>(null);
+  const [keyReady, setKeyReady] = useState(false);
 
   const {
     messages,
@@ -98,9 +111,15 @@ export default function UserChat() {
     async function loadKey() {
       if (!id || !memberIds) return;
 
-      try {
-        await initializeKeys(); // ensures local keypair exists (mobile fix from earlier)
+      // Ensure local keys exist; if not, we'll show the recovery PIN prompt
+      // (handled separately via the PinModal). Without keys we can't decrypt.
+      const ready = await setUpKeys();
+      if (!ready) return;
+      if (isMounted) setKeyReady(true);
 
+      if (!isMounted) return;
+
+      try {
         const currentUserId = await getCurrentUserId();
         const chatMembers = memberIds
           .split(",")
@@ -133,7 +152,7 @@ export default function UserChat() {
     return () => {
       isMounted = false;
     };
-  }, [id, memberIds]);
+  }, [id, memberIds, keyReady, setUpKeys]);
   /*
    * Background chat recede animation
    */
@@ -382,6 +401,22 @@ export default function UserChat() {
           setSelectedMessage(null);
           setMenuPosition(null);
         }}
+      />
+
+      <PinModal
+        visible={needsPin}
+        mode={pinMode}
+        error={pinError}
+        loading={pinBusy}
+        onSubmit={async (pin) => {
+          const ok = await initializeWithPin(pin);
+          if (!ok) {
+            setPinError("Incorrect PIN. Please try again.");
+            return;
+          }
+          setKeyReady(true);
+        }}
+        onCancel={skipPin}
       />
     </SafeAreaView>
   );

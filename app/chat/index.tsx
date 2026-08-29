@@ -10,6 +10,8 @@ import NewChatSheet from "@/components/chat/new-chat/NewChatSheet";
 import { useFocusEffect } from "expo-router";
 import BottomSheet from "@gorhom/bottom-sheet";
 import useChats from "@/hooks/useChats";
+import { useKeySetup } from "@/hooks/useKeySetup";
+import PinModal from "@/components/security/PinModal";
 
 export default function Chat() {
   const [activeChatCategory, setActiveChatCategory] =
@@ -17,11 +19,21 @@ export default function Chat() {
   const { colors } = useTheme();
   const bottomSheetRef = useRef<BottomSheet>(null);
   const { chats, loading, refetch } = useChats();
+  const {
+    needsPin,
+    pinMode,
+    busy: pinBusy,
+    setUpKeys,
+    initializeWithPin,
+    skip: skipPin,
+  } = useKeySetup();
+  const [pinError, setPinError] = useState<string | null>(null);
 
   useFocusEffect(
     useCallback(() => {
       refetch();
-    }, [refetch]),
+      setUpKeys();
+    }, [refetch, setUpKeys]),
   );
 
   return (
@@ -56,6 +68,23 @@ export default function Chat() {
       </View>
 
       <NewChatSheet bottomSheetRef={bottomSheetRef} onChatCreated={refetch} />
+
+      <PinModal
+        visible={needsPin}
+        mode={pinMode}
+        error={pinError}
+        loading={pinBusy}
+        onSubmit={async (pin) => {
+          const ok = await initializeWithPin(pin);
+          if (!ok) {
+            setPinError("Incorrect PIN. Please try again.");
+            return;
+          }
+          setPinError(null);
+          refetch();
+        }}
+        onCancel={skipPin}
+      />
     </SafeAreaView>
   );
 }

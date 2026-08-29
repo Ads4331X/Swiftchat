@@ -44,7 +44,10 @@
         }
       ],
       "expo-secure-store",
-      ["react-native-libsodium", {}],
+      [
+        "react-native-libsodium",
+        {}
+      ],
       [
         "expo-sqlite",
         {
@@ -61,6 +64,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "4e6ba3bd-d437-4fd1-883d-be80e3b25ff8"
+      }
     }
   }
 }

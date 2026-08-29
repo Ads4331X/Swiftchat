@@ -102,10 +102,11 @@ export default function SignupScreen() {
           contentContainerStyle={{
             flexGrow: 1,
             paddingHorizontal: 22,
-            paddingBottom: 10,
+            paddingBottom: 40,
           }}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
+          automaticallyAdjustKeyboardInsets={Platform.OS !== "ios"}
         >
           {/* logo */}
           <View className="items-center ">

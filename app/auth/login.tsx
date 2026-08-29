@@ -18,7 +18,8 @@ import { Image } from "expo-image";
 import AntDesign from "@expo/vector-icons/AntDesign";
 import { setToken } from "@/lib/secureStorage";
 import { connectSocket } from "@/lib/socket";
-import { initializeKeys } from "@/lib/crypto";
+import { useKeySetup } from "@/hooks/useKeySetup";
+import PinModal from "@/components/security/PinModal";
 
 type FormData = {
   email: string;
@@ -29,6 +30,15 @@ export default function LoginScreen() {
   const theme = useTheme();
   const colors = theme.colors;
   const [showPassword, setShowPassword] = useState(false);
+  const {
+    needsPin,
+    pinMode,
+    busy: pinBusy,
+    setUpKeys,
+    initializeWithPin,
+    skip: skipPin,
+  } = useKeySetup();
+  const [pinError, setPinError] = useState<string | null>(null);
 
   const {
     control,
@@ -40,6 +50,15 @@ export default function LoginScreen() {
       password: "",
     },
   });
+
+  const finishLogin = () => {
+    Toast.show({
+      type: "success",
+      text1: "Welcome back!",
+      text2: "You're logged in",
+    });
+    router.replace("/chat");
+  };
 
   const onSubmit = async (data: FormData) => {
     try {
@@ -57,14 +76,17 @@ export default function LoginScreen() {
       return; // stop here — actual login failed, don't proceed
     }
 
-    // Login succeeded. Everything below is best-effort setup —
-    // it should never re-label itself as a "login failure".
+    // Login succeeded. Check whether keys need to be (re)established. If a
+    // recovery PIN is needed, prompt for it; only navigate once handled.
     try {
-      await initializeKeys();
+      const ready = await setUpKeys();
+      if (!ready) {
+        return; // PinModal is now visible; it will navigate on submit/skip.
+      }
     } catch (err) {
-      console.warn("Key initialization failed, will retry later:", err);
-      // optional: queue a retry, or silently continue —
-      // the user is still logged in, keys can init later
+      console.warn("Key setup failed:", err);
+      finishLogin();
+      return;
     }
 
     try {
@@ -73,13 +95,8 @@ export default function LoginScreen() {
       console.warn("Socket connection failed, will retry:", err);
     }
 
-    Toast.show({
-      type: "success",
-      text1: "Welcome back!",
-      text2: "You're logged in",
-    });
-
-    router.replace("/chat");
+    finishLogin();
+    return;
   };
   const {
     subtleText,
@@ -333,6 +350,29 @@ export default function LoginScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <PinModal
+        visible={needsPin}
+        mode={pinMode}
+        error={pinError}
+        loading={pinBusy}
+        onSubmit={async (pin) => {
+          const ok = await initializeWithPin(pin);
+          if (!ok) {
+            setPinError("Incorrect PIN. Please try again.");
+            return;
+          }
+          await connectSocket();
+          finishLogin();
+        }}
+        onCancel={() => {
+          skipPin();
+          setTimeout(() => {
+            connectSocket().catch(() => {});
+            finishLogin();
+          }, 300);
+        }}
+      />
     </SafeAreaView>
   );
 }

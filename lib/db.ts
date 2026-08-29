@@ -323,6 +323,21 @@ export async function deleteConversation({
   await db.runAsync(`DELETE FROM Conversation WHERE id = ?`, [conversationId]);
 }
 
+/**
+ * Wipes every local cache table. Call after a fresh login / PIN recovery so
+ * stale decrypted previews (left behind by a broken reinstall) never block
+ * correct re-decryption — the app re-fetches and re-decrypts from the server.
+ */
+export async function clearAllLocalData() {
+  const db = await getDb();
+  await db.execAsync(`
+    DELETE FROM Message;
+    DELETE FROM Conversation;
+    DELETE FROM PendingMessage;
+    DELETE FROM User;
+  `);
+}
+
 type ServerConversation = {
   id: number;
   conversationId?: number;
