@@ -1,5 +1,6 @@
 import { getToken } from "./secureStorage";
 import { io, Socket as SocketType } from "socket.io-client";
+import { getBackendUrl } from "./api";
 
 let Socket: SocketType | null = null;
 
@@ -13,7 +14,7 @@ export async function connectSocket() {
     return;
   }
 
-  Socket = io(process.env.EXPO_PUBLIC_BACKEND_URL, {
+  Socket = io(getBackendUrl(), {
     reconnectionDelayMax: 10000,
     auth: {
       token,

@@ -26,6 +26,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 
 import { useEffect, useMemo } from "react";
+import { startPendingSync } from "@/lib/pendingSync";
 
 function ToastSafeAreaWrapper() {
   const insets = useSafeAreaInsets();
@@ -48,6 +49,10 @@ function ToastSafeAreaWrapper() {
 
 function AppNavigator() {
   const { isDark, colors } = useTheme();
+
+  useEffect(() => {
+    startPendingSync();
+  }, []);
 
   useEffect(() => {
     SystemUI.setBackgroundColorAsync(colors.background);

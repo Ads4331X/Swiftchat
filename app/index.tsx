@@ -61,9 +61,9 @@ export default function HomeScreen() {
           error={pinError}
           loading={pinBusy}
           onSubmit={async (pin) => {
-            const ok = await initializeWithPin(pin);
-            if (!ok) {
-              setPinError("Incorrect PIN. Please try again.");
+            const res = await initializeWithPin(pin);
+            if (!res.ok) {
+              setPinError(res.error || "Incorrect PIN. Please try again.");
               return;
             }
             setPinError(null);

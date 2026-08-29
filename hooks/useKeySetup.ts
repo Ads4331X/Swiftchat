@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { getPrivateKey, getPublicKey } from "@/lib/secureStorage";
 import { clearAllLocalData } from "@/lib/db";
+import { getBackendUrl } from "@/lib/api";
 import {
   hasKeyBackup,
   initializeKeys,
@@ -57,9 +58,18 @@ export function useKeySetup() {
       // block correct decryption — wipe it so the app re-fetches from server.
       await clearAllLocalData();
       setNeedsPin(false);
-      return true;
-    } catch {
-      return false; // wrong PIN — caller keeps the modal open for retry
+      return { ok: true };
+    } catch (err: any) {
+      if (err?.isAxiosError || err?.message?.includes("Network Error")) {
+        return {
+          ok: false,
+          error: "Network Error: Cannot connect to server at " + getBackendUrl(),
+        };
+      }
+      return {
+        ok: false,
+        error: err?.message || "Incorrect PIN. Please try again.",
+      };
     } finally {
       setBusy(false);
     }

@@ -19,6 +19,7 @@ import {
 } from "@/lib/socket";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNetInfo } from "@react-native-community/netinfo";
+import { flushPendingMessages, onPendingFlushed } from "@/lib/pendingSync";
 
 export type Message = {
   id: number;
@@ -64,64 +65,53 @@ export default function useChatMessages(
     );
   };
 
-  const { isConnected } = useNetInfo();
+  const { isConnected, isInternetReachable } = useNetInfo();
 
+  // Reconcile the in-memory list with what actually exists on the server/Db
+  // now. Optimistic entries (negative id) that were still pending stay
+  // visible as "Sending…"; everything confirmed by the flush replaces them.
+  const reconcileMessages = useCallback(async () => {
+    if (!decryptedConversationKey) return;
+
+    const cache = await readMsgsPaginated({
+      conversationId: Number(id),
+      limit: 200,
+    });
+    const pending = await getPendingMessages();
+    const pendingIds = new Set(pending.map((p) => p.id));
+
+    const confirmed = await decryptChatMessages({
+      serverMessages: cache as Message[],
+      decryptedConversationKey,
+    });
+
+    setMessages((prev) => {
+      const confirmedIds = new Set(confirmed.map((m) => m.id));
+      const stillPending = prev.filter(
+        (m) => m.id < 0 && pendingIds.has(m.id) && !confirmedIds.has(m.id),
+      );
+      return [...confirmed, ...stillPending];
+    });
+  }, [id, decryptedConversationKey]);
+
+  // Flush offline (pending) messages through the global shared flusher so we
+  // never double-post with the background sync. Reconcile our list whenever a
+  // flush lands on this conversation.
   useEffect(() => {
-    if (isConnected) {
-      const pendingMsgs = async () => {
-        const pendingMessages = await getPendingMessages();
-        for (let pendingMessage of pendingMessages) {
-          try {
-            const result = await api.post("/api/conversations/messages", {
-              messageText: pendingMessage.text,
-              conversationId: pendingMessage.conversationId,
-              nonce: pendingMessage.nonce,
-            });
+    const unsubscribe = onPendingFlushed(({ conversationIds }) => {
+      if (conversationIds.includes(Number(id))) {
+        reconcileMessages().catch(() => {});
+      }
+    });
 
-            await saveMessage({
-              messageId: result.data.id,
-              message: result.data.text,
-              sentAt: result.data.sentAt,
-              SenderId: result.data.senderId,
-              ConversationId: result.data.conversationId,
-              nonce: result.data.nonce,
-            });
-
-            await deletePendingMessage({ messageId: pendingMessage.id });
-
-            if (
-              Number(pendingMessage.conversationId) === Number(id) &&
-              decryptedConversationKey
-            ) {
-              const [confirmedMessage] = await decryptChatMessages({
-                serverMessages: [result.data],
-                decryptedConversationKey,
-              });
-
-              setMessages((prev) => {
-                const withoutOptimistic = prev.filter(
-                  (m) => m.id !== pendingMessage.id,
-                );
-                const alreadyPresent = withoutOptimistic.some(
-                  (m) => m.id === confirmedMessage.id,
-                );
-                return alreadyPresent
-                  ? withoutOptimistic
-                  : [...withoutOptimistic, confirmedMessage];
-              });
-            }
-          } catch (error) {
-            console.error(
-              "Failed to sync pending message:",
-              pendingMessage.id,
-              error,
-            );
-          }
-        }
-      };
-      pendingMsgs();
+    const online =
+      isConnected === true || isInternetReachable !== false || isInternetReachable == null;
+    if (online) {
+      flushPendingMessages().then(reconcileMessages).catch(() => {});
     }
-  }, [isConnected, id, decryptedConversationKey]);
+
+    return unsubscribe;
+  }, [isConnected, isInternetReachable, id, reconcileMessages]);
   useEffect(() => {
     if (!id) return;
     let active = true;

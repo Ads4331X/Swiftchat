@@ -7,6 +7,9 @@ import {
   TextInput,
   View,
   Platform,
+  KeyboardAvoidingView,
+  ScrollView,
+  TouchableOpacity,
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useTheme } from "@/constants/theme-provider";
@@ -101,74 +104,89 @@ export default function PinModal({
       animationType="fade"
       onRequestClose={confirmCancel}
     >
-      <View className="flex-1 items-center justify-center px-6 bg-black/50">
-        <View
-          className="w-full max-w-sm rounded-3xl p-6"
-          style={{
-            backgroundColor: colors.background,
-            shadowColor: "#000",
-            shadowOpacity: 0.2,
-            shadowRadius: 24,
-            shadowOffset: { width: 0, height: 10 },
-            elevation: 12,
-          }}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        className="flex-1 bg-black/50"
+      >
+        <ScrollView
+          contentContainerStyle={{ flexGrow: 1, justifyContent: "center" }}
+          keyboardShouldPersistTaps="handled"
+          className="px-6"
         >
-          <Text
-            style={{ color: colors.text }}
-            className="text-xl font-bold text-center mb-2"
-          >
-            {TITLES[mode]}
-          </Text>
-          <Text
-            style={{ color: subtleText }}
-            className="text-sm text-center mb-6 leading-5"
-          >
-            {SUBTITLES[mode]}
-          </Text>
-
-          {error ? (
-            <Text className="text-[#EF4444] text-sm text-center mb-4">
-              {error}
-            </Text>
-          ) : null}
-
-          <TextInput
-            ref={inputRef}
-            value={digits}
-            onChangeText={handleChange}
-            keyboardType="number-pad"
-            secureTextEntry
-            maxLength={PIN_LENGTH}
-            autoFocus
-            caretHidden
-            style={{ position: "absolute", width: 1, height: 1, opacity: 0 }}
-          />
-
-          <View className="flex-row justify-between">{boxes}</View>
-
-          <Pressable
-            onPress={() => onSubmit(digits)}
-            disabled={digits.length !== PIN_LENGTH || loading}
-            className="rounded-2xl py-4 items-center mt-6 active:opacity-90"
+          <View
+            className="w-full max-w-sm rounded-3xl p-6 self-center my-auto"
             style={{
-              backgroundColor: BRAND_COLOR,
-              opacity: digits.length === PIN_LENGTH && !loading ? 1 : 0.4,
+              backgroundColor: colors.background,
+              shadowColor: "#000",
+              shadowOpacity: 0.2,
+              shadowRadius: 24,
+              shadowOffset: { width: 0, height: 10 },
+              elevation: 12,
             }}
           >
-            <Text className="text-white text-lg font-semibold">
-              {loading ? "Verifying..." : mode === "create" ? "Save PIN" : "Unlock"}
+            <Text
+              style={{ color: colors.text }}
+              className="text-xl font-bold text-center mb-2"
+            >
+              {TITLES[mode]}
             </Text>
-          </Pressable>
+            <Text
+              style={{ color: subtleText }}
+              className="text-sm text-center mb-6 leading-5"
+            >
+              {SUBTITLES[mode]}
+            </Text>
 
-          <Pressable
-            onPress={confirmCancel}
-            hitSlop={{ top: 12, bottom: 12 }}
-            className="py-3 items-center"
-          >
-            <Text className="text-[#EF4444] font-medium">Cancel</Text>
-          </Pressable>
-        </View>
-      </View>
+            {error ? (
+              <Text className="text-[#EF4444] text-sm text-center mb-4 font-medium px-2">
+                {error}
+              </Text>
+            ) : null}
+
+            <TextInput
+              ref={inputRef}
+              value={digits}
+              onChangeText={handleChange}
+              keyboardType="number-pad"
+              secureTextEntry
+              maxLength={PIN_LENGTH}
+              autoFocus
+              caretHidden
+              style={{ position: "absolute", width: 1, height: 1, opacity: 0 }}
+            />
+
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={() => inputRef.current?.focus()}
+              className="flex-row justify-between my-2"
+            >
+              {boxes}
+            </TouchableOpacity>
+
+            <Pressable
+              onPress={() => onSubmit(digits)}
+              disabled={digits.length !== PIN_LENGTH || loading}
+              className="rounded-2xl py-4 items-center mt-6 active:opacity-90"
+              style={{
+                backgroundColor: BRAND_COLOR,
+                opacity: digits.length === PIN_LENGTH && !loading ? 1 : 0.4,
+              }}
+            >
+              <Text className="text-white text-lg font-semibold">
+                {loading ? "Verifying..." : mode === "create" ? "Save PIN" : "Unlock"}
+              </Text>
+            </Pressable>
+
+            <Pressable
+              onPress={confirmCancel}
+              hitSlop={{ top: 12, bottom: 12 }}
+              className="py-3 items-center"
+            >
+              <Text className="text-[#EF4444] font-medium">Cancel</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

@@ -2,7 +2,6 @@ import {
   Alert,
   Dimensions,
   Pressable,
-  ScrollView,
   Text,
   View,
   StyleSheet,
@@ -75,7 +74,6 @@ type Layout = {
   reactionLeft: number;
   menuTop: number;
   menuLeft: number;
-  maxBubbleHeight: number;
 };
 
 function computeLayout(p: Position, isMine: boolean): Layout {
@@ -91,14 +89,9 @@ function computeLayout(p: Position, isMine: boolean): Layout {
     (REACTIONS.length - 1) * REACTION_GAP +
     REACTION_BAR_PADDING_H * 2;
 
-  const availableHeight = SCREEN.height - SCREEN_PAD * 2;
-  const fixedChrome = REACTION_BAR_HEIGHT + FLOAT_GAP * 2 + menuHeight;
-
-  // Never let the bubble claim more than the screen minus reaction bar,
-  // menu, and gaps — long messages scroll internally instead of pushing
-  // everything else off-screen.
-  const maxBubbleHeight = Math.max(80, availableHeight - fixedChrome);
-  const effectiveHeight = Math.min(p.height * 1.08, maxBubbleHeight);
+  // Position the menu relative to the message's NATURAL height so the
+  // bubble keeps its exact size/padding and never gets clamped or shrunk.
+  const effectiveHeight = Math.max(80, p.height);
 
   const groupHeight =
     REACTION_BAR_HEIGHT + FLOAT_GAP + effectiveHeight + FLOAT_GAP + menuHeight;
@@ -139,7 +132,6 @@ function computeLayout(p: Position, isMine: boolean): Layout {
     reactionLeft,
     menuTop,
     menuLeft,
-    maxBubbleHeight,
   };
 }
 
@@ -251,7 +243,7 @@ export function MessageActionSheet({
 
     overlayOpacity.value = withSpring(1, { damping: 30, stiffness: 280 });
     rowTranslateY.value = withSpring(layout.rowTop, SPRING_MSG);
-    msgScale.value = withSpring(1.03, SPRING_MSG);
+    msgScale.value = 1;
     reactionOpacity.value = withDelay(
       30,
       withSpring(1, { damping: 24, stiffness: 280 }),
@@ -382,7 +374,6 @@ export function MessageActionSheet({
                 style={[
                   {
                     maxWidth: "80%",
-                    maxHeight: layout.maxBubbleHeight,
                     alignSelf: isMine ? "flex-end" : "flex-start",
                     shadowColor: "#000",
                     shadowOpacity: 0.3,
@@ -393,17 +384,12 @@ export function MessageActionSheet({
                   bubbleScaleStyle,
                 ]}
               >
-                <ScrollView
-                  bounces={false}
-                  showsVerticalScrollIndicator={false}
-                >
-                  <MessageBubbleContent
-                    text={message}
-                    isMine={isMine}
-                    textColor={textColor}
-                    bubbleColor={bubbleColor}
-                  />
-                </ScrollView>
+                <MessageBubbleContent
+                  text={message}
+                  isMine={isMine}
+                  textColor={textColor}
+                  bubbleColor={bubbleColor}
+                />
               </Animated.View>
             </View>
           </Animated.View>

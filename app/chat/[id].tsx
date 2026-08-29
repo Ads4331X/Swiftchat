@@ -216,20 +216,21 @@ export default function UserChat() {
       return;
     }
 
+    const text = draft;
+    setDraft("");
     setSending(true);
     try {
       if (editingMessageId) {
-        await editMessage(editingMessageId, draft);
+        await editMessage(editingMessageId, text);
         setEditingMessageId(null);
       } else {
-        await sendMessage(draft);
+        await sendMessage(text);
       }
 
       emitStopTyping(Number(id));
-      setDraft("");
 
       // Force-scroll to bottom on send, WhatsApp-style — regardless of
-      // where the user currently is scrolled to.
+      // where the user is currently scrolled to.
       scrollToEndRef.current?.();
     } finally {
       setSending(false);
