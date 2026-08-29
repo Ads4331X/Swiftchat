@@ -207,50 +207,57 @@ export default function useChatMessages(
       );
 
       const getMessages = async () => {
+        if (!decryptedConversationKey) {
+          setLoading(true);
+          return;
+        }
+
         setLoading(true);
         try {
-          // 1. Load from local cache first (instant display)
-          let cache: Message[] = [];
-          let decryptedCache: Message[] = [];
+          // 1. Load from local cache first (instant display < 10ms)
           try {
-            cache = (await readMsgsPaginated({
+            const cache = (await readMsgsPaginated({
               conversationId: Number(id),
               limit: 200,
             })) as Message[];
 
-            if (!decryptedConversationKey) return;
-            decryptedCache = await decryptChatMessages({
-              serverMessages: cache,
-              decryptedConversationKey,
-            });
+            if (cache.length > 0) {
+              const decryptedCache = await decryptChatMessages({
+                serverMessages: cache,
+                decryptedConversationKey,
+              });
+
+              if (active && decryptedCache.length > 0) {
+                setMessages(decryptedCache);
+                setLoading(false); // <--- Instant WhatsApp-style local rendering!
+              }
+            }
           } catch {
             // cache unavailable
           }
-          if (active && decryptedCache.length > 0) {
-            setMessages(decryptedCache);
-            setLoading(false);
-          }
 
-          // 2. Fetch latest messages from server
+          // 2. Fetch latest messages from server in background
           const response = await api.get(
             `/api/conversations/messages/${id}?limit=${PAGE_SIZE}`,
           );
           if (!active || !decryptedConversationKey) return;
           const serverMessages: Message[] = response.data;
-          if (!decryptedConversationKey) return;
           const decryptedServerMessages = await decryptChatMessages({
             serverMessages,
             decryptedConversationKey,
           });
-          // 3. Merge: replace local with server data (server is authoritive for latest)
-          setMessages((prev) => {
-            const serverIds = new Set(decryptedServerMessages.map((m) => m.id));
-            // Keep any local-only messages (optimistic sends not yet confirmed)
-            const localOnly = prev.filter(
-              (m) => m.id < 0 || !serverIds.has(m.id),
-            );
-            return [...localOnly, ...decryptedServerMessages];
-          });
+
+          // 3. Merge: replace local with server data (server is authoritative for latest)
+          if (active) {
+            setMessages((prev) => {
+              const serverIds = new Set(decryptedServerMessages.map((m) => m.id));
+              const localOnly = prev.filter(
+                (m) => m.id < 0 || !serverIds.has(m.id),
+              );
+              return [...localOnly, ...decryptedServerMessages];
+            });
+            setLoading(false);
+          }
 
           // 4. Save server messages to local cache
           serverMessages.forEach((msg: Message) => {
@@ -264,12 +271,13 @@ export default function useChatMessages(
             }).catch(() => {});
           });
 
-          // 5. If we got fewer than PAGE_SIZE, there's nothing older to load
           if (decryptedServerMessages.length < PAGE_SIZE) {
             setHasMore(false);
           }
 
           fetchedServerRef.current = true;
+        } catch (err) {
+          console.warn("Error fetching server messages:", err);
         } finally {
           if (active) {
             setLoading(false);
@@ -288,6 +296,8 @@ export default function useChatMessages(
 
     let cleanupFn: (() => void) | void;
 
+    const hasKey = Boolean(decryptedConversationKey);
+
     init().then((c) => {
       if (typeof c === "function") cleanupFn = c as () => void;
     });
@@ -296,7 +306,7 @@ export default function useChatMessages(
       active = false;
       if (cleanupFn) cleanupFn();
     };
-  }, [id, decryptedConversationKey]);
+  }, [id, Boolean(decryptedConversationKey)]);
 
   // Load older messages (infinite scroll — called when user scrolls to top)
   const loadMore = useCallback(async () => {

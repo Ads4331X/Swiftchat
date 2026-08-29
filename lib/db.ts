@@ -8,10 +8,10 @@ const isWeb = Platform.OS === "web";
 // Fast Refresh / hot-reload that left the old worker's handle behind) throws
 // `NoModificationAllowedError`. Retrying with a small backoff lets the old
 // worker release its handle before we try again.
-let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
+let dbPromise: Promise<SQLite.SQLiteDatabase | null> | null = null;
 
-const SCHEMA = `
-  CREATE TABLE IF NOT EXISTS Message (
+const STATEMENTS = [
+  `CREATE TABLE IF NOT EXISTS Message (
     id INTEGER PRIMARY KEY,
     conversationId INTEGER NOT NULL,
     senderId INTEGER NOT NULL,
@@ -19,18 +19,16 @@ const SCHEMA = `
     nonce TEXT NOT NULL,
     sentAt TEXT NOT NULL,
     editedAt TEXT
-  );
-
-  CREATE TABLE IF NOT EXISTS Conversation (
+  );`,
+  `CREATE TABLE IF NOT EXISTS Conversation (
     id INTEGER PRIMARY KEY,
     otherUserId INTEGER,
     otherUsername TEXT,
     otherAvatarUrl TEXT,
     lastMessageText TEXT,
     lastMessageSentAt TEXT
-  );
-
-  CREATE TABLE IF NOT EXISTS PendingMessage (
+  );`,
+  `CREATE TABLE IF NOT EXISTS PendingMessage (
     id INTEGER PRIMARY KEY,
     conversationId INTEGER NOT NULL,
     senderId INTEGER NOT NULL,
@@ -38,29 +36,31 @@ const SCHEMA = `
     nonce TEXT NOT NULL,
     sentAt TEXT NOT NULL,
     editedAt TEXT
-  );
-
-  CREATE TABLE IF NOT EXISTS User (
+  );`,
+  `CREATE TABLE IF NOT EXISTS User (
     id INTEGER PRIMARY KEY,
     username TEXT NOT NULL,
     avatarUrl TEXT
-  )
-`;
+  );`,
+];
 
-async function openDbOnce(): Promise<SQLite.SQLiteDatabase> {
-  const maxAttempts = isWeb ? 5 : 1;
+async function openDbOnce(): Promise<SQLite.SQLiteDatabase | null> {
+  const maxAttempts = isWeb ? 3 : 1;
   let lastError: unknown;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       const database = await SQLite.openDatabaseAsync("Message");
-      // WAL needs shared-memory support that wa-sqlite's OPFS adapter only
-      // gets with exclusive locking, and it adds extra files to the OPFS
-      // pool (which has a hard capacity). On web the default journal mode is
-      // plenty for a local cache, so skip WAL there.
-      const pragmas = isWeb ? "" : "PRAGMA journal_mode = WAL;";
-      await database.execAsync(`${pragmas}\n${SCHEMA}`);
-      // Migration: add otherAvatarUrl if missing (existing DBs)
+      if (!isWeb) {
+        try {
+          await database.execAsync("PRAGMA journal_mode = WAL;");
+        } catch {}
+      }
+
+      for (const stmt of STATEMENTS) {
+        await database.execAsync(stmt);
+      }
+
       try {
         await database.execAsync(
           `ALTER TABLE Conversation ADD COLUMN otherUserId INTEGER;`,
@@ -68,33 +68,35 @@ async function openDbOnce(): Promise<SQLite.SQLiteDatabase> {
       } catch {}
       try {
         await database.execAsync(
-          `ALTER TABLE Conversation ADD COLUMN otherAvatarUrl TEXT`,
+          `ALTER TABLE Conversation ADD COLUMN otherAvatarUrl TEXT;`,
         );
-      } catch {
-        // column already exists — ignore
-      }
+      } catch {}
       try {
-        await database.execAsync(`ALTER TABLE Message ADD COLUMN nonce TEXT`);
-      } catch {
-        // column already exists — ignore
-      }
+        await database.execAsync(`ALTER TABLE Message ADD COLUMN nonce TEXT;`);
+      } catch {}
       console.log("SQLite database initialized");
       return database;
     } catch (error) {
       lastError = error;
       if (!isWeb || attempt >= maxAttempts - 1) break;
-      await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+      await new Promise((resolve) => setTimeout(resolve, 150 * (attempt + 1)));
     }
+  }
+
+  if (isWeb) {
+    console.warn("Web SQLite cache disabled — falling back to API data", lastError);
+    return null;
   }
 
   console.error("SQLite database failed to open", lastError);
   throw lastError;
 }
 
-function getDb(): Promise<SQLite.SQLiteDatabase> {
+function getDb(): Promise<SQLite.SQLiteDatabase | null> {
   if (!dbPromise) {
     dbPromise = openDbOnce().catch((error) => {
       dbPromise = null;
+      if (isWeb) return null;
       throw error;
     });
   }
@@ -118,14 +120,18 @@ export async function saveMessage({
   messageId,
   nonce,
 }: SaveMsgParams) {
-  const db = await getDb();
-  await db.runAsync(
-    `INSERT OR REPLACE INTO Message (id, text, sentAt, senderId, conversationId , nonce) VALUES (?, ?, ?, ?, ? , ?)`,
-    [messageId, message, sentAt, SenderId, ConversationId, nonce],
-  );
+  try {
+    const db = await getDb();
+    if (!db) return;
+    await db.runAsync(
+      `INSERT OR REPLACE INTO Message (id, text, sentAt, senderId, conversationId , nonce) VALUES (?, ?, ?, ?, ? , ?)`,
+      [messageId, message, sentAt, SenderId, ConversationId, nonce],
+    );
+  } catch (err) {
+    console.warn("saveMessage skipped:", err);
+  }
 }
 
-// update msg locally
 type UpdateMsg = {
   messageId: number;
   editedAt: string;
@@ -139,42 +145,53 @@ export async function updateMsg({
   message,
   nonce,
 }: UpdateMsg) {
-  const db = await getDb();
-  await db.runAsync(
-    `UPDATE Message SET text = ?, editedAt = ? , nonce = ? WHERE id = ?`,
-    [message, editedAt, nonce, messageId],
-  );
+  try {
+    const db = await getDb();
+    if (!db) return;
+    await db.runAsync(
+      `UPDATE Message SET text = ?, editedAt = ? , nonce = ? WHERE id = ?`,
+      [message, editedAt, nonce, messageId],
+    );
+  } catch (err) {
+    console.warn("updateMsg skipped:", err);
+  }
 }
 
-// delete message locally
 type DeleteMsg = {
   messageId: number;
 };
 
 export async function deleteMsg({ messageId }: DeleteMsg) {
-  const db = await getDb();
-  await db.runAsync(`DELETE FROM Message WHERE id = ?`, [messageId]);
+  try {
+    const db = await getDb();
+    if (!db) return;
+    await db.runAsync(`DELETE FROM Message WHERE id = ?`, [messageId]);
+  } catch (err) {
+    console.warn("deleteMsg skipped:", err);
+  }
 }
 
-// read all messages for a conversation
 type ReadMsgs = {
   conversationId: number;
 };
 
 export async function readMsgs({ conversationId }: ReadMsgs) {
-  const db = await getDb();
-  const messages = await db.getAllAsync(
-    `SELECT * FROM Message WHERE conversationId = ? ORDER BY sentAt ASC`,
-    [conversationId],
-  );
-
-  return messages;
+  try {
+    const db = await getDb();
+    if (!db) return [];
+    return await db.getAllAsync(
+      `SELECT * FROM Message WHERE conversationId = ? ORDER BY sentAt ASC`,
+      [conversationId],
+    );
+  } catch (err) {
+    console.warn("readMsgs skipped:", err);
+    return [];
+  }
 }
 
-// read messages paginated (for infinite scroll — fetch older messages)
 type ReadMsgsPaginated = {
   conversationId: number;
-  before?: string; // sentAt cursor — fetch messages older than this
+  before?: string;
   limit?: number;
 };
 
@@ -183,20 +200,25 @@ export async function readMsgsPaginated({
   before,
   limit = 50,
 }: ReadMsgsPaginated) {
-  const db = await getDb();
-  if (before) {
-    return db.getAllAsync(
-      `SELECT * FROM Message WHERE conversationId = ? AND sentAt < ? ORDER BY sentAt ASC LIMIT ?`,
-      [conversationId, before, limit],
+  try {
+    const db = await getDb();
+    if (!db) return [];
+    if (before) {
+      return await db.getAllAsync(
+        `SELECT * FROM Message WHERE conversationId = ? AND sentAt < ? ORDER BY sentAt ASC LIMIT ?`,
+        [conversationId, before, limit],
+      );
+    }
+    return await db.getAllAsync(
+      `SELECT * FROM Message WHERE conversationId = ? ORDER BY sentAt ASC LIMIT ?`,
+      [conversationId, limit],
     );
+  } catch (err) {
+    console.warn("readMsgsPaginated skipped:", err);
+    return [];
   }
-  return db.getAllAsync(
-    `SELECT * FROM Message WHERE conversationId = ? ORDER BY sentAt ASC LIMIT ?`,
-    [conversationId, limit],
-  );
 }
 
-// save conversation locally
 type SaveConversationParams = {
   id: number;
   otherUserId: number;
@@ -214,23 +236,25 @@ export async function saveConversation({
   lastMessageText,
   lastMessageSentAt,
 }: SaveConversationParams) {
-  const db = await getDb();
-  await db.runAsync(
-    `INSERT OR REPLACE INTO Conversation (id, otherUserId, otherUsername, otherAvatarUrl, lastMessageText, lastMessageSentAt) VALUES (?, ?, ?, ?, ? , ?)`,
-    [
-      id,
-      otherUserId,
-      otherUsername,
-      otherAvatarUrl ?? "",
-      lastMessageText,
-      lastMessageSentAt,
-    ],
-  );
+  try {
+    const db = await getDb();
+    if (!db) return;
+    await db.runAsync(
+      `INSERT OR REPLACE INTO Conversation (id, otherUserId, otherUsername, otherAvatarUrl, lastMessageText, lastMessageSentAt) VALUES (?, ?, ?, ?, ? , ?)`,
+      [
+        id,
+        otherUserId,
+        otherUsername,
+        otherAvatarUrl ?? "",
+        lastMessageText,
+        lastMessageSentAt,
+      ],
+    );
+  } catch (err) {
+    console.warn("saveConversation skipped:", err);
+  }
 }
 
-// Update only the last-message preview of a cached conversation so the list
-// stays in sync with incoming/sent messages without needing the full member
-// data (unlike saveConversation).
 export async function updateConversationPreview({
   id,
   lastMessageText,
@@ -240,14 +264,18 @@ export async function updateConversationPreview({
   lastMessageText: string;
   lastMessageSentAt: string;
 }) {
-  const db = await getDb();
-  await db.runAsync(
-    `UPDATE Conversation SET lastMessageText = ?, lastMessageSentAt = ? WHERE id = ?`,
-    [lastMessageText, lastMessageSentAt, id],
-  );
+  try {
+    const db = await getDb();
+    if (!db) return;
+    await db.runAsync(
+      `UPDATE Conversation SET lastMessageText = ?, lastMessageSentAt = ? WHERE id = ?`,
+      [lastMessageText, lastMessageSentAt, id],
+    );
+  } catch (err) {
+    console.warn("updateConversationPreview skipped:", err);
+  }
 }
 
-// read all cached conversations
 export type CachedConversation = {
   id: number;
   members: { id: number; username: string; avatar?: string }[];
@@ -261,47 +289,51 @@ export type CachedConversation = {
 };
 
 export async function getConversations(): Promise<CachedConversation[]> {
-  const db = await getDb();
+  try {
+    const db = await getDb();
+    if (!db) return [];
 
-  const rows = await db.getAllAsync<{
-    id: number;
-    otherUserId: number | null;
-    otherUsername: string | null;
-    otherAvatarUrl: string | null;
-    lastMessageText: string | null;
-    lastMessageSentAt: string | null;
-  }>(`SELECT * FROM Conversation ORDER BY lastMessageSentAt DESC`);
+    const rows = await db.getAllAsync<{
+      id: number;
+      otherUserId: number | null;
+      otherUsername: string | null;
+      otherAvatarUrl: string | null;
+      lastMessageText: string | null;
+      lastMessageSentAt: string | null;
+    }>(`SELECT * FROM Conversation ORDER BY lastMessageSentAt DESC`);
 
-  // Filter out rows with no valid user data — these are ghost entries caused
-  // by a failed sync and would show as "Unknown" in the UI when offline.
-  return rows
-    .filter(
-      (c) =>
-        c.otherUserId !== null &&
-        c.otherUserId > 0 &&
-        c.otherUsername !== null &&
-        c.otherUsername.trim() !== "",
-    )
-    .map((c) => ({
-      id: c.id,
+    return rows
+      .filter(
+        (c) =>
+          c.otherUserId !== null &&
+          c.otherUserId > 0 &&
+          c.otherUsername !== null &&
+          c.otherUsername.trim() !== "",
+      )
+      .map((c) => ({
+        id: c.id,
 
-      members: [
-        {
-          id: c.otherUserId ?? -1,
-          username: c.otherUsername ?? "Unknown",
-          avatar: c.otherAvatarUrl ?? undefined,
-        },
-      ],
+        members: [
+          {
+            id: c.otherUserId ?? -1,
+            username: c.otherUsername ?? "Unknown",
+            avatar: c.otherAvatarUrl ?? undefined,
+          },
+        ],
 
-      lastMessage: c.lastMessageText
-        ? {
-            id: -1,
-            text: c.lastMessageText,
-            sentAt: c.lastMessageSentAt ?? "",
-            senderId: -1,
-          }
-        : null,
-    }));
+        lastMessage: c.lastMessageText
+          ? {
+              id: -1,
+              text: c.lastMessageText,
+              sentAt: c.lastMessageSentAt ?? "",
+              senderId: -1,
+            }
+          : null,
+      }));
+  } catch (err) {
+    console.warn("getConversations skipped:", err);
+    return [];
+  }
 }
 
 type Chat = {
@@ -318,24 +350,27 @@ export async function deleteConversation({
 }: {
   conversationId: number;
 }) {
-  const db = await getDb();
+  try {
+    const db = await getDb();
+    if (!db) return;
 
-  await db.runAsync(`DELETE FROM Conversation WHERE id = ?`, [conversationId]);
+    await db.runAsync(`DELETE FROM Conversation WHERE id = ?`, [conversationId]);
+  } catch (err) {
+    console.warn("deleteConversation skipped:", err);
+  }
 }
 
-/**
- * Wipes every local cache table. Call after a fresh login / PIN recovery so
- * stale decrypted previews (left behind by a broken reinstall) never block
- * correct re-decryption — the app re-fetches and re-decrypts from the server.
- */
 export async function clearAllLocalData() {
-  const db = await getDb();
-  await db.execAsync(`
-    DELETE FROM Message;
-    DELETE FROM Conversation;
-    DELETE FROM PendingMessage;
-    DELETE FROM User;
-  `);
+  try {
+    const db = await getDb();
+    if (!db) return;
+    await db.execAsync("DELETE FROM Message;");
+    await db.execAsync("DELETE FROM Conversation;");
+    await db.execAsync("DELETE FROM PendingMessage;");
+    await db.execAsync("DELETE FROM User;");
+  } catch (err) {
+    console.warn("clearAllLocalData skipped:", err);
+  }
 }
 
 type ServerConversation = {
@@ -355,43 +390,45 @@ export async function syncConversationsWithServer({
 }: {
   serverConversations: ServerConversation[];
 }) {
-  const localConversations = await getConversations();
-  const myId = await (await import("@/lib/auth")).getCurrentUserId();
+  try {
+    const localConversations = await getConversations();
+    const myId = await (await import("@/lib/auth")).getCurrentUserId();
 
-  const serverConversationIds = new Set<number>();
+    const serverConversationIds = new Set<number>();
 
-  for (const conv of serverConversations) {
-    const convId = conv.conversationId ?? conv.id;
-    serverConversationIds.add(convId);
+    for (const conv of serverConversations) {
+      const convId = conv.conversationId ?? conv.id;
+      serverConversationIds.add(convId);
 
-    // handle members array format (from API)
-    if (conv.members && conv.members.length > 0) {
-      const other = conv.members.find((m) => m.id !== myId) ?? conv.members[0];
-      await saveConversation({
-        id: convId,
-        otherUserId: other.id,
-        otherAvatarUrl: other.avatar,
-        otherUsername: other.username,
-        lastMessageSentAt: conv.lastMessage?.sentAt ?? conv.lastMessageSentAt ?? "",
-        lastMessageText: conv.lastMessage?.text ?? conv.lastMessageText ?? "",
-      });
-    } else if (conv.userId) {
-      // handle flat format
-      await saveConversation({
-        id: convId,
-        otherUserId: conv.userId,
-        otherAvatarUrl: conv.avatarUrl,
-        otherUsername: conv.username ?? "Unknown",
-        lastMessageSentAt: conv.lastMessageSentAt ?? "",
-        lastMessageText: conv.lastMessageText ?? "",
-      });
+      if (conv.members && conv.members.length > 0) {
+        const other = conv.members.find((m) => m.id !== myId) ?? conv.members[0];
+        await saveConversation({
+          id: convId,
+          otherUserId: other.id,
+          otherAvatarUrl: other.avatar,
+          otherUsername: other.username,
+          lastMessageSentAt: conv.lastMessage?.sentAt ?? conv.lastMessageSentAt ?? "",
+          lastMessageText: conv.lastMessage?.text ?? conv.lastMessageText ?? "",
+        });
+      } else if (conv.userId) {
+        await saveConversation({
+          id: convId,
+          otherUserId: conv.userId,
+          otherAvatarUrl: conv.avatarUrl,
+          otherUsername: conv.username ?? "Unknown",
+          lastMessageSentAt: conv.lastMessageSentAt ?? "",
+          lastMessageText: conv.lastMessageText ?? "",
+        });
+      }
     }
-  }
 
-  for (const conversation of localConversations) {
-    if (!serverConversationIds.has(conversation.id)) {
-      await deleteConversation({ conversationId: conversation.id });
+    for (const conversation of localConversations) {
+      if (!serverConversationIds.has(conversation.id)) {
+        await deleteConversation({ conversationId: conversation.id });
+      }
     }
+  } catch (err) {
+    console.warn("syncConversationsWithServer skipped:", err);
   }
 }
 
@@ -403,11 +440,16 @@ export async function savePendingMessage({
   messageId,
   nonce,
 }: SaveMsgParams) {
-  const db = await getDb();
-  await db.runAsync(
-    `INSERT OR REPLACE INTO PendingMessage (id, text, sentAt, senderId, conversationId , nonce) VALUES (?, ?, ?, ?, ? , ?)`,
-    [messageId, message, sentAt, SenderId, ConversationId, nonce],
-  );
+  try {
+    const db = await getDb();
+    if (!db) return;
+    await db.runAsync(
+      `INSERT OR REPLACE INTO PendingMessage (id, text, sentAt, senderId, conversationId , nonce) VALUES (?, ?, ?, ?, ? , ?)`,
+      [messageId, message, sentAt, SenderId, ConversationId, nonce],
+    );
+  } catch (err) {
+    console.warn("savePendingMessage skipped:", err);
+  }
 }
 
 export async function updatePendingMessage({
@@ -416,17 +458,28 @@ export async function updatePendingMessage({
   message,
   nonce,
 }: UpdateMsg) {
-  const db = await getDb();
-  await db.runAsync(
-    `UPDATE PendingMessage SET text = ?, editedAt = ? , nonce = ? WHERE id = ?`,
-    [message, editedAt, nonce, messageId],
-  );
+  try {
+    const db = await getDb();
+    if (!db) return;
+    await db.runAsync(
+      `UPDATE PendingMessage SET text = ?, editedAt = ? , nonce = ? WHERE id = ?`,
+      [message, editedAt, nonce, messageId],
+    );
+  } catch (err) {
+    console.warn("updatePendingMessage skipped:", err);
+  }
 }
 
 export async function deletePendingMessage({ messageId }: DeleteMsg) {
-  const db = await getDb();
-  await db.runAsync(`DELETE FROM PendingMessage WHERE id = ?`, [messageId]);
+  try {
+    const db = await getDb();
+    if (!db) return;
+    await db.runAsync(`DELETE FROM PendingMessage WHERE id = ?`, [messageId]);
+  } catch (err) {
+    console.warn("deletePendingMessage skipped:", err);
+  }
 }
+
 export type PendingMessage = {
   id: number;
   conversationId: number;
@@ -438,39 +491,62 @@ export type PendingMessage = {
 };
 
 export async function getPendingMessages(): Promise<PendingMessage[]> {
-  const db = await getDb();
+  try {
+    const db = await getDb();
+    if (!db) return [];
 
-  return db.getAllAsync<PendingMessage>(`
-    SELECT *
-    FROM PendingMessage
-    ORDER BY sentAt ASC
-  `);
+    return await db.getAllAsync<PendingMessage>(`
+      SELECT *
+      FROM PendingMessage
+      ORDER BY sentAt ASC
+    `);
+  } catch (err) {
+    console.warn("getPendingMessages skipped:", err);
+    return [];
+  }
 }
 
 export async function getUser(userId: number) {
-  const db = await getDb();
-  return db.getFirstAsync<{ id: number; username: string; avatarUrl: string | null }>(
-    `SELECT * FROM User WHERE id = ?`,
-    [userId],
-  );
+  try {
+    const db = await getDb();
+    if (!db) return null;
+    return await db.getFirstAsync<{ id: number; username: string; avatarUrl: string | null }>(
+      `SELECT * FROM User WHERE id = ?`,
+      [userId],
+    );
+  } catch (err) {
+    console.warn("getUser skipped:", err);
+    return null;
+  }
 }
 
 export async function upsertUser(userId: number, username: string, avatarUrl?: string) {
-  const db = await getDb();
-  await db.runAsync(
-    `INSERT OR REPLACE INTO User (id, username, avatarUrl) VALUES (?, ?, ?)`,
-    [userId, username, avatarUrl ?? null],
-  );
+  try {
+    const db = await getDb();
+    if (!db) return;
+    await db.runAsync(
+      `INSERT OR REPLACE INTO User (id, username, avatarUrl) VALUES (?, ?, ?)`,
+      [userId, username, avatarUrl ?? null],
+    );
+  } catch (err) {
+    console.warn("upsertUser skipped:", err);
+  }
 }
 
 export async function getConversationOtherUser(conversationId: number) {
-  const db = await getDb();
-  return db.getFirstAsync<{
-    otherUserId: number;
-    otherUsername: string;
-    otherAvatarUrl: string | null;
-  }>(
-    `SELECT otherUserId, otherUsername, otherAvatarUrl FROM Conversation WHERE id = ?`,
-    [conversationId],
-  );
+  try {
+    const db = await getDb();
+    if (!db) return null;
+    return await db.getFirstAsync<{
+      otherUserId: number;
+      otherUsername: string;
+      otherAvatarUrl: string | null;
+    }>(
+      `SELECT otherUserId, otherUsername, otherAvatarUrl FROM Conversation WHERE id = ?`,
+      [conversationId],
+    );
+  } catch (err) {
+    console.warn("getConversationOtherUser skipped:", err);
+    return null;
+  }
 }

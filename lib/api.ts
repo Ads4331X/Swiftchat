@@ -6,6 +6,9 @@ import { getToken } from "@/lib/secureStorage";
 export function getBackendUrl(): string {
   let envUrl = process.env.EXPO_PUBLIC_BACKEND_URL;
   if (envUrl && envUrl.trim() !== "") {
+    if (Platform.OS === "android" && (envUrl.includes("localhost") || envUrl.includes("127.0.0.1"))) {
+      return envUrl.replace("localhost", "192.168.1.72").replace("127.0.0.1", "192.168.1.72");
+    }
     return envUrl;
   }
 

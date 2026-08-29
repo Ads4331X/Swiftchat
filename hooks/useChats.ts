@@ -67,6 +67,7 @@ export default function useChats() {
 
         if (cache.length) {
           setChats(cache);
+          setLoading(false);
         }
       } catch {
         // Local cache unavailable.
@@ -166,15 +167,13 @@ export default function useChats() {
 
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener((state) => {
-      // console.log("Is connected?", state.isConnected);
-
       if (state.isConnected) {
         refetch();
       }
     });
 
     return unsubscribe;
-  }, [refetch]);
+  }, []);
   /*
    * New messages
    */

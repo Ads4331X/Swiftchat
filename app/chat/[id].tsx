@@ -111,13 +111,9 @@ export default function UserChat() {
     async function loadKey() {
       if (!id || !memberIds) return;
 
-      // Ensure local keys exist; if not, we'll show the recovery PIN prompt
-      // (handled separately via the PinModal). Without keys we can't decrypt.
       const ready = await setUpKeys();
       if (!ready) return;
       if (isMounted) setKeyReady(true);
-
-      if (!isMounted) return;
 
       try {
         const currentUserId = await getCurrentUserId();
@@ -152,7 +148,7 @@ export default function UserChat() {
     return () => {
       isMounted = false;
     };
-  }, [id, memberIds, keyReady, setUpKeys]);
+  }, [id, memberIds]);
   /*
    * Background chat recede animation
    */
