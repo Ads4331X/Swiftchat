@@ -213,29 +213,33 @@ export async function getOrCreateConversationKey(
   const { encryptedConversationKey, nonce, createdById } =
     await getEncryptedConversationKey(conversationId);
 
-  // 2. If it already exists, decrypt and return it
+  // 2. If it already exists, attempt to decrypt it
   if (encryptedConversationKey && nonce && createdById) {
     const receiverPrivateKey = await getPrivateKey("privateKey");
-    if (!receiverPrivateKey) {
-      throw new Error(
-        "Private key not found — call initializeKeys() at login first",
-      );
+    if (receiverPrivateKey) {
+      try {
+        const senderPublicKeyResponse = await api.get(
+          `/api/user/${createdById}/public-key`,
+        );
+
+        if (senderPublicKeyResponse.data?.publicKey) {
+          const { conversationKey } = await decryptConversationKey({
+            encryptedConversationKey: Base64.toUint8Array(encryptedConversationKey),
+            nonce: Base64.toUint8Array(nonce),
+            receiverPrivateKey: Base64.toUint8Array(receiverPrivateKey),
+            senderPublicKey: Base64.toUint8Array(
+              senderPublicKeyResponse.data.publicKey,
+            ),
+          });
+
+          return conversationKey;
+        }
+      } catch {
+        console.warn(
+          `Could not decrypt existing conversation key for conversation ${conversationId}. Re-generating key...`,
+        );
+      }
     }
-
-    const senderPublicKeyResponse = await api.get(
-      `/api/user/${createdById}/public-key`,
-    );
-
-    const { conversationKey } = await decryptConversationKey({
-      encryptedConversationKey: Base64.toUint8Array(encryptedConversationKey),
-      nonce: Base64.toUint8Array(nonce),
-      receiverPrivateKey: Base64.toUint8Array(receiverPrivateKey),
-      senderPublicKey: Base64.toUint8Array(
-        senderPublicKeyResponse.data.publicKey,
-      ),
-    });
-
-    return conversationKey;
   }
 
   // 3. Doesn't exist yet — generate one and distribute it to every member
@@ -297,16 +301,20 @@ export async function decryptMessage({
   decryptedConversationKey: Uint8Array;
 }) {
   await sodium.ready;
-  const encryptedMessageToArray8 = Base64.toUint8Array(encryptedMessage);
-  const nonceToArray8 = Base64.toUint8Array(nonce);
+  try {
+    const encryptedMessageToArray8 = Base64.toUint8Array(encryptedMessage);
+    const nonceToArray8 = Base64.toUint8Array(nonce);
 
-  const decryptMessage = sodium.crypto_secretbox_open_easy(
-    encryptedMessageToArray8,
-    nonceToArray8,
-    decryptedConversationKey,
-  );
+    const decryptMessage = sodium.crypto_secretbox_open_easy(
+      encryptedMessageToArray8,
+      nonceToArray8,
+      decryptedConversationKey,
+    );
 
-  return { decryptMessage: new TextDecoder().decode(decryptMessage) };
+    return { decryptMessage: new TextDecoder().decode(decryptMessage) };
+  } catch {
+    return { decryptMessage: "[Encrypted Message]" };
+  }
 }
 
 export async function backupPrivateKey({

@@ -116,13 +116,14 @@ export default function useChats() {
                 text: decrypted.decryptMessage,
               },
             };
-          } catch (error) {
-            console.error(
-              "Could not decrypt conversation preview:",
-              chat.id,
-              error,
-            );
-            return chat;
+          } catch {
+            return {
+              ...chat,
+              lastMessage: {
+                ...chat.lastMessage,
+                text: "[Encrypted Message]",
+              },
+            };
           }
         }),
       );

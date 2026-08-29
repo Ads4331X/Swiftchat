@@ -80,8 +80,9 @@ export default function PinModal({
     <View
       key={i}
       style={{
-        width: 44,
-        height: 56,
+        width: "14%",
+        aspectRatio: 44 / 56,
+        maxWidth: 46,
         borderRadius: 12,
         backgroundColor: inputBg,
         borderWidth: 2,
@@ -91,7 +92,7 @@ export default function PinModal({
         opacity: digits[i] ? 1 : 0.25,
       }}
     >
-      <Text style={{ color: colors.text, fontSize: 24, fontWeight: "700" }}>
+      <Text style={{ color: colors.text, fontSize: 22, fontWeight: "700" }}>
         {digits[i] ? "•" : ""}
       </Text>
     </View>
@@ -101,17 +102,18 @@ export default function PinModal({
     <Modal
       visible={visible}
       transparent
+      statusBarTranslucent
       animationType="fade"
       onRequestClose={confirmCancel}
     >
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        behavior={Platform.OS === "ios" ? "padding" : "padding"}
         className="flex-1 bg-black/50"
       >
         <ScrollView
-          contentContainerStyle={{ flexGrow: 1, justifyContent: "center" }}
+          contentContainerStyle={{ flexGrow: 1, justifyContent: "center", paddingVertical: 32 }}
           keyboardShouldPersistTaps="handled"
-          className="px-6"
+          className="px-4"
         >
           <View
             className="w-full max-w-sm rounded-3xl p-6 self-center my-auto"
@@ -143,30 +145,36 @@ export default function PinModal({
               </Text>
             ) : null}
 
-            <TextInput
-              ref={inputRef}
-              value={digits}
-              onChangeText={handleChange}
-              keyboardType="number-pad"
-              secureTextEntry
-              maxLength={PIN_LENGTH}
-              autoFocus
-              caretHidden
-              style={{ position: "absolute", width: 1, height: 1, opacity: 0 }}
-            />
-
-            <TouchableOpacity
-              activeOpacity={1}
-              onPress={() => inputRef.current?.focus()}
-              className="flex-row justify-between my-2"
-            >
-              {boxes}
-            </TouchableOpacity>
+            <View className="relative flex-row justify-between items-center my-3 py-1">
+              <View pointerEvents="none" className="flex-row justify-between w-full">
+                {boxes}
+              </View>
+              <TextInput
+                ref={inputRef}
+                value={digits}
+                onChangeText={handleChange}
+                keyboardType="number-pad"
+                secureTextEntry
+                maxLength={PIN_LENGTH}
+                autoFocus
+                caretHidden
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  opacity: 0.01,
+                  fontSize: 1,
+                  color: "transparent",
+                }}
+              />
+            </View>
 
             <Pressable
               onPress={() => onSubmit(digits)}
               disabled={digits.length !== PIN_LENGTH || loading}
-              className="rounded-2xl py-4 items-center mt-6 active:opacity-90"
+              className="rounded-2xl py-4 items-center mt-5 active:opacity-90"
               style={{
                 backgroundColor: BRAND_COLOR,
                 opacity: digits.length === PIN_LENGTH && !loading ? 1 : 0.4,
@@ -180,7 +188,7 @@ export default function PinModal({
             <Pressable
               onPress={confirmCancel}
               hitSlop={{ top: 12, bottom: 12 }}
-              className="py-3 items-center"
+              className="py-3 items-center mt-1"
             >
               <Text className="text-[#EF4444] font-medium">Cancel</Text>
             </Pressable>
