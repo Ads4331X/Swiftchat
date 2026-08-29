@@ -19,7 +19,12 @@ import {
 } from "@/lib/socket";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNetInfo } from "@react-native-community/netinfo";
-import { flushPendingMessages, onPendingFlushed } from "@/lib/pendingSync";
+import {
+  acquireFlushLock,
+  flushPendingMessages,
+  onPendingFlushed,
+  releaseFlushLock,
+} from "@/lib/pendingSync";
 
 export type Message = {
   id: number;
@@ -29,9 +34,15 @@ export type Message = {
   senderId: number;
   conversationId: number;
   nonce: string;
+  /** Stable client key so optimistic rows keep their position when confirmed. */
+  key?: string;
 };
 
 const PAGE_SIZE = 50;
+
+function keyFor(message: Message): string {
+  return message.key ?? `m-${message.id}`;
+}
 
 export default function useChatMessages(
   id: string | number,
@@ -44,6 +55,10 @@ export default function useChatMessages(
   const [hasMore, setHasMore] = useState(true);
   const tempIdRef = useRef(-1);
   const fetchedServerRef = useRef(false);
+  // Keep the latest currentUserId available to socket listeners whose effect
+  // doesn't re-run when the user id arrives asynchronously.
+  const currentUserIdRef = useRef(currentUserId);
+  currentUserIdRef.current = currentUserId;
 
   const decryptChatMessages = async ({
     serverMessages,
@@ -68,8 +83,11 @@ export default function useChatMessages(
   const { isConnected, isInternetReachable } = useNetInfo();
 
   // Reconcile the in-memory list with what actually exists on the server/Db
-  // now. Optimistic entries (negative id) that were still pending stay
-  // visible as "Sending…"; everything confirmed by the flush replaces them.
+  // now. Optimistic entries (negative id) that are still pending stay visible
+  // as "Sending…"; a confirmed message is matched to its optimistic row by
+  // nonce and swapped IN PLACE so the FlatList row never unmounts/remounts.
+  // Unchanged messages keep their previous object reference so memoized
+  // bubbles skip re-rendering (no full-list flash on flush).
   const reconcileMessages = useCallback(async () => {
     if (!decryptedConversationKey) return;
 
@@ -86,11 +104,43 @@ export default function useChatMessages(
     });
 
     setMessages((prev) => {
-      const confirmedIds = new Set(confirmed.map((m) => m.id));
-      const stillPending = prev.filter(
-        (m) => m.id < 0 && pendingIds.has(m.id) && !confirmedIds.has(m.id),
-      );
-      return [...confirmed, ...stillPending];
+      const confirmedById = new Map(confirmed.map((m) => [m.id, m]));
+      const confirmedByNonce = new Map<string, Message>();
+      for (const m of confirmed) {
+        if (m.nonce && !confirmedByNonce.has(m.nonce)) {
+          confirmedByNonce.set(m.nonce, m);
+        }
+      }
+
+      const next: Message[] = [];
+      const representedIds = new Set<number>();
+
+      for (const m of prev) {
+        if (m.id < 0 && !pendingIds.has(m.id)) {
+          // This optimistic message was just confirmed. Swap it in place,
+          // keeping the stable key so the row doesn't unmount.
+          const replacement =
+            confirmedByNonce.get(m.nonce) ?? confirmedById.get(m.id);
+          if (replacement) {
+            next.push({ ...replacement, key: m.key ?? keyFor(replacement) });
+            representedIds.add(replacement.id);
+          }
+          continue;
+        }
+        next.push(m);
+        if (m.id >= 0) representedIds.add(m.id);
+      }
+
+      // Append confirmed rows not already represented (e.g. messages that
+      // arrived via the background flusher while this screen was closed).
+      for (const m of confirmed) {
+        if (!representedIds.has(m.id)) {
+          next.push({ ...m, key: keyFor(m) });
+          representedIds.add(m.id);
+        }
+      }
+
+      return next;
     });
   }, [id, decryptedConversationKey]);
 
@@ -155,12 +205,28 @@ export default function useChatMessages(
         }).catch(() => {});
 
         setMessages((currentMsg) => {
-          const existingMessage = currentMsg.find(
-            (message) => message.id === newMessage.id,
-          );
-
-          if (existingMessage) {
+          if (currentMsg.some((message) => message.id === newMessage.id)) {
             return currentMsg;
+          }
+
+          // The server broadcasts our own messages back to us. If this echo
+          // matches one of our optimistic (Sending…) rows by nonce, swap it
+          // in place — keeping the stable key — instead of appending a
+          // duplicate next to the original.
+          const echoIndex = currentMsg.findIndex(
+            (message) =>
+              message.id < 0 &&
+              message.senderId === currentUserIdRef.current &&
+              message.nonce === newMessage.nonce,
+          );
+          if (echoIndex >= 0) {
+            const optimistic = currentMsg[echoIndex];
+            const next = [...currentMsg];
+            next[echoIndex] = {
+              ...decryptNewMessage[0],
+              key: optimistic.key ?? `m-${decryptNewMessage[0].id}`,
+            };
+            return next;
           }
 
           return [...currentMsg, decryptNewMessage[0]];
@@ -247,14 +313,20 @@ export default function useChatMessages(
             decryptedConversationKey,
           });
 
-          // 3. Merge: replace local with server data (server is authoritative for latest)
+          // 3. Merge: keep existing rows (by reference so memoized bubbles
+          // don't re-render) and only add messages we don't already have.
           if (active) {
             setMessages((prev) => {
-              const serverIds = new Set(decryptedServerMessages.map((m) => m.id));
+              const prevById = new Map(prev.map((m) => [m.id, m]));
+              const merged: Message[] = [];
+              for (const m of decryptedServerMessages) {
+                merged.push(prevById.get(m.id) ?? { ...m, key: keyFor(m) });
+              }
+              const mergedIds = new Set(merged.map((m) => m.id));
               const localOnly = prev.filter(
-                (m) => m.id < 0 || !serverIds.has(m.id),
+                (m) => m.id < 0 || !mergedIds.has(m.id),
               );
-              return [...localOnly, ...decryptedServerMessages];
+              return [...localOnly, ...merged];
             });
             setLoading(false);
           }
@@ -440,9 +512,10 @@ export default function useChatMessages(
     const tempId = tempIdRef.current--;
     const optimisticMessage: Message = {
       id: tempId,
+      key: `m-local-${tempId}`,
       text: trimmed,
       sentAt: new Date().toISOString(),
-      editedAt: new Date().toISOString(),
+      editedAt: null,
       senderId: currentUserId ?? -1,
       conversationId: Number(id),
       nonce: encryptedNonce,
@@ -450,16 +523,19 @@ export default function useChatMessages(
 
     setMessages((prev) => [...prev, optimisticMessage]);
 
-    await savePendingMessage({
-      message: encryptedMessage,
-      nonce: encryptedNonce,
-      messageId: optimisticMessage.id,
-      SenderId: optimisticMessage.senderId,
-      ConversationId: optimisticMessage.conversationId,
-      sentAt: optimisticMessage.sentAt,
-    });
-
+    // Hold the shared flush lock from BEFORE the pending row exists, so the
+    // background flusher can never observe it and double-send it.
+    const held = await acquireFlushLock();
     try {
+      await savePendingMessage({
+        message: encryptedMessage,
+        nonce: encryptedNonce,
+        messageId: optimisticMessage.id,
+        SenderId: optimisticMessage.senderId,
+        ConversationId: optimisticMessage.conversationId,
+        sentAt: optimisticMessage.sentAt,
+      });
+
       const response = await api.post(`/api/conversations/messages`, {
         messageText: encryptedMessage,
         conversationId: Number(id),
@@ -492,19 +568,29 @@ export default function useChatMessages(
         lastMessageSentAt: response.data.sentAt,
       }).catch(() => {});
 
+      // Swap the optimistic row IN PLACE — same key, same row, no remount.
       setMessages((prev) => {
-        const withoutOptimistic = prev.filter((m) => m.id !== tempId);
-
-        const alreadyPresent = withoutOptimistic.some(
-          (m) => m.id === confirmedMessage.id,
-        );
-
-        return alreadyPresent
-          ? withoutOptimistic
-          : [...withoutOptimistic, confirmedMessage];
+        let swapped = false;
+        const next = prev.map((m) => {
+          if (m.id === tempId) {
+            swapped = true;
+            return {
+              ...confirmedMessage,
+              key: m.key ?? `m-${confirmedMessage.id}`,
+            };
+          }
+          return m;
+        });
+        if (swapped) return next;
+        if (next.some((m) => m.id === confirmedMessage.id)) return next;
+        return [...next, { ...confirmedMessage, key: keyFor(confirmedMessage) }];
       });
     } catch {
+      // Still offline or server rejected — keep the pending row; the
+      // background sync will retry when connectivity returns.
       console.log("Message saved as pending:", tempId);
+    } finally {
+      if (held) releaseFlushLock();
     }
   };
 

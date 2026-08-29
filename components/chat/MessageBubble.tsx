@@ -1,7 +1,7 @@
 import { Keyboard, Image, Pressable, Text, View } from "react-native";
 import { type Message } from "@/hooks/useChatMessages";
 import { BRAND_COLOR } from "@/constants/theme";
-import { useRef } from "react";
+import { memo, useRef } from "react";
 import Feather from "@expo/vector-icons/Feather";
 
 type Position = {
@@ -111,7 +111,7 @@ Keyboard.addListener("keyboardDidHide", () => {
   keyboardVisible = false;
 });
 
-export default function MessageBubble({
+export default memo(function MessageBubble({
   message,
   isMine,
   textColor,
@@ -215,4 +215,4 @@ export default function MessageBubble({
       </View>
     </Pressable>
   );
-}
+});

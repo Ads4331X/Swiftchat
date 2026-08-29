@@ -21,6 +21,14 @@ export default function ChatHeader({
 }: ChatHeaderProps) {
   const router = useRouter();
 
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace("/");
+    }
+  };
+
   return (
     <View
       className="w-full px-4 py-3 flex-row items-center"
@@ -30,7 +38,11 @@ export default function ChatHeader({
         backgroundColor,
       }}
     >
-      <Pressable onPress={() => router.back()} className="p-1">
+      <Pressable
+        onPress={handleBack}
+        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        className="p-2 -ml-1 mr-2"
+      >
         <Feather name="arrow-left" size={24} color={textColor} />
       </Pressable>
 

@@ -110,6 +110,36 @@ export default function MessageList({
     [listRef],
   );
 
+  // Stable renderItem so React.memo'ed MessageBubbles only re-render when
+  // their own message actually changed — not on every array rebuild.
+  const renderItem = useCallback(
+    ({ item }: { item: Message }) => (
+      <MessageBubble
+        message={item}
+        isMine={item.senderId === currentUserId}
+        textColor={textColor}
+        bubbleColor={bubbleColor}
+        subtleText={subtleText}
+        hidden={item.id === selectedMessageId}
+        onLongPress={(position) => onMessageLongPress(item, position)}
+        showAvatar={showAvatarSet.has(item.id)}
+        avatarUrl={otherAvatarUrl}
+        otherUsername={otherUsername}
+      />
+    ),
+    [
+      currentUserId,
+      textColor,
+      bubbleColor,
+      subtleText,
+      selectedMessageId,
+      onMessageLongPress,
+      showAvatarSet,
+      otherAvatarUrl,
+      otherUsername,
+    ],
+  );
+
   // Expose a force-scroll-to-bottom to the parent (used after sending).
   if (onScrollToEndRef) {
     onScrollToEndRef.current = () => scrollToBottom(true);
@@ -139,21 +169,8 @@ export default function MessageList({
         ref={listRef}
         inverted
         data={invertedData}
-        keyExtractor={(message) => String(message.id)}
-        renderItem={({ item }) => (
-          <MessageBubble
-            message={item}
-            isMine={item.senderId === currentUserId}
-            textColor={textColor}
-            bubbleColor={bubbleColor}
-            subtleText={subtleText}
-            hidden={item.id === selectedMessageId}
-            onLongPress={(position) => onMessageLongPress(item, position)}
-            showAvatar={showAvatarSet.has(item.id)}
-            avatarUrl={otherAvatarUrl}
-            otherUsername={otherUsername}
-          />
-        )}
+        keyExtractor={(message) => message.key ?? String(message.id)}
+        renderItem={renderItem}
         // NOTE: with `inverted`, header/footer are visually swapped —
         // ListHeaderComponent renders at the BOTTOM, ListFooterComponent
         // renders at the TOP.

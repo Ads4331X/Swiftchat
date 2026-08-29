@@ -11,6 +11,7 @@ import {
 
 let started = false;
 let flushing = false;
+let flushLockHeld = false;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
 type FlushListener = (info: { conversationIds: number[] }) => void;
@@ -33,12 +34,33 @@ function notifyFlushed(conversationId: number) {
 }
 
 /**
+ * Acquire the shared flush lock. The chat screen holds this for the entire
+ * duration of a direct POST (from BEFORE the pending row is saved) so the
+ * background flusher can never observe that row and double-send it. Awaits a
+ * concurrently running flush to finish first; returns false only after a
+ * generous timeout (meaning the send will proceed unguarded as a last resort).
+ */
+export async function acquireFlushLock(timeoutMs = 10000): Promise<boolean> {
+  const start = Date.now();
+  while (flushLockHeld || flushing) {
+    if (Date.now() - start > timeoutMs) return false;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  flushLockHeld = true;
+  return true;
+}
+
+export function releaseFlushLock(): void {
+  flushLockHeld = false;
+}
+
+/**
  * Global flush of offline (pending) messages. Runs regardless of which
  * screen is open, so messages sent while offline are delivered as soon as
  * connectivity returns — even outside the chat screen.
  */
 export async function flushPendingMessages(): Promise<void> {
-  if (flushing) return;
+  if (flushing || flushLockHeld) return;
 
   const token = await getToken("token");
   if (!token) {
