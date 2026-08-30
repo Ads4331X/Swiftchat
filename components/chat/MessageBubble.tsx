@@ -44,6 +44,9 @@ function formatBubbleTime(iso: string): string {
   });
 }
 
+// Color for the WhatsApp-style double-check "read" ticks on own messages.
+const READ_TICK_COLOR = "#4FC3F7";
+
 export function MessageBubbleContent({
   text,
   isMine,
@@ -94,7 +97,11 @@ export function MessageBubbleContent({
           </Text>
         )}
         {isMine && (
-          <ReadReceipts isPending={!!isPending} isRead={!!isRead} color={tickColor} />
+          <ReadReceipts
+            isPending={!!isPending}
+            isRead={!!isRead}
+            color={isMine && isRead ? READ_TICK_COLOR : tickColor}
+          />
         )}
       </View>
     </View>

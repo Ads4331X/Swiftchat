@@ -345,7 +345,16 @@ export default function useChatMessages(
               const prevById = new Map(prev.map((m) => [m.id, m]));
               const merged: Message[] = [];
               for (const m of decryptedServerMessages) {
-                merged.push(prevById.get(m.id) ?? { ...m, key: keyFor(m) });
+                // Always use the freshly-decrypted row, not a previously
+                // rendered one: it may be a "[Encrypted Message]" placeholder
+                // from before the conversation key was available. Keep the
+                // existing row's key so the bubble doesn't remount.
+                const existing = prevById.get(m.id);
+                merged.push(
+                  existing
+                    ? { ...m, key: existing.key ?? keyFor(m) }
+                    : { ...m, key: keyFor(m) },
+                );
               }
               const mergedIds = new Set(merged.map((m) => m.id));
               const localOnly = prev.filter(

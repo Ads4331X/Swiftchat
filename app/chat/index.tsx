@@ -24,7 +24,7 @@ export default function Chat() {
     pinMode,
     busy: pinBusy,
     setUpKeys,
-    initializeWithPin,
+    submitPin,
     skip: skipPin,
   } = useKeySetup();
   const [pinError, setPinError] = useState<string | null>(null);
@@ -75,9 +75,9 @@ export default function Chat() {
         error={pinError}
         loading={pinBusy}
         onSubmit={async (pin) => {
-          const ok = await initializeWithPin(pin);
-          if (!ok) {
-            setPinError("Incorrect PIN. Please try again.");
+          const ok = await submitPin(pin);
+          if (!ok.ok) {
+            setPinError(ok.error || "Incorrect PIN. Please try again.");
             return;
           }
           setPinError(null);

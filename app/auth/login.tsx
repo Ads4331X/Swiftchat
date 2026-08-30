@@ -35,7 +35,7 @@ export default function LoginScreen() {
     pinMode,
     busy: pinBusy,
     setUpKeys,
-    initializeWithPin,
+    submitPin,
     skip: skipPin,
   } = useKeySetup();
   const [pinError, setPinError] = useState<string | null>(null);
@@ -61,9 +61,12 @@ export default function LoginScreen() {
   };
 
   const onSubmit = async (data: FormData) => {
+    // Lone whitespace around the email is almost always a typo — normalize it
+    // before validation/sending so "you@example.com " doesn't fail as invalid.
+    const email = data.email.trim().toLowerCase();
     try {
       const response = await api.post("/api/auth/login", {
-        email: data.email,
+        email,
         password: data.password,
       });
       await setToken("token", response.data.token);
@@ -357,9 +360,9 @@ export default function LoginScreen() {
         error={pinError}
         loading={pinBusy}
         onSubmit={async (pin) => {
-          const ok = await initializeWithPin(pin);
-          if (!ok) {
-            setPinError("Incorrect PIN. Please try again.");
+          const ok = await submitPin(pin);
+          if (!ok.ok) {
+            setPinError(ok.error || "Incorrect PIN. Please try again.");
             return;
           }
           await connectSocket();

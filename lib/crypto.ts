@@ -35,22 +35,34 @@ export async function hasKeyBackup(): Promise<boolean> {
   }
 }
 
+/**
+ * Parameters describing how the Recovery PIN is turned into an encryption key.
+ * All of them are public/non-secret metadata and MUST be stored alongside the
+ * encrypted backup so recovery can re-derive the exact same key.
+ */
+export type KeyBackupParams = {
+  keyBackupOpsLimit: number;
+  keyBackupMemLimit: number;
+  keyBackupAlg: number;
+};
+
 export type EnsureKeysResult =
-  | { ok: true }
+  | { ok: true; brandNew: boolean }
   | { ok: false; reason: "pinNeeded" }
   | { ok: false; reason: "lost" };
 
 /**
  * Ensures a local identity keypair exists — WITHOUT requiring a PIN.
  *
- * - Local keys present    → re-assert the public key, done.
+ * - Local keys present    → re-assert the public key, done (brandNew: false).
  * - Recovery backup exists → the PIN is needed to restore the SAME key
  *                            (reinstall / new device).
  * - No local key, no backup, but the server already holds a key for this
  *   account → the old key is lost (reinstall without backup). Never mint a
  *   replacement (would orphan history).
  * - No local key, no backup, server has NO key → brand-new account: generate a
- *   fresh keypair locally.
+ *   fresh keypair locally and report brandNew: true so the UI can invite the
+ *   user to set a (skippable) Recovery PIN for this exact key.
  */
 export async function ensureLocalKeys(): Promise<EnsureKeysResult> {
   const privateKey = await getPrivateKey("privateKey");
@@ -58,7 +70,7 @@ export async function ensureLocalKeys(): Promise<EnsureKeysResult> {
 
   if (privateKey && publicKey) {
     await api.put("/api/user/public-key", { publicKey }).catch(() => {});
-    return { ok: true };
+    return { ok: true, brandNew: false };
   }
 
   if (await hasKeyBackup()) {
@@ -86,7 +98,7 @@ export async function ensureLocalKeys(): Promise<EnsureKeysResult> {
       publicKey: Base64.fromUint8Array(generated.publicKey),
     })
     .catch(() => {});
-  return { ok: true };
+  return { ok: true, brandNew: true };
 }
 
 /**
@@ -346,6 +358,43 @@ export async function decryptMessage({
   }
 }
 
+/**
+ * Derives an encryption key from the Recovery PIN using Argon2id
+ * (`crypto_pwhash`). The salt must be the same random salt that was stored
+ * with the backup. The PIN bytes are zeroed as soon as the key is derived so
+ * the PIN never lingers in JS memory longer than necessary.
+ */
+async function deriveKeyFromPin(
+  pin: string,
+  salt: Uint8Array,
+  params: KeyBackupParams,
+): Promise<Uint8Array> {
+  await sodium.ready;
+  const pinBytes = new TextEncoder().encode(pin);
+  try {
+    return sodium.crypto_pwhash(
+      sodium.crypto_secretbox_KEYBYTES,
+      pinBytes,
+      salt,
+      params.keyBackupOpsLimit,
+      params.keyBackupMemLimit,
+      params.keyBackupAlg,
+    );
+  } finally {
+    pinBytes.fill(0);
+  }
+}
+
+function defaultBackupParams(): KeyBackupParams {
+  const argon2id =
+    sodium.crypto_pwhash_ALG_ARGON2ID13 ?? sodium.crypto_pwhash_ALG_DEFAULT;
+  return {
+    keyBackupOpsLimit: sodium.crypto_pwhash_OPSLIMIT_INTERACTIVE,
+    keyBackupMemLimit: sodium.crypto_pwhash_MEMLIMIT_INTERACTIVE,
+    keyBackupAlg: argon2id,
+  };
+}
+
 export async function backupPrivateKey({
   privateKey,
   password,
@@ -354,34 +403,39 @@ export async function backupPrivateKey({
   password: string;
 }) {
   await sodium.ready;
+  const params = defaultBackupParams();
   const nonce = sodium.randombytes_buf(sodium.crypto_secretbox_NONCEBYTES);
   const salt = sodium.randombytes_buf(sodium.crypto_pwhash_SALTBYTES);
 
-  const derivedKey = sodium.crypto_pwhash(
-    sodium.crypto_secretbox_KEYBYTES,
-    password,
-    salt,
-    sodium.crypto_pwhash_OPSLIMIT_INTERACTIVE,
-    sodium.crypto_pwhash_MEMLIMIT_INTERACTIVE,
-    sodium.crypto_pwhash_ALG_DEFAULT,
-  );
+  let derivedKey: Uint8Array | undefined;
+  try {
+    derivedKey = await deriveKeyFromPin(password, salt, params);
 
-  const encryptedPrivateKey = sodium.crypto_secretbox_easy(
-    privateKey,
-    nonce,
-    derivedKey,
-  );
+    const encryptedPrivateKey = sodium.crypto_secretbox_easy(
+      privateKey,
+      nonce,
+      derivedKey,
+    );
 
-  const encryptedPrivateKeyToString =
-    Base64.fromUint8Array(encryptedPrivateKey);
-  const saltToString = Base64.fromUint8Array(salt);
-  const nonceToString = Base64.fromUint8Array(nonce);
+    const encryptedPrivateKeyToString =
+      Base64.fromUint8Array(encryptedPrivateKey);
+    const saltToString = Base64.fromUint8Array(salt);
+    const nonceToString = Base64.fromUint8Array(nonce);
 
-  await api.put("/api/user/key-backup", {
-    keyBackupEncrypted: encryptedPrivateKeyToString,
-    keyBackupNonce: nonceToString,
-    keyBackupSalt: saltToString,
-  });
+    // Only the ENCRYPTED private key + non-secret metadata ever leave this
+    // device. The PIN and the plaintext private key stay local and are never
+    // sent to the server.
+    await api.put("/api/user/key-backup", {
+      keyBackupEncrypted: encryptedPrivateKeyToString,
+      keyBackupNonce: nonceToString,
+      keyBackupSalt: saltToString,
+      keyBackupOpsLimit: params.keyBackupOpsLimit,
+      keyBackupMemLimit: params.keyBackupMemLimit,
+      keyBackupAlg: params.keyBackupAlg,
+    });
+  } finally {
+    derivedKey?.fill(0);
+  }
 }
 
 export async function recoverPrivateKey({ password }: { password: string }) {
@@ -398,29 +452,52 @@ export async function recoverPrivateKey({ password }: { password: string }) {
     return null;
   }
 
+  // KDF/encryption parameters were stored with the backup. Fall back to the
+  // defaults when restoring a legacy backup that predates storing them, so
+  // old backups remain recoverable.
+  const legacy = defaultBackupParams();
+  const params: KeyBackupParams = {
+    keyBackupOpsLimit:
+      typeof backup.data.keyBackupOpsLimit === "number"
+        ? backup.data.keyBackupOpsLimit
+        : legacy.keyBackupOpsLimit,
+    keyBackupMemLimit:
+      typeof backup.data.keyBackupMemLimit === "number"
+        ? backup.data.keyBackupMemLimit
+        : legacy.keyBackupMemLimit,
+    keyBackupAlg:
+      typeof backup.data.keyBackupAlg === "number"
+        ? backup.data.keyBackupAlg
+        : legacy.keyBackupAlg,
+  };
+
+  // Refuse to attempt a key derivation with invalid stored parameters.
+  if (
+    !params.keyBackupOpsLimit ||
+    !params.keyBackupMemLimit ||
+    !params.keyBackupAlg
+  ) {
+    return null;
+  }
+
   const encryptedPrivateKeyToArray8 = Base64.toUint8Array(
     backup.data.keyBackupEncrypted,
   );
   const nonceToArray8 = Base64.toUint8Array(backup.data.keyBackupNonce);
   const saltToArray8 = Base64.toUint8Array(backup.data.keyBackupSalt);
 
-  const derivedKey = sodium.crypto_pwhash(
-    sodium.crypto_secretbox_KEYBYTES,
-    password,
-    saltToArray8,
-    sodium.crypto_pwhash_OPSLIMIT_INTERACTIVE,
-    sodium.crypto_pwhash_MEMLIMIT_INTERACTIVE,
-    sodium.crypto_pwhash_ALG_DEFAULT,
-  );
-
+  let derivedKey: Uint8Array | undefined;
   try {
-    const decryptedPrivateKey = sodium.crypto_secretbox_open_easy(
+    derivedKey = await deriveKeyFromPin(password, saltToArray8, params);
+
+    return sodium.crypto_secretbox_open_easy(
       encryptedPrivateKeyToArray8,
       nonceToArray8,
       derivedKey,
     );
-    return decryptedPrivateKey;
   } catch {
     return null; // wrong pin
+  } finally {
+    derivedKey?.fill(0);
   }
 }

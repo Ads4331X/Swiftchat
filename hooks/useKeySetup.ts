@@ -4,10 +4,11 @@ import { getBackendUrl } from "@/lib/api";
 import { addRecoveryPin, ensureLocalKeys, initializeKeys } from "@/lib/crypto";
 
 /**
- * Ensures encryption keys are set up. New accounts get a keypair generated
- * automatically (no PIN required); a recovery PIN is only asked for when
- * restoring existing keys on a new device/reinstall. The PIN is purely an
- * optional back-up feature and never gates chatting.
+ * Ensures encryption keys are set up. A brand-new account gets a keypair
+ * generated automatically and is then invited (never forced) to set a
+ * Recovery PIN. A recovery PIN is only *required* when restoring existing
+ * keys on a new device/reinstall. In every case the PIN is purely an optional
+ * back-up feature and never gates chatting.
  */
 export function useKeySetup() {
   const [needsPin, setNeedsPin] = useState(false);
@@ -16,7 +17,19 @@ export function useKeySetup() {
 
   const setUpKeys = useCallback(async (): Promise<boolean> => {
     const result = await ensureLocalKeys();
-    if (result.ok || result.reason === "lost") {
+    if (result.ok) {
+      if (result.brandNew) {
+        // Brand-new keypair was just generated. Show the (skippable) PIN setup
+        // modal so the user can optionally back up THIS key.
+        setPinMode("add");
+        setNeedsPin(true);
+        return false;
+      }
+      setNeedsPin(false);
+      return true;
+    }
+    if (result.reason === "lost") {
+      // Old key is unrecoverable — don't mint a replacement, don't ask for a PIN.
       setNeedsPin(false);
       return true;
     }
@@ -68,6 +81,20 @@ export function useKeySetup() {
     }
   }, []);
 
+  // Single submit entry point used by every screen's PinModal: "add" mode
+  // backs up the existing (already-generated) key, "enter" mode restores the
+  // key from the server backup. The PIN itself is only passed through to the
+  // crypto function and is never stored anywhere.
+  const submitPin = useCallback(
+    async (pin: string) => {
+      if (pinMode === "add") {
+        return addPin(pin);
+      }
+      return initializeWithPin(pin);
+    },
+    [pinMode, addPin, initializeWithPin],
+  );
+
   const skip = useCallback(() => {
     setNeedsPin(false);
   }, []);
@@ -80,6 +107,7 @@ export function useKeySetup() {
     initializeWithPin,
     startAddPin,
     addPin,
+    submitPin,
     skip,
   };
 }

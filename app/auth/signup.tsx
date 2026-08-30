@@ -16,6 +16,10 @@ import { useTheme } from "@/constants/theme-provider";
 import Toast from "react-native-toast-message";
 import { Image } from "expo-image";
 import AntDesign from "@expo/vector-icons/AntDesign";
+import { setToken } from "@/lib/secureStorage";
+import { connectSocket } from "@/lib/socket";
+import { useKeySetup } from "@/hooks/useKeySetup";
+import PinModal from "@/components/security/PinModal";
 
 type FormData = {
   email: string;
@@ -28,6 +32,15 @@ export default function SignupScreen() {
   const theme = useTheme();
   const colors = theme.colors;
   const [showPassword, setShowPassword] = useState(false);
+  const {
+    needsPin,
+    pinMode,
+    busy: pinBusy,
+    setUpKeys,
+    submitPin,
+    skip: skipPin,
+  } = useKeySetup();
+  const [pinError, setPinError] = useState<string | null>(null);
 
   const {
     control,
@@ -44,21 +57,33 @@ export default function SignupScreen() {
   });
 
   const onSubmit = async (data: FormData) => {
+    // Lone whitespace around the email/username is almost always a typo —
+    // normalize it before sending so "you@example.com " registers cleanly.
+    const email = data.email.trim().toLowerCase();
+    const username = data.username.trim();
     try {
       await api.post("/api/auth/register", {
-        email: data.email,
-        username: data.username,
+        email,
+        username,
         password: data.password,
         confirmPassword: data.confirmPassword,
       });
 
-      Toast.show({
-        type: "success",
-        text1: "Account created!",
-        text2: "Welcome to SwiftChat",
+      // Log the new account in right away so E2EE keys are generated and the
+      // (skippable) Recovery PIN is offered as part of account creation.
+      const loginRes = await api.post("/api/auth/login", {
+        email,
+        password: data.password,
       });
+      await setToken("token", loginRes.data.token);
 
-      router.push("/auth/login");
+      const ready = await setUpKeys();
+      if (!ready) {
+        return; // PinModal is now visible; it navigates on submit/skip.
+      }
+
+      await connectSocket().catch(() => {});
+      router.replace("/chat");
     } catch (err: any) {
       Toast.show({
         type: "error",
@@ -481,6 +506,40 @@ export default function SignupScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <PinModal
+        visible={needsPin}
+        mode={pinMode}
+        error={pinError}
+        loading={pinBusy}
+        onSubmit={async (pin) => {
+          const res = await submitPin(pin);
+          if (!res.ok) {
+            setPinError(res.error || "Incorrect PIN. Please try again.");
+            return;
+          }
+          setPinError(null);
+          Toast.show({
+            type: "success",
+            text1: "Account created!",
+            text2: "Welcome to SwiftChat",
+          });
+          await connectSocket().catch(() => {});
+          router.replace("/chat");
+        }}
+        onCancel={() => {
+          skipPin();
+          Toast.show({
+            type: "success",
+            text1: "Account created!",
+            text2: "Welcome to SwiftChat",
+          });
+          setTimeout(() => {
+            connectSocket().catch(() => {});
+            router.replace("/chat");
+          }, 300);
+        }}
+      />
     </SafeAreaView>
   );
 }

@@ -17,7 +17,7 @@ export default function HomeScreen() {
     pinMode,
     busy: pinBusy,
     setUpKeys,
-    initializeWithPin,
+    submitPin,
     skip: skipPin,
   } = useKeySetup();
   const [pinError, setPinError] = useState<string | null>(null);
@@ -61,7 +61,7 @@ export default function HomeScreen() {
           error={pinError}
           loading={pinBusy}
           onSubmit={async (pin) => {
-            const res = await initializeWithPin(pin);
+            const res = await submitPin(pin);
             if (!res.ok) {
               setPinError(res.error || "Incorrect PIN. Please try again.");
               return;

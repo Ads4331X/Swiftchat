@@ -63,6 +63,20 @@ export default function PinModal({
     setDigits(sanitized);
   };
 
+  // Clear the PIN digits from state as soon as it is submitted or dismissed so
+  // the PIN is not retained in component memory any longer than necessary.
+  const handleSubmit = () => {
+    if (loading || digits.length !== PIN_LENGTH) return;
+    const pin = digits;
+    setDigits("");
+    onSubmit(pin);
+  };
+
+  const handleCancel = () => {
+    setDigits("");
+    onCancel();
+  };
+
   // The PIN is optional (a backup feature). It never gates chatting, so it is
   // always skippable.
   const canSkip = true;
@@ -74,7 +88,7 @@ export default function PinModal({
       "Without a PIN, your messages can't be recovered if you reinstall the app or switch devices.",
       [
         { text: "Go Back", style: "cancel" },
-        { text: "Skip Anyway", style: "destructive", onPress: onCancel },
+        { text: "Skip Anyway", style: "destructive", onPress: handleCancel },
       ],
     );
   };
@@ -175,7 +189,7 @@ export default function PinModal({
             </View>
 
             <Pressable
-              onPress={() => onSubmit(digits)}
+              onPress={handleSubmit}
               disabled={digits.length !== PIN_LENGTH || loading}
               className="rounded-2xl py-4 items-center mt-5 active:opacity-90"
               style={{

@@ -65,7 +65,7 @@ export default function UserChat() {
     pinMode,
     busy: pinBusy,
     setUpKeys,
-    initializeWithPin,
+    submitPin,
     skip: skipPin,
   } = useKeySetup();
   const [pinError, setPinError] = useState<string | null>(null);
@@ -148,7 +148,7 @@ export default function UserChat() {
     };
     // Re-run once the recovery PIN is resolved so messages decrypt again after
     // restoring the private key.
-  }, [id, memberIds, needsPin]);
+  }, [id, memberIds, needsPin, setUpKeys]);
   /*
    * Background chat recede animation
    */
@@ -408,9 +408,9 @@ export default function UserChat() {
         error={pinError}
         loading={pinBusy}
         onSubmit={async (pin) => {
-          const ok = await initializeWithPin(pin);
-          if (!ok) {
-            setPinError("Incorrect PIN. Please try again.");
+          const ok = await submitPin(pin);
+          if (!ok.ok) {
+            setPinError(ok.error || "Incorrect PIN. Please try again.");
             return;
           }
         }}
