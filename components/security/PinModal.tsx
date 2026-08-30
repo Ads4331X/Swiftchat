@@ -9,7 +9,6 @@ import {
   Platform,
   KeyboardAvoidingView,
   ScrollView,
-  TouchableOpacity,
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useTheme } from "@/constants/theme-provider";

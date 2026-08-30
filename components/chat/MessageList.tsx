@@ -13,6 +13,8 @@ import { TypingIndicator } from "./TypingIndicator";
 import { BRAND_COLOR } from "@/constants/theme";
 import { markRead } from "@/lib/db";
 import { api } from "@/lib/api";
+import { listenForMarkRead } from "@/lib/socket";
+import { useEffect } from "react";
 
 type Position = {
   pageX: number;
@@ -84,25 +86,32 @@ export default function MessageList({
     return set;
   }, [messages]);
 
+  useEffect(() => {
+    const unsubscribe = listenForMarkRead(
+      async ({ conversationId, messageId, userId, readAt }) => {
+        await markRead({
+          conversationId,
+          messageId,
+          userId,
+          readAt,
+        });
+      },
+    );
+    return unsubscribe;
+  }, []);
+
   const handleViewableItemsChanged = useCallback(
     async ({ viewableItems }: any) => {
       for (let i = viewableItems.length - 1; i >= 0; i--) {
         const msg = viewableItems[i].item;
 
         if (msg.senderId !== currentUserId) {
-          const response = await api.post(
+          await api.post(
             `/api/conversations/messages/${msg.conversationId}/mark-read`,
             {
               messageId: msg.id,
             },
           );
-
-          await markRead({
-            conversationId: response.data.conversationId,
-            messageId: response.data.messageId,
-            userId: response.data.userId,
-            readAt: response.data.readAt,
-          });
 
           return;
         }

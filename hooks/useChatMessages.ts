@@ -4,6 +4,7 @@ import {
   deleteMsg,
   deletePendingMessage,
   getPendingMessages,
+  markRead,
   readMsgsPaginated,
   saveMessage,
   savePendingMessage,
@@ -13,6 +14,7 @@ import {
 import {
   connectSocket,
   joinConversation,
+  listenForMarkRead,
   listenForMessageDeletes,
   listenForMessageUpdates,
   listenForNewMessages,
@@ -36,6 +38,8 @@ export type Message = {
   nonce: string;
   /** Stable client key so optimistic rows keep their position when confirmed. */
   key?: string;
+  /** Whether the recipient has read this message (own messages only). */
+  read?: boolean;
 };
 
 const PAGE_SIZE = 50;
@@ -272,6 +276,26 @@ export default function useChatMessages(
         },
       );
 
+      const unsubscribeMarkRead = listenForMarkRead(
+        ({ conversationId, messageId, userId, readAt }) => {
+          if (Number(conversationId) !== Number(id)) return;
+          if (Number(userId) === currentUserIdRef.current) return;
+          markRead({
+            conversationId: Number(conversationId),
+            messageId,
+            userId,
+            readAt,
+          }).catch(() => {});
+          setMessages((currentMsg) =>
+            currentMsg.map((m) =>
+              m.id === messageId && m.senderId === currentUserIdRef.current
+                ? { ...m, read: true }
+                : m,
+            ),
+          );
+        },
+      );
+
       const getMessages = async () => {
         if (!decryptedConversationKey) {
           setLoading(true);
@@ -363,12 +387,11 @@ export default function useChatMessages(
         unsubscribeNewMessage && unsubscribeNewMessage();
         unsubscribeMessageUpdate && unsubscribeMessageUpdate();
         unsubscribeMessageDelete && unsubscribeMessageDelete();
+        unsubscribeMarkRead && unsubscribeMarkRead();
       };
     };
 
     let cleanupFn: (() => void) | void;
-
-    const hasKey = Boolean(decryptedConversationKey);
 
     init().then((c) => {
       if (typeof c === "function") cleanupFn = c as () => void;

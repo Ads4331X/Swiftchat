@@ -69,7 +69,6 @@ export default function UserChat() {
     skip: skipPin,
   } = useKeySetup();
   const [pinError, setPinError] = useState<string | null>(null);
-  const [keyReady, setKeyReady] = useState(false);
 
   const {
     messages,
@@ -113,7 +112,6 @@ export default function UserChat() {
 
       const ready = await setUpKeys();
       if (!ready) return;
-      if (isMounted) setKeyReady(true);
 
       try {
         const currentUserId = await getCurrentUserId();
@@ -413,7 +411,6 @@ export default function UserChat() {
             setPinError("Incorrect PIN. Please try again.");
             return;
           }
-          setKeyReady(true);
         }}
         onCancel={skipPin}
       />

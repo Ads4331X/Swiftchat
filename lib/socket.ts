@@ -90,9 +90,16 @@ export function listenForStopTyping(
 }
 
 export function listenForMarkRead(
-  callback: (data: { conversationId: number; messageId: number }) => void,
+  callback: (data: {
+    conversationId: number;
+    messageId: number;
+    userId: number;
+    readAt: string;
+  }) => void,
 ) {
   Socket?.on("mark-read", callback);
 
-  return () => Socket?.off("mark-read");
+  return () => {
+    Socket?.off("mark-read", callback);
+  };
 }

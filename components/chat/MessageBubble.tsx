@@ -2,7 +2,7 @@ import { Keyboard, Image, Pressable, Text, View } from "react-native";
 import { type Message } from "@/hooks/useChatMessages";
 import { BRAND_COLOR } from "@/constants/theme";
 import { memo, useRef } from "react";
-import Feather from "@expo/vector-icons/Feather";
+import { ReadReceipts } from "./ReadReceipts";
 
 type Position = {
   pageX: number;
@@ -33,6 +33,7 @@ type MessageBubbleContentProps = {
   sentAt?: string;
   subtleText?: string;
   isPending?: boolean;
+  isRead?: boolean;
 };
 
 function formatBubbleTime(iso: string): string {
@@ -52,13 +53,14 @@ export function MessageBubbleContent({
   sentAt,
   subtleText,
   isPending,
+  isRead,
 }: MessageBubbleContentProps) {
   const wasEdited =
     editedAt &&
     sentAt &&
     new Date(editedAt).getTime() > new Date(sentAt).getTime();
 
-  const tickColor = isMine ? "rgba(255,255,255,0.55)" : subtleText;
+  const tickColor = isMine ? "rgba(255,255,255,0.55)" : (subtleText ?? "#687076");
 
   return (
     <View
@@ -92,11 +94,7 @@ export function MessageBubbleContent({
           </Text>
         )}
         {isMine && (
-          <Feather
-            name={isPending ? "clock" : "check"}
-            size={11}
-            color={tickColor}
-          />
+          <ReadReceipts isPending={!!isPending} isRead={!!isRead} color={tickColor} />
         )}
       </View>
     </View>
@@ -210,6 +208,7 @@ export default memo(function MessageBubble({
             editedAt={message.editedAt ?? undefined}
             sentAt={message.sentAt}
             isPending={message.id < 0}
+            isRead={message.read}
           />
         </View>
       </View>
