@@ -201,7 +201,9 @@ export default function UserChat() {
     }
 
     run();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   /*

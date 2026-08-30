@@ -18,7 +18,9 @@ const STATEMENTS = [
     text TEXT NOT NULL,
     nonce TEXT NOT NULL,
     sentAt TEXT NOT NULL,
-    editedAt TEXT
+    editedAt TEXT,
+    readAt Text NOT NUll,
+    read Boolean NOT NULL
   );`,
   `CREATE TABLE IF NOT EXISTS Conversation (
     id INTEGER PRIMARY KEY,
@@ -84,7 +86,10 @@ async function openDbOnce(): Promise<SQLite.SQLiteDatabase | null> {
   }
 
   if (isWeb) {
-    console.warn("Web SQLite cache disabled — falling back to API data", lastError);
+    console.warn(
+      "Web SQLite cache disabled — falling back to API data",
+      lastError,
+    );
     return null;
   }
 
@@ -336,15 +341,6 @@ export async function getConversations(): Promise<CachedConversation[]> {
   }
 }
 
-type Chat = {
-  conversationId: number;
-  userId: number;
-  username: string;
-  avatarUrl?: string;
-  lastMessageText: string;
-  lastMessageSentAt: string;
-};
-
 export async function deleteConversation({
   conversationId,
 }: {
@@ -354,7 +350,9 @@ export async function deleteConversation({
     const db = await getDb();
     if (!db) return;
 
-    await db.runAsync(`DELETE FROM Conversation WHERE id = ?`, [conversationId]);
+    await db.runAsync(`DELETE FROM Conversation WHERE id = ?`, [
+      conversationId,
+    ]);
   } catch (err) {
     console.warn("deleteConversation skipped:", err);
   }
@@ -401,13 +399,15 @@ export async function syncConversationsWithServer({
       serverConversationIds.add(convId);
 
       if (conv.members && conv.members.length > 0) {
-        const other = conv.members.find((m) => m.id !== myId) ?? conv.members[0];
+        const other =
+          conv.members.find((m) => m.id !== myId) ?? conv.members[0];
         await saveConversation({
           id: convId,
           otherUserId: other.id,
           otherAvatarUrl: other.avatar,
           otherUsername: other.username,
-          lastMessageSentAt: conv.lastMessage?.sentAt ?? conv.lastMessageSentAt ?? "",
+          lastMessageSentAt:
+            conv.lastMessage?.sentAt ?? conv.lastMessageSentAt ?? "",
           lastMessageText: conv.lastMessage?.text ?? conv.lastMessageText ?? "",
         });
       } else if (conv.userId) {
@@ -510,17 +510,22 @@ export async function getUser(userId: number) {
   try {
     const db = await getDb();
     if (!db) return null;
-    return await db.getFirstAsync<{ id: number; username: string; avatarUrl: string | null }>(
-      `SELECT * FROM User WHERE id = ?`,
-      [userId],
-    );
+    return await db.getFirstAsync<{
+      id: number;
+      username: string;
+      avatarUrl: string | null;
+    }>(`SELECT * FROM User WHERE id = ?`, [userId]);
   } catch (err) {
     console.warn("getUser skipped:", err);
     return null;
   }
 }
 
-export async function upsertUser(userId: number, username: string, avatarUrl?: string) {
+export async function upsertUser(
+  userId: number,
+  username: string,
+  avatarUrl?: string,
+) {
   try {
     const db = await getDb();
     if (!db) return;
@@ -549,4 +554,27 @@ export async function getConversationOtherUser(conversationId: number) {
     console.warn("getConversationOtherUser skipped:", err);
     return null;
   }
+}
+
+export async function markRead({
+  messageId,
+  userId,
+  conversationId,
+  readAt,
+}: {
+  messageId: number;
+  userId: number;
+  conversationId: number;
+  readAt: string;
+}) {
+  const db = await getDb();
+
+  if (!db) return null;
+
+  return await db.runAsync(
+    `INSERT OR REPLACE INTO MessageRead
+      (messageId, userId, conversationId, readAt)
+     VALUES (?, ?, ?, ?)`,
+    [messageId, userId, conversationId, readAt],
+  );
 }

@@ -88,3 +88,11 @@ export function listenForStopTyping(
   Socket?.on("typing-stop", callback);
   return () => Socket?.off("typing-stop", callback);
 }
+
+export function listenForMarkRead(
+  callback: (data: { conversationId: number; messageId: number }) => void,
+) {
+  Socket?.on("mark-read", callback);
+
+  return () => Socket?.off("mark-read");
+}

@@ -11,6 +11,8 @@ import { type Message } from "@/hooks/useChatMessages";
 import MessageBubble from "./MessageBubble";
 import { TypingIndicator } from "./TypingIndicator";
 import { BRAND_COLOR } from "@/constants/theme";
+import { markRead } from "@/lib/db";
+import { api } from "@/lib/api";
 
 type Position = {
   pageX: number;
@@ -81,6 +83,33 @@ export default function MessageList({
     }
     return set;
   }, [messages]);
+
+  const handleViewableItemsChanged = useCallback(
+    async ({ viewableItems }: any) => {
+      for (let i = viewableItems.length - 1; i >= 0; i--) {
+        const msg = viewableItems[i].item;
+
+        if (msg.senderId !== currentUserId) {
+          const response = await api.post(
+            `/api/conversations/messages/${msg.conversationId}/mark-read`,
+            {
+              messageId: msg.id,
+            },
+          );
+
+          await markRead({
+            conversationId: response.data.conversationId,
+            messageId: response.data.messageId,
+            userId: response.data.userId,
+            readAt: response.data.readAt,
+          });
+
+          return;
+        }
+      }
+    },
+    [currentUserId],
+  );
 
   const handleScroll = useCallback(
     (e: { nativeEvent: { contentOffset: { y: number } } }) => {
@@ -171,6 +200,7 @@ export default function MessageList({
         data={invertedData}
         keyExtractor={(message) => message.key ?? String(message.id)}
         renderItem={renderItem}
+        onViewableItemsChanged={handleViewableItemsChanged}
         // NOTE: with `inverted`, header/footer are visually swapped —
         // ListHeaderComponent renders at the BOTTOM, ListFooterComponent
         // renders at the TOP.
