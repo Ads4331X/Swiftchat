@@ -24,9 +24,7 @@ export async function generateKeyPair() {
 }
 
 /**
- * Returns true when a recovery backup already exists on the server. Callers
- * use this to decide whether a needed PIN is "enter" (recover existing) or
- * "create" (brand-new user with no history to restore).
+ * Returns true when a recovery backup already exists on the server.
  */
 export async function hasKeyBackup(): Promise<boolean> {
   try {
@@ -37,80 +35,81 @@ export async function hasKeyBackup(): Promise<boolean> {
   }
 }
 
+export type EnsureKeysResult =
+  | { ok: true }
+  | { ok: false; reason: "pinNeeded" }
+  | { ok: false; reason: "lost" };
+
 /**
- * Ensures a local keypair exists, using the PIN to recover the user's real
- * keys when a backup exists (reinstall/new device).
+ * Ensures a local identity keypair exists — WITHOUT requiring a PIN.
  *
- * - Local keys present          → return them (normal path).
- * - Backup exists               → recover with the PIN; WRONG PIN throws (never
- *                                 generate a fresh keypair and orphan history).
- * - No backup at all (new user) → generate + back up with the PIN.
- *
- * A PIN is required when no local keys exist. Callers must prompt for one.
+ * - Local keys present    → re-assert the public key, done.
+ * - Recovery backup exists → the PIN is needed to restore the SAME key
+ *                            (reinstall / new device).
+ * - No local key, no backup, but the server already holds a key for this
+ *   account → the old key is lost (reinstall without backup). Never mint a
+ *   replacement (would orphan history).
+ * - No local key, no backup, server has NO key → brand-new account: generate a
+ *   fresh keypair locally.
+ */
+export async function ensureLocalKeys(): Promise<EnsureKeysResult> {
+  const privateKey = await getPrivateKey("privateKey");
+  const publicKey = await getPublicKey("publicKey");
+
+  if (privateKey && publicKey) {
+    await api.put("/api/user/public-key", { publicKey }).catch(() => {});
+    return { ok: true };
+  }
+
+  if (await hasKeyBackup()) {
+    return { ok: false, reason: "pinNeeded" };
+  }
+
+  let serverPublicKey: string | undefined;
+  try {
+    const details = await api.get("/api/user/user-details");
+    serverPublicKey = details.data.publicKey ?? undefined;
+  } catch {
+    // Can't confirm this is a brand-new account — fail closed, don't generate.
+    return { ok: false, reason: "lost" };
+  }
+
+  if (serverPublicKey) {
+    return { ok: false, reason: "lost" };
+  }
+
+  const generated = await generateKeyPair();
+  await setPublicKey("publicKey", Base64.fromUint8Array(generated.publicKey));
+  await setPrivateKey("privateKey", Base64.fromUint8Array(generated.privateKey));
+  await api
+    .put("/api/user/public-key", {
+      publicKey: Base64.fromUint8Array(generated.publicKey),
+    })
+    .catch(() => {});
+  return { ok: true };
+}
+
+/**
+ * Restores the user's real keys using the recovery PIN. NEVER generates a
+ * replacement keypair here — that would orphan every past conversation.
  */
 export async function initializeKeys(pin: string) {
   let privateKey = await getPrivateKey("privateKey");
   let publicKey = await getPublicKey("publicKey");
 
-  // Self-heal installs damaged by an older bug that generated a fresh keypair
-  // and overwrote the account's public key. If the locally-stored pair is
-  // inconsistent with the account's real key on the server, discard it so we
-  // re-recover the genuine keys from the backup below.
   if (privateKey && publicKey) {
-    try {
-      const localDerived = Base64.fromUint8Array(
-        await derivePublicKeyFromPrivateKey(Base64.toUint8Array(privateKey)),
-      );
-      const server = await api.get("/api/user/user-details");
-      const serverPublicKey: string | undefined = server.data.publicKey;
-      if (localDerived !== publicKey || (serverPublicKey && localDerived !== serverPublicKey)) {
-        privateKey = null;
-        publicKey = null;
-      }
-    } catch {
-      // If we can't verify, keep the current keys rather than risk locks.
-    }
+    await api.put("/api/user/public-key", { publicKey });
+    return { publicKey, privateKey };
   }
 
-  if (!privateKey || !publicKey) {
-    const hasBackup = await hasKeyBackup();
-
-    if (hasBackup) {
-      // Existing backup — must recover with the exact PIN. Never fall back
-      // to a fresh keypair here: that would orphan every past conversation.
-      const recovered = await recoverPrivateKey({ password: pin });
-      if (!recovered) {
-        throw new Error("Invalid recovery PIN");
-      }
-
-      const base64PrivateKey = Base64.fromUint8Array(recovered);
-      await setPrivateKey("privateKey", base64PrivateKey);
-
-      // Derive the public key from the recovered private key. This is
-      // cryptographically guaranteed to be the exact public key that paired
-      // with this private key, so it self-heals a server public key that was
-      // previously corrupted by a broken reinstall.
-      publicKey = await syncPublicKeyFromPrivateKey(recovered);
-
-      privateKey = await getPrivateKey("privateKey");
-    } else {
-      // No backup — brand new account, generate and back up with the PIN.
-      const generated = await generateKeyPair();
-      const base64PublicKey = Base64.fromUint8Array(generated.publicKey);
-      const base64PrivateKey = Base64.fromUint8Array(generated.privateKey);
-
-      await setPublicKey("publicKey", base64PublicKey);
-      await setPrivateKey("privateKey", base64PrivateKey);
-
-      await backupPrivateKey({
-        privateKey: generated.privateKey,
-        password: pin,
-      });
-
-      publicKey = await getPublicKey("publicKey");
-      privateKey = await getPrivateKey("privateKey");
-    }
+  const recovered = await recoverPrivateKey({ password: pin });
+  if (!recovered) {
+    throw new Error("Invalid recovery PIN");
   }
+
+  await setPrivateKey("privateKey", Base64.fromUint8Array(recovered));
+  publicKey = await syncPublicKeyFromPrivateKey(recovered);
+  privateKey = await getPrivateKey("privateKey");
 
   if (!publicKey || !privateKey) {
     throw new Error("Failed to initialize encryption keys");
@@ -118,6 +117,21 @@ export async function initializeKeys(pin: string) {
 
   await api.put("/api/user/public-key", { publicKey });
   return { publicKey, privateKey };
+}
+
+/**
+ * Backs up the EXISTING locally-stored private key with a PIN (adding or
+ * updating a recovery PIN). Never replaces the identity key.
+ */
+export async function addRecoveryPin(password: string) {
+  const privateKey = await getPrivateKey("privateKey");
+  if (!privateKey) {
+    throw new Error("No local key found. Please log in first.");
+  }
+  await backupPrivateKey({
+    privateKey: Base64.toUint8Array(privateKey),
+    password,
+  });
 }
 
 export async function derivePublicKeyFromPrivateKey(
@@ -204,6 +218,14 @@ export async function decryptConversationKey({
  *
  * NOTE: no longer calls initializeKeys() here — keys must already be set up
  * at login/register. If they're missing, the error below tells you why.
+ *
+ * Returns:
+ *  - a Uint8Array conversation key when it could be fetched AND decrypted
+ *  - null when the key exists but THIS device cannot decrypt it (e.g. the
+ *    device has not restored its private key yet). Callers must treat null as
+ *    "undecryptable on this device" and show a placeholder WITHOUT ever
+ *    re-generating the key — re-generating would overwrite the key for every
+ *    member and orphan all previously-encrypted history.
  */
 export async function getOrCreateConversationKey(
   conversationId: string,
@@ -213,9 +235,10 @@ export async function getOrCreateConversationKey(
   const { encryptedConversationKey, nonce, createdById } =
     await getEncryptedConversationKey(conversationId);
 
+  const receiverPrivateKey = await getPrivateKey("privateKey");
+
   // 2. If it already exists, attempt to decrypt it
   if (encryptedConversationKey && nonce && createdById) {
-    const receiverPrivateKey = await getPrivateKey("privateKey");
     if (receiverPrivateKey) {
       try {
         const senderPublicKeyResponse = await api.get(
@@ -236,28 +259,34 @@ export async function getOrCreateConversationKey(
         }
       } catch {
         console.warn(
-          `Could not decrypt existing conversation key for conversation ${conversationId}. Re-generating key...`,
+          `Could not decrypt existing conversation key for conversation ${conversationId}.`,
         );
       }
     }
+
+    // The key exists but this device can't decrypt it (no private key, or the
+    // local keys don't match the conversation's members). NEVER regenerate it
+    // here — reassigning the key would orphan every previously-encrypted
+    // message for the OTHER members who can still decrypt. Only this device
+    // should see a placeholder until it restores its real private key.
+    return null;
   }
 
-  // 3. Doesn't exist yet — generate one and distribute it to every member
+  // 3. Doesn't exist yet — generate one and distribute it to every member.
+  //    Only possible if we actually hold a private key to sign with.
+  if (!receiverPrivateKey) {
+    return null;
+  }
+
   const conversationKey = await generateConversationKey();
 
   for (const memberId of memberIds) {
     const publicKeyResponse = await api.get(`/api/user/${memberId}/public-key`);
-    const senderPrivateKey = await getPrivateKey("privateKey");
-    if (!senderPrivateKey) {
-      throw new Error(
-        "Private key not found — call initializeKeys() at login first",
-      );
-    }
 
     const { encryptedKey, nonce: keyNonce } = await generateEncryptedKey({
       conversationKey,
       receiverPublicKey: Base64.toUint8Array(publicKeyResponse.data.publicKey),
-      senderPrivateKey: Base64.toUint8Array(senderPrivateKey),
+      senderPrivateKey: Base64.toUint8Array(receiverPrivateKey),
     });
 
     await api.put(`/api/conversations/${conversationId}/key/${memberId}`, {

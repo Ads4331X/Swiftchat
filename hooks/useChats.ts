@@ -104,11 +104,16 @@ export default function useChats() {
               memberIds,
             );
 
-            const decrypted = await decryptMessage({
-              encryptedMessage: chat.lastMessage.text,
-              nonce: chat.lastMessage.nonce,
-              decryptedConversationKey: conversationKey,
-            });
+            // Key exists but this device can't decrypt it (no private key yet).
+            // Show a placeholder — regenerating is handled inside crypto and
+            // will NOT be done, so other devices keep their working key.
+            const decrypted = conversationKey
+              ? await decryptMessage({
+                  encryptedMessage: chat.lastMessage.text,
+                  nonce: chat.lastMessage.nonce,
+                  decryptedConversationKey: conversationKey,
+                })
+              : { decryptMessage: "[Encrypted Message]" };
 
             return {
               ...chat,
@@ -210,11 +215,13 @@ export default function useChats() {
           memberIds,
         );
 
-        const decrypted = await decryptMessage({
-          encryptedMessage: message.text,
-          nonce: message.nonce,
-          decryptedConversationKey: conversationKey,
-        });
+        const decrypted = conversationKey
+          ? await decryptMessage({
+              encryptedMessage: message.text,
+              nonce: message.nonce,
+              decryptedConversationKey: conversationKey,
+            })
+          : { decryptMessage: "[Encrypted Message]" };
 
         const decryptedText = decrypted.decryptMessage;
 

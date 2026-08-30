@@ -38,8 +38,8 @@ export default function UserSettings() {
     needsPin,
     pinMode,
     busy: pinBusy,
-    setUpKeys,
-    initializeWithPin,
+    startAddPin,
+    addPin,
     skip: skipPin,
   } = useKeySetup();
 
@@ -164,7 +164,7 @@ export default function UserSettings() {
               subtitle="Protect your encrypted messages"
               onPress={() => {
                 setPinError(null);
-                setUpKeys();
+                startAddPin();
               }}
             />
             <SettingsCard
@@ -195,9 +195,9 @@ export default function UserSettings() {
         error={pinError}
         loading={pinBusy}
         onSubmit={async (pin) => {
-          const ok = await initializeWithPin(pin);
-          if (!ok) {
-            setPinError("Incorrect PIN. Please try again.");
+          const ok = await addPin(pin);
+          if (!ok.ok) {
+            setPinError(ok.error ?? "Incorrect PIN. Please try again.");
             return;
           }
           setPinError(null);

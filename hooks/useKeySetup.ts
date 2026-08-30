@@ -1,51 +1,26 @@
 import { useCallback, useState } from "react";
-import { getPrivateKey, getPublicKey } from "@/lib/secureStorage";
 import { clearAllLocalData } from "@/lib/db";
 import { getBackendUrl } from "@/lib/api";
-import {
-  hasKeyBackup,
-  initializeKeys,
-} from "@/lib/crypto";
+import { addRecoveryPin, ensureLocalKeys, initializeKeys } from "@/lib/crypto";
 
 /**
- * Ensures encryption keys are set up, collecting the recovery PIN if none
- * exist locally (reinstall / new device / first login).
- *
- * Returns:
- *  - needsPin:true + pinMode  → show the PinModal ("create" when no backup
- *                               exists, "enter" when recovering existing keys).
- *  - needsPin:false           → keys already ready.
- *
- * Callers should:
- *  - show PinModal when `needsPin` is true
- *  - call `initializeWithPin(pin)` on submit
- *  - call `skip()` on cancel (history will NOT be restored)
+ * Ensures encryption keys are set up. New accounts get a keypair generated
+ * automatically (no PIN required); a recovery PIN is only asked for when
+ * restoring existing keys on a new device/reinstall. The PIN is purely an
+ * optional back-up feature and never gates chatting.
  */
 export function useKeySetup() {
   const [needsPin, setNeedsPin] = useState(false);
-  const [pinMode, setPinMode] = useState<"create" | "enter">("enter");
+  const [pinMode, setPinMode] = useState<"enter" | "add">("enter");
   const [busy, setBusy] = useState(false);
 
   const setUpKeys = useCallback(async (): Promise<boolean> => {
-    const privateKey = await getPrivateKey("privateKey");
-    const publicKey = await getPublicKey("publicKey");
-
-    if (privateKey && publicKey) {
-      // Local keys exist. Re-assert the public key on the server: after a
-      // server reset the stored publicKey is NULL, and without it the app
-      // hits 404s when fetching keys for conversations. initializeKeys()
-      // re-uploads it (the PIN arg is unused on this path).
-      try {
-        await initializeKeys("");
-      } catch {
-        // Ignore — offline or server hiccup; keys will re-sync next time.
-      }
+    const result = await ensureLocalKeys();
+    if (result.ok || result.reason === "lost") {
       setNeedsPin(false);
       return true;
     }
-
-    const hasBackup = await hasKeyBackup();
-    setPinMode(hasBackup ? "enter" : "create");
+    setPinMode("enter");
     setNeedsPin(true);
     return false;
   }, []);
@@ -75,9 +50,36 @@ export function useKeySetup() {
     }
   }, []);
 
+  const startAddPin = useCallback(() => {
+    setPinMode("add");
+    setNeedsPin(true);
+  }, []);
+
+  const addPin = useCallback(async (pin: string) => {
+    setBusy(true);
+    try {
+      await addRecoveryPin(pin);
+      setNeedsPin(false);
+      return { ok: true };
+    } catch (err: any) {
+      return { ok: false, error: err?.message || "Could not save PIN." };
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
   const skip = useCallback(() => {
     setNeedsPin(false);
   }, []);
 
-  return { needsPin, pinMode, busy, setUpKeys, initializeWithPin, skip };
+  return {
+    needsPin,
+    pinMode,
+    busy,
+    setUpKeys,
+    initializeWithPin,
+    startAddPin,
+    addPin,
+    skip,
+  };
 }

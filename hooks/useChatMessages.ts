@@ -69,8 +69,19 @@ export default function useChatMessages(
     decryptedConversationKey,
   }: {
     serverMessages: Message[];
-    decryptedConversationKey: Uint8Array;
+    decryptedConversationKey: Uint8Array | null | undefined;
   }) => {
+    // No conversation key on this device (private key not restored yet). We
+    // still surface the messages so the user sees them, but as placeholders —
+    // and we must NEVER generate a key here (that would break decryption for
+    // other members).
+    if (!decryptedConversationKey) {
+      return serverMessages.map((message) => ({
+        ...message,
+        text: "[Encrypted Message]",
+      }));
+    }
+
     return await Promise.all(
       serverMessages.map(async (message) => {
         const { decryptMessage: decryptedText } = await decryptMessage({
@@ -93,8 +104,6 @@ export default function useChatMessages(
   // Unchanged messages keep their previous object reference so memoized
   // bubbles skip re-rendering (no full-list flash on flush).
   const reconcileMessages = useCallback(async () => {
-    if (!decryptedConversationKey) return;
-
     const cache = await readMsgsPaginated({
       conversationId: Number(id),
       limit: 200,
@@ -181,10 +190,7 @@ export default function useChatMessages(
 
       joinConversation({ id: String(id) });
       const unsubscribeNewMessage = listenForNewMessages(async (newMessage) => {
-        if (
-          Number(newMessage.conversationId) !== Number(id) ||
-          !decryptedConversationKey
-        ) {
+        if (Number(newMessage.conversationId) !== Number(id)) {
           return;
         }
 
@@ -297,11 +303,6 @@ export default function useChatMessages(
       );
 
       const getMessages = async () => {
-        if (!decryptedConversationKey) {
-          setLoading(true);
-          return;
-        }
-
         setLoading(true);
         try {
           // 1. Load from local cache first (instant display < 10ms)
@@ -330,7 +331,7 @@ export default function useChatMessages(
           const response = await api.get(
             `/api/conversations/messages/${id}?limit=${PAGE_SIZE}`,
           );
-          if (!active || !decryptedConversationKey) return;
+          if (!active) return;
           const serverMessages: Message[] = response.data;
           const decryptedServerMessages = await decryptChatMessages({
             serverMessages,
@@ -421,7 +422,6 @@ export default function useChatMessages(
         `/api/conversations/messages/${id}?limit=${PAGE_SIZE}&before=${oldest.id}`,
       );
       const olderMessages: Message[] = response.data;
-      if (!decryptedConversationKey) return;
       const decryptedOlderMessages = await decryptChatMessages({
         serverMessages: olderMessages,
         decryptedConversationKey,
@@ -471,8 +471,6 @@ export default function useChatMessages(
           setHasMore(false);
           return;
         }
-
-        if (!decryptedConversationKey) return;
 
         const decryptedLocalOlder = await decryptChatMessages({
           serverMessages: localOlder,

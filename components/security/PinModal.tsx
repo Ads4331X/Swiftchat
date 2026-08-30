@@ -16,7 +16,7 @@ import { BRAND_COLOR } from "@/constants/theme";
 
 type PinModalProps = {
   visible: boolean;
-  mode: "create" | "enter";
+  mode: "enter" | "add";
   onSubmit: (pin: string) => void;
   onCancel: () => void;
   error?: string | null;
@@ -26,14 +26,13 @@ type PinModalProps = {
 const PIN_LENGTH = 6;
 
 const TITLES = {
-  create: "Create a Recovery PIN",
   enter: "Enter Your Recovery PIN",
+  add: "Set a Recovery PIN",
 } as const;
 
 const SUBTITLES = {
-  create:
-    "You'll need this to recover your messages if you log in on a new device.",
   enter: "Enter the PIN you created to restore your encrypted messages.",
+  add: "This PIN backs up your existing encryption key so you can restore it on a new device.",
 } as const;
 
 export default function PinModal({
@@ -64,10 +63,15 @@ export default function PinModal({
     setDigits(sanitized);
   };
 
+  // The PIN is optional (a backup feature). It never gates chatting, so it is
+  // always skippable.
+  const canSkip = true;
+
   const confirmCancel = () => {
+    if (!canSkip) return;
     Alert.alert(
       "Skip Recovery?",
-      "Without a PIN, your messages can't be recovered if you reinstall the app or switch devices. This can't be undone later.",
+      "Without a PIN, your messages can't be recovered if you reinstall the app or switch devices.",
       [
         { text: "Go Back", style: "cancel" },
         { text: "Skip Anyway", style: "destructive", onPress: onCancel },
@@ -180,17 +184,23 @@ export default function PinModal({
               }}
             >
               <Text className="text-white text-lg font-semibold">
-                {loading ? "Verifying..." : mode === "create" ? "Save PIN" : "Unlock"}
+                {loading
+                  ? "Verifying..."
+                  : mode === "add"
+                    ? "Save PIN"
+                    : "Unlock"}
               </Text>
             </Pressable>
 
-            <Pressable
-              onPress={confirmCancel}
-              hitSlop={{ top: 12, bottom: 12 }}
-              className="py-3 items-center mt-1"
-            >
-              <Text className="text-[#EF4444] font-medium">Cancel</Text>
-            </Pressable>
+            {canSkip ? (
+              <Pressable
+                onPress={confirmCancel}
+                hitSlop={{ top: 12, bottom: 12 }}
+                className="py-3 items-center mt-1"
+              >
+                <Text className="text-[#EF4444] font-medium">Cancel</Text>
+              </Pressable>
+            ) : null}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>

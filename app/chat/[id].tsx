@@ -134,7 +134,7 @@ export default function UserChat() {
         );
 
         if (isMounted) {
-          setdecryptedConversationKey(conversationKey);
+          setdecryptedConversationKey(conversationKey ?? undefined);
         }
       } catch (error) {
         console.error("Failed to load conversation key:", error);
@@ -146,7 +146,9 @@ export default function UserChat() {
     return () => {
       isMounted = false;
     };
-  }, [id, memberIds]);
+    // Re-run once the recovery PIN is resolved so messages decrypt again after
+    // restoring the private key.
+  }, [id, memberIds, needsPin]);
   /*
    * Background chat recede animation
    */
