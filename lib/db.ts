@@ -44,6 +44,13 @@ const STATEMENTS = [
     username TEXT NOT NULL,
     avatarUrl TEXT
   );`,
+  `CREATE TABLE IF NOT EXISTS MessageRead (
+    id INTEGER PRIMARY KEY,
+    messageId INTEGER NOT NULL,
+    userId INTEGER NOT NULL,
+    conversationId INTEGER NOT NULL,
+    readAt TEXT NOT NULL
+  );`,
 ];
 
 async function openDbOnce(): Promise<SQLite.SQLiteDatabase | null> {
