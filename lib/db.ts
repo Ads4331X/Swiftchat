@@ -52,6 +52,10 @@ const STATEMENTS = [
     conversationId INTEGER NOT NULL,
     readAt TEXT NOT NULL
   );`,
+  `CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY NOT NULL,
+    value TEXT NOT NULL
+  );`,
 ];
 
 async function openDbOnce(): Promise<SQLite.SQLiteDatabase | null> {
@@ -145,7 +149,15 @@ export async function saveMessage({
     if (!db) return;
     await db.runAsync(
       `INSERT OR REPLACE INTO Message (id, text, sentAt, senderId, conversationId , nonce, reactions) VALUES (?, ?, ?, ?, ? , ?, ?)`,
-      [messageId, message, sentAt, SenderId, ConversationId, nonce, reactions ?? null],
+      [
+        messageId,
+        message,
+        sentAt,
+        SenderId,
+        ConversationId,
+        nonce,
+        reactions ?? null,
+      ],
     );
   } catch (err) {
     console.warn("saveMessage skipped:", err);
@@ -191,10 +203,10 @@ export async function updateMessageReactions({
   try {
     const db = await getDb();
     if (!db) return;
-    await db.runAsync(
-      `UPDATE Message SET reactions = ? WHERE id = ?`,
-      [reactions, messageId],
-    );
+    await db.runAsync(`UPDATE Message SET reactions = ? WHERE id = ?`, [
+      reactions,
+      messageId,
+    ]);
   } catch (err) {
     console.warn("updateMessageReactions skipped:", err);
   }
@@ -630,4 +642,28 @@ export async function getMessageRead(conversationId: number) {
      LIMIT 1`,
     [conversationId],
   );
+}
+
+export async function setSetting(key: string, val: string) {
+  const db = await getDb();
+  if (!db) return null;
+
+  return db.runAsync(
+    `INSERT INTO settings (key, value)
+     VALUES (?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [key, val],
+  );
+}
+
+export async function getSetting(key: string) {
+  const db = await getDb();
+  if (!db) return null;
+
+  const result = await db.getFirstAsync<{ value: string }>(
+    `SELECT value FROM settings WHERE key = ?`,
+    [key],
+  );
+
+  return result?.value ?? null;
 }

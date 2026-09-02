@@ -147,7 +147,9 @@ export default function UserSettings() {
             <SettingsCard
               icon={<Feather name="eye" size={20} color={BRAND_COLOR} />}
               title="Appearance"
-              onPress={() => {}}
+              onPress={() => {
+                router.push("/appearance");
+              }}
             />
           </View>
 
