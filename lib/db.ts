@@ -20,7 +20,8 @@ const STATEMENTS = [
     sentAt TEXT NOT NULL,
     editedAt TEXT,
     readAt Text NOT NUll,
-    read Boolean NOT NULL
+    read Boolean NOT NULL,
+    reactions TEXT
   );`,
   `CREATE TABLE IF NOT EXISTS Conversation (
     id INTEGER PRIMARY KEY,
@@ -83,6 +84,11 @@ async function openDbOnce(): Promise<SQLite.SQLiteDatabase | null> {
       try {
         await database.execAsync(`ALTER TABLE Message ADD COLUMN nonce TEXT;`);
       } catch {}
+      try {
+        await database.execAsync(
+          `ALTER TABLE Message ADD COLUMN reactions TEXT;`,
+        );
+      } catch {}
       console.log("SQLite database initialized");
       return database;
     } catch (error) {
@@ -122,6 +128,7 @@ type SaveMsgParams = {
   SenderId: number;
   ConversationId: number;
   nonce: string;
+  reactions?: string;
 };
 
 export async function saveMessage({
@@ -131,13 +138,14 @@ export async function saveMessage({
   ConversationId,
   messageId,
   nonce,
+  reactions,
 }: SaveMsgParams) {
   try {
     const db = await getDb();
     if (!db) return;
     await db.runAsync(
-      `INSERT OR REPLACE INTO Message (id, text, sentAt, senderId, conversationId , nonce) VALUES (?, ?, ?, ?, ? , ?)`,
-      [messageId, message, sentAt, SenderId, ConversationId, nonce],
+      `INSERT OR REPLACE INTO Message (id, text, sentAt, senderId, conversationId , nonce, reactions) VALUES (?, ?, ?, ?, ? , ?, ?)`,
+      [messageId, message, sentAt, SenderId, ConversationId, nonce, reactions ?? null],
     );
   } catch (err) {
     console.warn("saveMessage skipped:", err);
@@ -172,6 +180,25 @@ export async function updateMsg({
 type DeleteMsg = {
   messageId: number;
 };
+
+export async function updateMessageReactions({
+  messageId,
+  reactions,
+}: {
+  messageId: number;
+  reactions: string;
+}) {
+  try {
+    const db = await getDb();
+    if (!db) return;
+    await db.runAsync(
+      `UPDATE Message SET reactions = ? WHERE id = ?`,
+      [reactions, messageId],
+    );
+  } catch (err) {
+    console.warn("updateMessageReactions skipped:", err);
+  }
+}
 
 export async function deleteMsg({ messageId }: DeleteMsg) {
   try {

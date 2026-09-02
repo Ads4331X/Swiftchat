@@ -9,6 +9,7 @@ import {
   saveMessage,
   savePendingMessage,
   updateConversationPreview,
+  updateMessageReactions,
   updateMsg,
 } from "@/lib/db";
 import {
@@ -55,6 +56,27 @@ const PAGE_SIZE = 50;
 
 function keyFor(message: Message): string {
   return message.key ?? `m-${message.id}`;
+}
+
+// SQLite returns the `reactions` column as a JSON string. Parse it back into
+// the `MessageReaction[]` shape used in-memory, treating invalid/empty values
+// as "no reactions".
+function parseLocalMessage(
+  row: Message & { reactions?: string | null },
+): Message {
+  const { reactions, ...rest } = row;
+  if (!reactions) return { ...rest, reactions: [] };
+  try {
+    const parsed = JSON.parse(reactions);
+    return {
+      ...rest,
+      reactions: Array.isArray(parsed)
+        ? (parsed as MessageReaction[])
+        : [],
+    };
+  } catch {
+    return { ...rest, reactions: [] };
+  }
 }
 
 export default function useChatMessages(
@@ -121,7 +143,9 @@ export default function useChatMessages(
     const pendingIds = new Set(pending.map((p) => p.id));
 
     const confirmed = await decryptChatMessages({
-      serverMessages: cache as Message[],
+      serverMessages: (cache as (Message & { reactions?: string | null })[]).map(
+        parseLocalMessage,
+      ),
       decryptedConversationKey,
     });
 
@@ -225,6 +249,9 @@ export default function useChatMessages(
           SenderId: newMessage.senderId,
           ConversationId: newMessage.conversationId,
           nonce: newMessage.nonce,
+          reactions: newMessage.reactions
+            ? JSON.stringify(newMessage.reactions)
+            : undefined,
         }).catch(() => {});
 
         setMessages((currentMsg) => {
@@ -321,20 +348,26 @@ export default function useChatMessages(
         emoji: string,
         removed: boolean,
       ) => {
+        let found = false;
+        let nextReactions: MessageReaction[] = [];
         setMessages((currentMsg) =>
           currentMsg.map((m) => {
             if (m.id !== messageId) return m;
+            found = true;
             const reactions = m.reactions ?? [];
             const others = reactions.filter((r) => r.user.id !== userId);
-            if (removed) {
-              return { ...m, reactions: others };
-            }
-            return {
-              ...m,
-              reactions: [...others, { emoji, user: { id: userId } }],
-            };
+            nextReactions = removed
+              ? others
+              : [...others, { emoji, user: { id: userId } }];
+            return { ...m, reactions: nextReactions };
           }),
         );
+        if (found) {
+          updateMessageReactions({
+            messageId,
+            reactions: JSON.stringify(nextReactions),
+          }).catch(() => {});
+        }
       };
 
       const unsubscribeReaction = listenForReaction(
@@ -359,11 +392,11 @@ export default function useChatMessages(
             const cache = (await readMsgsPaginated({
               conversationId: Number(id),
               limit: 200,
-            })) as Message[];
+            })) as (Message & { reactions?: string | null })[];
 
             if (cache.length > 0) {
               const decryptedCache = await decryptChatMessages({
-                serverMessages: cache,
+                serverMessages: cache.map(parseLocalMessage),
                 decryptedConversationKey,
               });
 
@@ -423,6 +456,9 @@ export default function useChatMessages(
               ConversationId: Number(msg.conversationId),
               SenderId: Number(msg.senderId),
               nonce: msg.nonce,
+              reactions: msg.reactions
+                ? JSON.stringify(msg.reactions)
+                : undefined,
             }).catch(() => {});
           });
 
@@ -509,6 +545,9 @@ export default function useChatMessages(
           ConversationId: Number(msg.conversationId),
           SenderId: Number(msg.senderId),
           nonce: msg.nonce,
+          reactions: msg.reactions
+            ? JSON.stringify(msg.reactions)
+            : undefined,
         }).catch(() => {});
       });
 
@@ -525,7 +564,7 @@ export default function useChatMessages(
           conversationId: Number(id),
           before: oldest.sentAt,
           limit: PAGE_SIZE,
-        })) as Message[];
+        })) as (Message & { reactions?: string | null })[];
 
         if (localOlder.length === 0) {
           setHasMore(false);
@@ -533,7 +572,7 @@ export default function useChatMessages(
         }
 
         const decryptedLocalOlder = await decryptChatMessages({
-          serverMessages: localOlder,
+          serverMessages: localOlder.map(parseLocalMessage),
           decryptedConversationKey,
         });
 
@@ -581,6 +620,7 @@ export default function useChatMessages(
     if (!currentUserId) return;
     const numericId = Number(messageId);
     let wasRemoved = false;
+    let nextReactions: MessageReaction[] = [];
 
     setMessages((prev) =>
       prev.map((m) => {
@@ -589,14 +629,20 @@ export default function useChatMessages(
         const existing = reactions.find((r) => r.user.id === currentUserId);
         wasRemoved = existing?.emoji === emoji;
         const others = reactions.filter((r) => r.user.id !== currentUserId);
+        nextReactions = wasRemoved
+          ? others
+          : [...others, { emoji, user: { id: currentUserId } }];
         return {
           ...m,
-          reactions: wasRemoved
-            ? others
-            : [...others, { emoji, user: { id: currentUserId } }],
+          reactions: nextReactions,
         };
       }),
     );
+
+    updateMessageReactions({
+      messageId: numericId,
+      reactions: JSON.stringify(nextReactions),
+    }).catch(() => {});
 
     try {
       await api.post(`/api/conversations/messages/${messageId}/reactions`, {
@@ -604,19 +650,25 @@ export default function useChatMessages(
       });
     } catch (err) {
       // roll back on failure
+      let rollbackReactions: MessageReaction[] = [];
       setMessages((prev) =>
         prev.map((m) => {
           if (m.id !== numericId) return m;
           const reactions = m.reactions ?? [];
           const others = reactions.filter((r) => r.user.id !== currentUserId);
+          rollbackReactions = wasRemoved
+            ? [...others, { emoji, user: { id: currentUserId } }]
+            : others;
           return {
             ...m,
-            reactions: wasRemoved
-              ? [...others, { emoji, user: { id: currentUserId } }]
-              : others,
+            reactions: rollbackReactions,
           };
         }),
       );
+      updateMessageReactions({
+        messageId: numericId,
+        reactions: JSON.stringify(rollbackReactions),
+      }).catch(() => {});
       console.warn("Failed to react:", err);
     }
   };
@@ -682,6 +734,9 @@ export default function useChatMessages(
           SenderId: response.data.senderId,
           ConversationId: response.data.conversationId,
           nonce: encryptedNonce,
+          reactions: response.data.reactions
+            ? JSON.stringify(response.data.reactions)
+            : undefined,
         });
         await deletePendingMessage({ messageId: tempId });
       } catch (err) {
