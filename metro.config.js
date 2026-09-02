@@ -7,14 +7,19 @@ config.resolver.assetExts.push("wasm");
 config.resolver.unstable_enablePackageExports = false;
 
 const defaultResolveRequest = config.resolver.resolveRequest;
+
+// Force the CJS (main) builds of the libsodium packages on web. Their ESM
+// builds (`.mjs`) reference `import.meta`, which Metro/Hermes cannot parse.
+const LIBSODIUM_CJS = new Set([
+  "libsodium-wrappers",
+  "libsodium",
+  "libsodium-wrappers-sumo",
+  "libsodium-sumo",
+]);
+
 config.resolver.resolveRequest = (context, moduleName, platform) => {
-  if (
-    (moduleName === "libsodium-wrappers" || moduleName === "libsodium") &&
-    platform === "web"
-  ) {
-    console.log("🔍 Redirecting", moduleName, "to CJS build");
+  if (LIBSODIUM_CJS.has(moduleName) && platform === "web") {
     const resolved = require.resolve(moduleName);
-    console.log("✅ Resolved to:", resolved);
     return {
       filePath: resolved,
       type: "sourceFile",

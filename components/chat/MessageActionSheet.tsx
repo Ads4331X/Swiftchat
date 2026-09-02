@@ -24,6 +24,8 @@ import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import Feather from "@expo/vector-icons/Feather";
 import { MessageBubbleContent } from "./MessageBubble";
+import { api } from "@/lib/api";
+import { useLocalSearchParams } from "expo-router";
 
 const SCREEN = Dimensions.get("window");
 
@@ -289,14 +291,25 @@ export function MessageActionSheet({
     transform: [{ translateY: menuTranslateY.value }],
   }));
 
+  const { id } = useLocalSearchParams<{ id: string }>();
+
   if (!mounted || !position || !layout) return null;
 
-  const handleReaction = (index: number) => {
+  const handleReaction = async (emoji: string, index: number) => {
     reactScales[index].value = withSequence(
       withSpring(1.35, { damping: 10, stiffness: 400 }),
       withSpring(1, { damping: 14, stiffness: 300 }),
     );
     Haptics.selectionAsync();
+    const result = await api.post(
+      `/api/conversations/messages/${id}/reactions`,
+      {
+        emoji,
+        messageId,
+      },
+    );
+    console.log(result);
+
     dismiss();
   };
 
@@ -427,7 +440,7 @@ export function MessageActionSheet({
                 key={i}
                 emoji={emoji}
                 scaleValue={reactScales[i]}
-                onPress={() => handleReaction(i)}
+                onPress={() => handleReaction(emoji, i)}
               />
             ))}
           </Animated.View>

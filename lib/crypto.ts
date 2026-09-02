@@ -386,6 +386,11 @@ async function deriveKeyFromPin(
 }
 
 function defaultBackupParams(): KeyBackupParams {
+  if (typeof sodium.crypto_pwhash !== "function") {
+    throw new Error(
+      "libsodium crypto_pwhash is unavailable in this runtime. Use the sumo build on web.",
+    );
+  }
   const argon2id =
     sodium.crypto_pwhash_ALG_ARGON2ID13 ?? sodium.crypto_pwhash_ALG_DEFAULT;
   return {

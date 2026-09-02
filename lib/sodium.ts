@@ -11,7 +11,7 @@ try {
 }
 
 if (!sodiumModule) {
-  sodiumModule = require("libsodium-wrappers");
+  sodiumModule = require("libsodium-wrappers-sumo");
 }
 
 export default sodiumModule.default ?? sodiumModule;
