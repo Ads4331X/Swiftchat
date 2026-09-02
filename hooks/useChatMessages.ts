@@ -18,6 +18,8 @@ import {
   listenForMessageDeletes,
   listenForMessageUpdates,
   listenForNewMessages,
+  listenForReaction,
+  listenForReactionUpdate,
 } from "@/lib/socket";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNetInfo } from "@react-native-community/netinfo";
@@ -27,6 +29,11 @@ import {
   onPendingFlushed,
   releaseFlushLock,
 } from "@/lib/pendingSync";
+
+export type MessageReaction = {
+  emoji: string;
+  user: { id: number };
+};
 
 export type Message = {
   id: number;
@@ -40,6 +47,8 @@ export type Message = {
   key?: string;
   /** Whether the recipient has read this message (own messages only). */
   read?: boolean;
+  /** Emoji reactions attached to this message (from the server). */
+  reactions?: MessageReaction[];
 };
 
 const PAGE_SIZE = 50;
@@ -168,9 +177,13 @@ export default function useChatMessages(
     });
 
     const online =
-      isConnected === true || isInternetReachable !== false || isInternetReachable == null;
+      isConnected === true ||
+      isInternetReachable !== false ||
+      isInternetReachable == null;
     if (online) {
-      flushPendingMessages().then(reconcileMessages).catch(() => {});
+      flushPendingMessages()
+        .then(reconcileMessages)
+        .catch(() => {});
     }
 
     return unsubscribe;
@@ -302,6 +315,42 @@ export default function useChatMessages(
         },
       );
 
+      const applyReaction = (
+        messageId: number,
+        userId: number,
+        emoji: string,
+        removed: boolean,
+      ) => {
+        setMessages((currentMsg) =>
+          currentMsg.map((m) => {
+            if (m.id !== messageId) return m;
+            const reactions = m.reactions ?? [];
+            const others = reactions.filter((r) => r.user.id !== userId);
+            if (removed) {
+              return { ...m, reactions: others };
+            }
+            return {
+              ...m,
+              reactions: [...others, { emoji, user: { id: userId } }],
+            };
+          }),
+        );
+      };
+
+      const unsubscribeReaction = listenForReaction(
+        ({ conversationId, messageId, userId, emoji, removed }) => {
+          if (Number(conversationId) !== Number(id)) return;
+          applyReaction(Number(messageId), Number(userId), emoji, !!removed);
+        },
+      );
+
+      const unsubscribeReactionUpdate = listenForReactionUpdate(
+        ({ conversationId, messageId, userId, emoji, removed }) => {
+          if (Number(conversationId) !== Number(id)) return;
+          applyReaction(Number(messageId), Number(userId), emoji, !!removed);
+        },
+      );
+
       const getMessages = async () => {
         setLoading(true);
         try {
@@ -398,6 +447,8 @@ export default function useChatMessages(
         unsubscribeMessageUpdate && unsubscribeMessageUpdate();
         unsubscribeMessageDelete && unsubscribeMessageDelete();
         unsubscribeMarkRead && unsubscribeMarkRead();
+        unsubscribeReaction && unsubscribeReaction();
+        unsubscribeReactionUpdate && unsubscribeReactionUpdate();
       };
     };
 
@@ -526,6 +577,50 @@ export default function useChatMessages(
     });
   };
 
+  const reactToMessage = async (messageId: string | number, emoji: string) => {
+    if (!currentUserId) return;
+    const numericId = Number(messageId);
+    let wasRemoved = false;
+
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.id !== numericId) return m;
+        const reactions = m.reactions ?? [];
+        const existing = reactions.find((r) => r.user.id === currentUserId);
+        wasRemoved = existing?.emoji === emoji;
+        const others = reactions.filter((r) => r.user.id !== currentUserId);
+        return {
+          ...m,
+          reactions: wasRemoved
+            ? others
+            : [...others, { emoji, user: { id: currentUserId } }],
+        };
+      }),
+    );
+
+    try {
+      await api.post(`/api/conversations/messages/${messageId}/reactions`, {
+        emoji,
+      });
+    } catch (err) {
+      // roll back on failure
+      setMessages((prev) =>
+        prev.map((m) => {
+          if (m.id !== numericId) return m;
+          const reactions = m.reactions ?? [];
+          const others = reactions.filter((r) => r.user.id !== currentUserId);
+          return {
+            ...m,
+            reactions: wasRemoved
+              ? [...others, { emoji, user: { id: currentUserId } }]
+              : others,
+          };
+        }),
+      );
+      console.warn("Failed to react:", err);
+    }
+  };
+
   const deleteMessage = async (messageId: string | number) => {
     await api.delete(`/api/conversations/messages/${messageId}`);
     await deleteMsg({ messageId: Number(messageId) });
@@ -613,7 +708,10 @@ export default function useChatMessages(
         });
         if (swapped) return next;
         if (next.some((m) => m.id === confirmedMessage.id)) return next;
-        return [...next, { ...confirmedMessage, key: keyFor(confirmedMessage) }];
+        return [
+          ...next,
+          { ...confirmedMessage, key: keyFor(confirmedMessage) },
+        ];
       });
     } catch {
       // Still offline or server rejected — keep the pending row; the
@@ -632,6 +730,7 @@ export default function useChatMessages(
     sendMessage,
     editMessage,
     deleteMessage,
+    reactToMessage,
     loadMore,
   };
 }

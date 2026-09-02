@@ -24,8 +24,6 @@ import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import Feather from "@expo/vector-icons/Feather";
 import { MessageBubbleContent } from "./MessageBubble";
-import { api } from "@/lib/api";
-import { useLocalSearchParams } from "expo-router";
 
 const SCREEN = Dimensions.get("window");
 
@@ -46,6 +44,7 @@ type MessageActionSheetProps = {
   bubbleColor: string;
   onEdit: () => void;
   onDelete: () => void;
+  onReact?: (emoji: string) => void;
   onReply?: () => void;
   onForward?: () => void;
   onPin?: () => void;
@@ -147,6 +146,7 @@ export function MessageActionSheet({
   bubbleColor,
   onEdit,
   onDelete,
+  onReact,
   onReply,
   onForward,
   onPin,
@@ -291,8 +291,6 @@ export function MessageActionSheet({
     transform: [{ translateY: menuTranslateY.value }],
   }));
 
-  const { id } = useLocalSearchParams<{ id: string }>();
-
   if (!mounted || !position || !layout) return null;
 
   const handleReaction = async (emoji: string, index: number) => {
@@ -301,14 +299,7 @@ export function MessageActionSheet({
       withSpring(1, { damping: 14, stiffness: 300 }),
     );
     Haptics.selectionAsync();
-    const result = await api.post(
-      `/api/conversations/messages/${id}/reactions`,
-      {
-        emoji,
-        messageId,
-      },
-    );
-    console.log(result);
+    onReact?.(emoji);
 
     dismiss();
   };

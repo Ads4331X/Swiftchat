@@ -103,3 +103,35 @@ export function listenForMarkRead(
     Socket?.off("mark-read", callback);
   };
 }
+
+export function listenForReaction(
+  callback: (data: {
+    conversationId: number;
+    messageId: number;
+    userId: number;
+    emoji: string;
+    removed: boolean;
+  }) => void,
+) {
+  Socket?.on("message-reaction", callback);
+
+  return () => {
+    Socket?.off("message-reaction", callback);
+  };
+}
+
+export function listenForReactionUpdate(
+  callback: (data: {
+    conversationId: number;
+    messageId: number;
+    userId: number;
+    emoji: string;
+    removed: boolean;
+  }) => void,
+) {
+  Socket?.on("message-reaction-update", callback);
+
+  return () => {
+    Socket?.off("message-reaction-update", callback);
+  };
+}

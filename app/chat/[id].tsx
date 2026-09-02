@@ -78,6 +78,7 @@ export default function UserChat() {
     sendMessage,
     deleteMessage,
     editMessage,
+    reactToMessage,
     loadMore,
   } = useChatMessages(id, currentUserId, decryptedConversationKey);
 
@@ -385,6 +386,11 @@ export default function UserChat() {
         onDelete={() => {
           if (selectedMessage) {
             deleteMessage(selectedMessage.id);
+          }
+        }}
+        onReact={(emoji) => {
+          if (selectedMessage) {
+            reactToMessage(selectedMessage.id, emoji);
           }
         }}
         onReply={() => {}}
