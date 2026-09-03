@@ -40,6 +40,8 @@ type MessageListProps = {
   onScrollToEndRef?: RefObject<(() => void) | null>;
   otherAvatarUrl?: string;
   otherUsername?: string;
+  isGroup?: boolean;
+  members?: { id: number; username: string; avatar?: string }[];
 };
 
 // How far (px) from the bottom counts as "still at the bottom" for the
@@ -63,8 +65,19 @@ export default function MessageList({
   onScrollToEndRef,
   otherAvatarUrl,
   otherUsername,
+  isGroup = false,
+  members = [],
 }: MessageListProps) {
   const [showScrollButton, setShowScrollButton] = useState(false);
+
+  // Lookup sender display names for group bubbles.
+  const senderNameMap = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const m of members) {
+      if (m.username && m.username !== "You") map.set(m.id, m.username);
+    }
+    return map;
+  }, [members]);
 
   // Inverted FlatList expects newest-first data — index 0 renders at the
   // visual bottom. This is what makes the list "just work": no imperative
@@ -163,6 +176,8 @@ export default function MessageList({
         showAvatar={showAvatarSet.has(item.id)}
         avatarUrl={otherAvatarUrl}
         otherUsername={otherUsername}
+        isGroup={isGroup}
+        senderName={senderNameMap.get(item.senderId)}
       />
     ),
     [
@@ -175,6 +190,8 @@ export default function MessageList({
       showAvatarSet,
       otherAvatarUrl,
       otherUsername,
+      isGroup,
+      senderNameMap,
     ],
   );
 

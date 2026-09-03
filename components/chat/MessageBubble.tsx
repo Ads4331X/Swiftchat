@@ -23,6 +23,8 @@ type MessageBubbleProps = {
   showAvatar?: boolean;
   avatarUrl?: string;
   otherUsername?: string;
+  isGroup?: boolean;
+  senderName?: string;
 };
 
 type MessageBubbleContentProps = {
@@ -226,6 +228,8 @@ export default memo(function MessageBubble({
   showAvatar,
   avatarUrl,
   otherUsername,
+  isGroup = false,
+  senderName,
 }: MessageBubbleProps) {
   const bubbleRef = useRef<View>(null);
   const AVATAR_SIZE = 28;
@@ -307,6 +311,14 @@ export default memo(function MessageBubble({
               message.reactions && message.reactions.length > 0 ? 14 : 0,
           }}
         >
+          {isGroup && !isMine && showAvatar && senderName ? (
+            <Text
+              className="text-xs font-semibold mb-0.5"
+              style={{ color: BRAND_COLOR, paddingHorizontal: 4 }}
+            >
+              {senderName}
+            </Text>
+          ) : null}
           <MessageBubbleContent
             text={message.text}
             isMine={isMine}

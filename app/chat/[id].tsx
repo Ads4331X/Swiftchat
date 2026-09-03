@@ -32,6 +32,13 @@ export default function UserChat() {
     avatarUrl?: string;
     memberIds?: string;
   }>();
+
+  const otherMemberIds = (memberIds ?? "")
+    .split(",")
+    .filter(Boolean)
+    .map(Number);
+  const memberCount = otherMemberIds.length + 1;
+  const isGroup = otherMemberIds.length > 1;
   const {
     colors,
     subtleText,
@@ -51,12 +58,13 @@ export default function UserChat() {
     skip: skipPin,
   } = useKeySetup();
   const [pinError, setPinError] = useState<string | null>(null);
-  const { currentUserId, conversationKey, otherUser } = useChatParticipant(
-    id,
-    memberIds,
-    needsPin,
-    setUpKeys,
-  );
+  const { currentUserId, conversationKey, otherUser, members } =
+    useChatParticipant(
+      id,
+      memberIds,
+      needsPin,
+      setUpKeys,
+    );
   const { isOtherUserTyping, notifyDraftChange, stopTyping } = useChatTyping(
     id,
     currentUserId,
@@ -125,8 +133,10 @@ export default function UserChat() {
     >
       <ChatHeader
         userId={otherUser?.userId}
-        username={otherUser?.username ?? username}
-        avatarUrl={otherUser?.avatarUrl ?? avatarUrl}
+        username={isGroup ? username : otherUser?.username ?? username}
+        avatarUrl={isGroup ? "" : otherUser?.avatarUrl ?? avatarUrl}
+        isGroup={isGroup}
+        memberCount={memberCount}
         textColor={colors.text}
         dividerColor={dividerColor}
         backgroundColor={colors.background}
@@ -148,6 +158,8 @@ export default function UserChat() {
         onScrollToEndRef={scrollToEndRef}
         otherAvatarUrl={otherUser?.avatarUrl ?? avatarUrl ?? ""}
         otherUsername={otherUser?.username ?? username ?? ""}
+        isGroup={isGroup}
+        members={members}
       />
       <ChatComposer
         draft={draft}

@@ -10,6 +10,12 @@ type ChatParticipant = {
   avatarUrl?: string;
 };
 
+type ChatMember = {
+  id: number;
+  username: string;
+  avatar?: string;
+};
+
 export default function useChatParticipant(
   conversationId: string,
   memberIds: string | undefined,
@@ -19,6 +25,7 @@ export default function useChatParticipant(
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [conversationKey, setConversationKey] = useState<Uint8Array>();
   const [otherUser, setOtherUser] = useState<ChatParticipant | null>(null);
+  const [members, setMembers] = useState<ChatMember[]>([]);
 
   useEffect(() => {
     getCurrentUserId().then(setCurrentUserId);
@@ -82,22 +89,37 @@ export default function useChatParticipant(
           (item) =>
             String(item.conversationId ?? item.id) === String(conversationId),
         );
-        const member = conversation?.members?.find(
+        const conversationMembers: any[] = conversation?.members ?? [];
+        const member = conversationMembers.find(
           (item: any) => item.id !== myId,
         );
-        if (!member || cancelled) return;
+        if (!conversationMembers.length || cancelled) {
+          return;
+        }
 
-        const participant = {
-          userId: member.id,
-          username: member.username,
-          avatarUrl: member.avatar ?? member.avatarUrl ?? undefined,
-        };
-        setOtherUser(participant);
-        await upsertUser(
-          member.id,
-          participant.username,
-          participant.avatarUrl,
-        );
+        const allMembers: ChatMember[] = conversationMembers.map((m: any) => ({
+          id: m.id,
+          username: m.username,
+          avatar: m.avatar ?? m.avatarUrl ?? undefined,
+        }));
+        if (myId != null) {
+          allMembers.push({ id: myId, username: "You" });
+        }
+        setMembers(allMembers);
+
+        if (member && !cancelled) {
+          const participant = {
+            userId: member.id,
+            username: member.username,
+            avatarUrl: member.avatar ?? member.avatarUrl ?? undefined,
+          };
+          setOtherUser(participant);
+          await upsertUser(
+            member.id,
+            participant.username,
+            participant.avatarUrl,
+          );
+        }
       } catch {
         // Cached participant data is still usable while offline.
       }
@@ -109,5 +131,5 @@ export default function useChatParticipant(
     };
   }, [conversationId]);
 
-  return { currentUserId, conversationKey, otherUser };
+  return { currentUserId, conversationKey, otherUser, members };
 }

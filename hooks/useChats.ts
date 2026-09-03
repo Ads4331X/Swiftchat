@@ -18,6 +18,7 @@ export type ChatMember = {
 
 export type Chat = {
   id: number;
+  name?: string;
   members: ChatMember[];
   lastMessage?: {
     id: number;

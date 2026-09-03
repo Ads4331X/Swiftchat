@@ -2,12 +2,15 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import Feather from "@expo/vector-icons/Feather";
 import { BRAND_COLOR } from "@/constants/theme";
+import { useTheme } from "@/constants/theme-provider";
 import Avatar from "@/components/profile/Avatar";
 
 type ChatHeaderProps = {
   userId?: number;
   username?: string;
   avatarUrl?: string;
+  isGroup?: boolean;
+  memberCount?: number;
   textColor: string;
   dividerColor: string;
   backgroundColor: string;
@@ -17,11 +20,14 @@ export default function ChatHeader({
   userId,
   username,
   avatarUrl,
+  isGroup = false,
+  memberCount,
   textColor,
   dividerColor,
   backgroundColor,
 }: ChatHeaderProps) {
   const router = useRouter();
+  const { subtleText } = useTheme();
 
   const handleBack = () => {
     if (router.canGoBack()) router.back();
@@ -46,7 +52,7 @@ export default function ChatHeader({
       </Pressable>
       <Avatar username={username ?? "?"} avatarUrl={avatarUrl} size={34} />
       <Pressable
-        disabled={userId == null}
+        disabled={!(isGroup === false && userId != null)}
         onPress={() => {
           if (userId != null) {
             router.push({
@@ -64,6 +70,15 @@ export default function ChatHeader({
         >
           {username || "Chat"}
         </Text>
+        {isGroup && memberCount ? (
+          <Text
+            numberOfLines={1}
+            style={{ color: subtleText }}
+            className="ml-3 text-xs"
+          >
+            {memberCount} members
+          </Text>
+        ) : null}
       </Pressable>
       <View className="flex-row items-center gap-4">
         <Pressable>

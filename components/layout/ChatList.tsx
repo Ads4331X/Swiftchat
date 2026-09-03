@@ -102,10 +102,15 @@ export default function ChatList({
     );
   }
 
-  const displayName = (chat: Chat) =>
-    chat.members.length > 1
+  const displayName = (chat: Chat) => {
+    const groupName = chat.name?.trim();
+    if (groupName) {
+      return groupName;
+    }
+    return chat.members.length > 1
       ? chat.members.map((member) => member.username).join(", ")
       : (chat.members[0]?.username ?? "Chat");
+  };
 
   const otherAvatar = (chat: Chat) =>
     chat.members.length === 1 ? (chat.members[0]?.avatar ?? "") : "";
