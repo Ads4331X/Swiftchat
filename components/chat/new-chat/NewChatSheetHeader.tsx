@@ -4,10 +4,12 @@ import { useTheme } from "@/constants/theme-provider";
 
 type NewChatSheetHeaderProps = {
   onClose: () => void;
+  title?: string;
 };
 
 export default function NewChatSheetHeader({
   onClose,
+  title = "New Chat",
 }: NewChatSheetHeaderProps) {
   const colors = useTheme().colors;
 
@@ -23,7 +25,7 @@ export default function NewChatSheetHeader({
         style={{ color: colors.text }}
         className="flex-1 text-center text-lg font-semibold"
       >
-        New Chat
+        {title}
       </Text>
       <View className="w-6" />
     </View>

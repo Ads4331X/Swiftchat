@@ -23,11 +23,13 @@ type SearchUser = {
 type NewChatSheetProps = {
   bottomSheetRef: React.RefObject<React.ElementRef<typeof BottomSheet> | null>;
   onChatCreated?: () => void;
+  variant?: "new-chat" | "add-member";
 };
 
 export default function NewChatSheet({
   bottomSheetRef,
   onChatCreated,
+  variant = "new-chat",
 }: NewChatSheetProps) {
   const theme = useTheme();
   const colors = theme.colors;
@@ -46,6 +48,7 @@ export default function NewChatSheet({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [creatingUsername, setCreatingUsername] = useState<string | null>(null);
   const inputRef = useRef<TextInput>(null);
+  const isAddMemberSheet = variant === "add-member";
 
   const onSubmit = async (data: FormData) => {
     const query = data.username.trim();
@@ -119,13 +122,18 @@ export default function NewChatSheet({
       backgroundStyle={{ backgroundColor: colors.background }}
     >
       <BottomSheetView>
-        <NewChatSheetHeader onClose={closeSheet} />
+        <NewChatSheetHeader
+          onClose={closeSheet}
+          title={isAddMemberSheet ? "Add member" : "New Chat"}
+        />
 
         <Text
           style={{ color: subtleText }}
           className="text-sm text-center mb-4"
         >
-          Search for a username to start a conversation
+          {isAddMemberSheet
+            ? "Add someone to this chat to create a group"
+            : "Search for a username to start a conversation"}
         </Text>
 
         <View className="px-4">
@@ -159,6 +167,7 @@ export default function NewChatSheet({
                   key={user.id}
                   username={user.username}
                   loading={creatingUsername === user.username}
+                  actionIcon={isAddMemberSheet ? "user-plus" : "message-circle"}
                   onPress={() => startChat(user.username)}
                 />
               ))}

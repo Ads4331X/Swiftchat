@@ -7,12 +7,14 @@ type SearchResultItemProps = {
   username: string;
   onPress: () => void;
   loading?: boolean;
+  actionIcon?: React.ComponentProps<typeof Feather>["name"];
 };
 
 export default function SearchResultItem({
   username,
   onPress,
   loading = false,
+  actionIcon = "message-circle",
 }: SearchResultItemProps) {
   const { colors, dividerColor } = useTheme();
   const initial = username.charAt(0).toUpperCase();
@@ -39,7 +41,7 @@ export default function SearchResultItem({
       {loading ? (
         <ActivityIndicator size="small" color={BRAND_COLOR} />
       ) : (
-        <Feather name="message-circle" size={20} color={BRAND_COLOR} />
+        <Feather name={actionIcon} size={20} color={BRAND_COLOR} />
       )}
 
       <View

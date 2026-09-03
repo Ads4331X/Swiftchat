@@ -1,6 +1,7 @@
 import { Alert, ScrollView, StyleSheet, Switch, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import BottomSheet from "@gorhom/bottom-sheet";
 import { api } from "@/lib/api";
 import { BRAND_COLOR } from "@/constants/theme";
 import { useTheme } from "@/constants/theme-provider";
@@ -8,6 +9,7 @@ import OtherProfileHeader from "@/components/profile/OtherProfileHeader";
 import ProfileSettingsSection, {
   type ProfileRow,
 } from "@/components/profile/ProfileSettingsSection";
+import NewChatSheet from "@/components/chat/new-chat/NewChatSheet";
 
 type User = {
   avatar?: string;
@@ -36,6 +38,7 @@ export default function OtherProfile() {
   const { colors } = useTheme();
   const [user, setUser] = useState<User>();
   const [notificationsOn, setNotificationsOn] = useState(true);
+  const bottomSheetRef = useRef<BottomSheet>(null);
 
   useEffect(() => {
     async function getOtherProfile() {
@@ -106,6 +109,12 @@ export default function OtherProfile() {
 
   const sharedRows: ProfileRow[] = [
     {
+      key: "add-members",
+      icon: "user-plus",
+      label: "Add members to chat",
+      onPress: () => bottomSheetRef.current?.expand(),
+    },
+    {
       key: "groups",
       icon: "users",
       label: "Groups in common",
@@ -172,6 +181,7 @@ export default function OtherProfile() {
         <ProfileSettingsSection title="Shared" rows={sharedRows} />
         <ProfileSettingsSection title="Danger zone" rows={dangerRows} />
       </ScrollView>
+      <NewChatSheet bottomSheetRef={bottomSheetRef} variant="add-member" />
     </View>
   );
 }
