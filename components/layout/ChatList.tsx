@@ -64,6 +64,32 @@ export default function ChatList({
       : chats;
 
   if (visibleChats.length === 0) {
+    if (filteredMode === "Groups") {
+      return (
+        <View className="flex-1" style={{ marginTop: 100 }}>
+          <EmptyState
+            icon="users"
+            title="No groups yet"
+            message={`Start a group chat by tapping +.\nSearch and select multiple people, then create your group.`}
+            iconSize={72}
+          />
+        </View>
+      );
+    }
+
+    if (filteredMode === "Unread") {
+      return (
+        <View className="flex-1" style={{ marginTop: 100 }}>
+          <EmptyState
+            icon="check-circle"
+            title="You're all caught up"
+            message={`No unread conversations.\nCheck back when someone messages you.`}
+            iconSize={72}
+          />
+        </View>
+      );
+    }
+
     return (
       <View className="flex-1" style={{ marginTop: 100 }}>
         <EmptyState

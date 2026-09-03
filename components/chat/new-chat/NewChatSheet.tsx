@@ -1,15 +1,18 @@
 import BottomSheet, { BottomSheetView } from "@gorhom/bottom-sheet";
-import { Text, TextInput, View } from "react-native";
+import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import Feather from "@expo/vector-icons/Feather";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "@/constants/theme-provider";
 import { Controller, useForm } from "react-hook-form";
 import { useRef, useState } from "react";
+import { useRouter } from "expo-router";
 import { api } from "@/lib/api";
 import NewChatSheetHeader from "./NewChatSheetHeader";
 import UsernameSearchInput from "./UsernameSearchInput";
 import SearchLoadingCard from "./SearchLoadingCard";
 import SearchResultItem from "./SearchResultItem";
 import EmptyState from "@/components/ui/EmptyState";
+import { BRAND_COLOR } from "@/constants/theme";
 
 type FormData = {
   username: string;
@@ -33,7 +36,8 @@ export default function NewChatSheet({
 }: NewChatSheetProps) {
   const theme = useTheme();
   const colors = theme.colors;
-  const { subtleText } = theme;
+  const { subtleText, dividerColor, inputBg } = theme;
+  const router = useRouter();
 
   const { control, handleSubmit, reset } = useForm<FormData>({
     defaultValues: {
@@ -49,6 +53,12 @@ export default function NewChatSheet({
   const [creatingUsername, setCreatingUsername] = useState<string | null>(null);
   const inputRef = useRef<TextInput>(null);
   const isAddMemberSheet = variant === "add-member";
+  const showNewGroup = variant === "new-chat";
+
+  const openNewGroup = () => {
+    closeSheet();
+    router.push("/group/create");
+  };
 
   const onSubmit = async (data: FormData) => {
     const query = data.username.trim();
@@ -135,6 +145,34 @@ export default function NewChatSheet({
             ? "Add someone to this chat to create a group"
             : "Search for a username to start a conversation"}
         </Text>
+
+        {showNewGroup && (
+          <Pressable
+            onPress={openNewGroup}
+            className="flex-row items-center gap-3 mx-4 mb-4 px-4 py-4 active:opacity-60"
+            style={{ backgroundColor: inputBg, borderRadius: 14 }}
+          >
+            <View
+              className="w-11 h-11 rounded-full items-center justify-center"
+              style={{ backgroundColor: BRAND_COLOR + "1a" }}
+            >
+              <Feather name="users" size={20} color={BRAND_COLOR} />
+            </View>
+            <View className="flex-1">
+              <Text style={{ color: colors.text }} className="font-medium text-base">
+                New Group
+              </Text>
+              <Text style={{ color: subtleText }} className="text-sm">
+                Add multiple people
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={20} color={subtleText} />
+            <View
+              className="absolute bottom-0 left-[72px] right-0"
+              style={{ height: StyleSheet.hairlineWidth, backgroundColor: dividerColor }}
+            />
+          </Pressable>
+        )}
 
         <View className="px-4">
           <Controller
