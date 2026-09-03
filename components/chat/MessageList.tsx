@@ -2,7 +2,6 @@ import {
   ActivityIndicator,
   FlatList,
   Pressable,
-  Text,
   View,
 } from "react-native";
 import { type RefObject, useCallback, useMemo, useState } from "react";
@@ -11,6 +10,7 @@ import { type Message } from "@/hooks/useChatMessages";
 import MessageBubble from "./MessageBubble";
 import { TypingIndicator } from "./TypingIndicator";
 import { BRAND_COLOR } from "@/constants/theme";
+import EmptyState from "@/components/ui/EmptyState";
 import { markRead } from "@/lib/db";
 import { api } from "@/lib/api";
 import { listenForMarkRead } from "@/lib/socket";
@@ -192,13 +192,7 @@ export default function MessageList({
   }
 
   if (messages.length === 0) {
-    return (
-      <View className="flex-1 items-center justify-center">
-        <Text style={{ color: subtleText }} className="text-base">
-          No messages yet
-        </Text>
-      </View>
-    );
+    return <EmptyState icon="message-square" title="Say hi" message="Send your first message to start the conversation." />;
   }
 
   return (

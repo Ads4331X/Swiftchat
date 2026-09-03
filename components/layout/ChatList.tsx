@@ -1,7 +1,7 @@
-import { View, Text } from "react-native";
+import { View } from "react-native";
 import { useState, useEffect } from "react";
 import SkeletonLoader from "./SkeletonLoader";
-import { useTheme } from "@/constants/theme-provider";
+import EmptyState from "@/components/ui/EmptyState";
 import type { ChatCategory } from "./PillsNav";
 import type { Chat } from "@/hooks/useChats";
 import ChatCard from "./ChatCard";
@@ -38,7 +38,6 @@ export default function ChatList({
   loading,
 }: ChatListProps) {
   const router = useRouter();
-  const { colors } = useTheme();
   const [typingMap, setTypingMap] = useState<Record<number, boolean>>({});
 
   useEffect(() => {
@@ -66,12 +65,14 @@ export default function ChatList({
 
   if (visibleChats.length === 0) {
     return (
-      <Text
-        style={{ color: colors.text }}
-        className="text-2xl text-center font-bold"
-      >
-        No conversations yet
-      </Text>
+      <View className="flex-1" style={{ marginTop: 100 }}>
+        <EmptyState
+          icon="message-circle"
+          title="Welcome to Swiftchat"
+          message={`You don't have any conversations yet.\nTap + to find someone and start a conversation.`}
+          iconSize={72}
+        />
+      </View>
     );
   }
 

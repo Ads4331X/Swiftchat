@@ -9,6 +9,7 @@ import NewChatSheetHeader from "./NewChatSheetHeader";
 import UsernameSearchInput from "./UsernameSearchInput";
 import SearchLoadingCard from "./SearchLoadingCard";
 import SearchResultItem from "./SearchResultItem";
+import EmptyState from "@/components/ui/EmptyState";
 
 type FormData = {
   username: string;
@@ -165,12 +166,13 @@ export default function NewChatSheet({
           )}
 
           {!isSearching && !errorMessage && searched && users.length === 0 && (
-            <Text
-              style={{ color: subtleText }}
-              className="mt-6 text-sm text-center"
-            >
-              No users found
-            </Text>
+            <View className="mt-6">
+              <EmptyState
+                icon="user-x"
+                title="No users found"
+                message="Try a different username."
+              />
+            </View>
           )}
         </View>
       </BottomSheetView>
