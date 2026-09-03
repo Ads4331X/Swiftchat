@@ -1,18 +1,41 @@
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { AppearanceCard } from "./AppearanceCard";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { router } from "expo-router";
 import Feather from "@expo/vector-icons/Feather";
 import { useTheme } from "@/constants/theme-provider";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { getSetting } from "@/lib/db";
 
 export type Appearance = "light" | "dark" | "system";
 
 const appearanceChoices: Appearance[] = ["light", "dark", "system"];
 
 export default function AppearanceName() {
+  const { colors, dividerColor, setAppearance } = useTheme();
   const [active, setActive] = useState<Appearance>("system");
-  const { colors, dividerColor } = useTheme();
+
+  useEffect(() => {
+    let mounted = true;
+    getSetting("appearance").then((saved) => {
+      if (!mounted) return;
+      if (
+        saved === "light" ||
+        saved === "dark" ||
+        saved === "system"
+      ) {
+        setActive(saved);
+      }
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handleClick = async (choice: Appearance) => {
+    setActive(choice);
+    await setAppearance(choice);
+  };
 
   return (
     <SafeAreaView
@@ -28,9 +51,7 @@ export default function AppearanceName() {
       >
         <Pressable
           onPress={() =>
-            router.canGoBack()
-              ? router.back()
-              : router.replace("/usersetting")
+            router.canGoBack() ? router.back() : router.replace("/usersetting")
           }
           className="p-1"
         >
@@ -51,7 +72,7 @@ export default function AppearanceName() {
             key={choice}
             appearanceName={choice}
             active={active}
-            onPress={() => setActive(choice)}
+            onPress={() => handleClick(choice)}
           />
         ))}
       </View>
