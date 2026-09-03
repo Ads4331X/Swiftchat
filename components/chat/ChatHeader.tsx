@@ -5,6 +5,7 @@ import { BRAND_COLOR } from "@/constants/theme";
 import Avatar from "@/components/profile/Avatar";
 
 type ChatHeaderProps = {
+  userId?: number;
   username?: string;
   avatarUrl?: string;
   textColor: string;
@@ -13,6 +14,7 @@ type ChatHeaderProps = {
 };
 
 export default function ChatHeader({
+  userId,
   username,
   avatarUrl,
   textColor,
@@ -22,11 +24,8 @@ export default function ChatHeader({
   const router = useRouter();
 
   const handleBack = () => {
-    if (router.canGoBack()) {
-      router.back();
-    } else {
-      router.replace("/");
-    }
+    if (router.canGoBack()) router.back();
+    else router.replace("/");
   };
 
   return (
@@ -45,17 +44,27 @@ export default function ChatHeader({
       >
         <Feather name="arrow-left" size={24} color={textColor} />
       </Pressable>
-
       <Avatar username={username ?? "?"} avatarUrl={avatarUrl} size={34} />
-
-      <Text
-        numberOfLines={1}
-        style={{ color: textColor }}
-        className="flex-1 ml-3 font-bold text-lg"
+      <Pressable
+        disabled={userId == null}
+        onPress={() => {
+          if (userId != null) {
+            router.push({
+              pathname: "/otherProfile/[id]" as never,
+              params: { id: userId },
+            });
+          }
+        }}
+        className="flex-1"
       >
-        {username || "Chat"}
-      </Text>
-
+        <Text
+          numberOfLines={1}
+          style={{ color: textColor }}
+          className="ml-3 font-bold text-lg"
+        >
+          {username || "Chat"}
+        </Text>
+      </Pressable>
       <View className="flex-row items-center gap-4">
         <Pressable>
           <Feather name="phone" size={22} color={BRAND_COLOR} />
