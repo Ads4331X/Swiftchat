@@ -2,6 +2,7 @@ import {
   ActivityIndicator,
   FlatList,
   Pressable,
+  Text,
   View,
 } from "react-native";
 import { type RefObject, useCallback, useMemo, useState } from "react";
@@ -15,6 +16,7 @@ import { markRead } from "@/lib/db";
 import { api } from "@/lib/api";
 import { listenForMarkRead } from "@/lib/socket";
 import { useEffect } from "react";
+import Avatar from "../profile/Avatar";
 
 type Position = {
   pageX: number;
@@ -35,7 +37,7 @@ type MessageListProps = {
   subtleText: string;
   onMessageLongPress: (message: Message, position: Position) => void;
   selectedMessageId?: number | null;
-  isOtherUserTyping?: boolean;
+  isOtherUserTyping?: number[];
   onLoadMore: () => void;
   onScrollToEndRef?: RefObject<(() => void) | null>;
   otherAvatarUrl?: string;
@@ -70,14 +72,33 @@ export default function MessageList({
 }: MessageListProps) {
   const [showScrollButton, setShowScrollButton] = useState(false);
 
-  // Lookup sender display names for group bubbles.
-  const senderNameMap = useMemo(() => {
-    const map = new Map<number, string>();
+  // Lookup sender display names/avatars for group bubbles & typing indicator.
+  const memberById = useMemo(() => {
+    const map = new Map<number, { username: string; avatar?: string }>();
     for (const m of members) {
-      if (m.username && m.username !== "You") map.set(m.id, m.username);
+      if (m.username && m.username !== "You") {
+        map.set(m.id, { username: m.username, avatar: m.avatar });
+      }
     }
     return map;
   }, [members]);
+
+  // The people who are typing right now (with name + avatar for display).
+  const typingMembers = useMemo(() => {
+    const ids = isOtherUserTyping ?? [];
+    return ids
+      .map((id) => memberById.get(id))
+      .filter((m): m is { username: string; avatar?: string } => Boolean(m));
+  }, [isOtherUserTyping, memberById]);
+
+  // Format "who is typing" into a readable sentence from the typing members.
+  const typingText = useMemo(() => {
+    const names = typingMembers.map((m) => m.username);
+    if (names.length === 0) return "typing…";
+    if (names.length === 1) return `${names[0]} is typing…`;
+    if (names.length === 2) return `${names[0]} and ${names[1]} are typing…`;
+    return "Several people are typing…";
+  }, [typingMembers]);
 
   // Inverted FlatList expects newest-first data — index 0 renders at the
   // visual bottom. This is what makes the list "just work": no imperative
@@ -177,7 +198,7 @@ export default function MessageList({
         avatarUrl={otherAvatarUrl}
         otherUsername={otherUsername}
         isGroup={isGroup}
-        senderName={senderNameMap.get(item.senderId)}
+        senderName={memberById.get(item.senderId)?.username}
       />
     ),
     [
@@ -191,7 +212,7 @@ export default function MessageList({
       otherAvatarUrl,
       otherUsername,
       isGroup,
-      senderNameMap,
+      memberById,
     ],
   );
 
@@ -209,7 +230,13 @@ export default function MessageList({
   }
 
   if (messages.length === 0) {
-    return <EmptyState icon="message-square" title="Say hi" message="Send your first message to start the conversation." />;
+    return (
+      <EmptyState
+        icon="message-square"
+        title="Say hi"
+        message="Send your first message to start the conversation."
+      />
+    );
   }
 
   return (
@@ -225,7 +252,7 @@ export default function MessageList({
         // ListHeaderComponent renders at the BOTTOM, ListFooterComponent
         // renders at the TOP.
         ListHeaderComponent={
-          isOtherUserTyping ? (
+          isOtherUserTyping?.length ? (
             <View className="flex-row justify-start px-1 py-[1px] mt-1">
               <View
                 className="px-3 py-2 rounded-2xl"
@@ -233,9 +260,34 @@ export default function MessageList({
                   backgroundColor: bubbleColor,
                   borderBottomLeftRadius: 4,
                   alignSelf: "flex-start",
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 10,
                 }}
               >
-                <TypingIndicator />
+                <View className="flex-row">
+                  {typingMembers.map((member, index) => (
+                    <View
+                      key={index}
+                      className="rounded-full"
+                      style={{
+                        borderWidth: 2,
+                        borderColor: bubbleColor,
+                        marginLeft: index === 0 ? 0 : -8,
+                      }}
+                    >
+                      <Avatar
+                        username={member.username}
+                        avatarUrl={member.avatar}
+                        size={24}
+                      />
+                    </View>
+                  ))}
+                </View>
+                {/* <Text style={{ color: subtleText }} className="text-sm">
+                  {typingText}
+                </Text> */}
+                <TypingIndicator color={subtleText} />
               </View>
             </View>
           ) : null

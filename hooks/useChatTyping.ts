@@ -10,34 +10,38 @@ export default function useChatTyping(
   conversationId: string,
   currentUserId: number | null,
 ) {
-  const [isOtherUserTyping, setIsOtherUserTyping] = useState(false);
+  const [isOtherUserTyping, setIsOtherUserTyping] = useState<number[]>([]);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    const stopTyping = listenForTyping(
+    const stopTypingSub = listenForTyping(
       ({ conversationId: incomingId, userId }) => {
         if (
           Number(incomingId) === Number(conversationId) &&
           userId !== currentUserId
         ) {
-          setIsOtherUserTyping(true);
+          setIsOtherUserTyping((prev) =>
+            prev.includes(userId) ? prev : [...prev, userId],
+          );
         }
       },
     );
-    const stopStopTyping = listenForStopTyping(
+    const stopStopTypingSub = listenForStopTyping(
       ({ conversationId: incomingId, userId }) => {
         if (
           Number(incomingId) === Number(conversationId) &&
           userId !== currentUserId
         ) {
-          setIsOtherUserTyping(false);
+          setIsOtherUserTyping((prev) =>
+            prev.filter((id) => id !== userId),
+          );
         }
       },
     );
 
     return () => {
-      stopTyping?.();
-      stopStopTyping?.();
+      stopTypingSub?.();
+      stopStopTypingSub?.();
     };
   }, [conversationId, currentUserId]);
 
