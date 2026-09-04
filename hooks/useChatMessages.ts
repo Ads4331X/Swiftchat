@@ -498,7 +498,7 @@ export default function useChatMessages(
       active = false;
       if (cleanupFn) cleanupFn();
     };
-  }, [id, Boolean(decryptedConversationKey)]);
+  }, [id, decryptedConversationKey]);
 
   // Load older messages (infinite scroll — called when user scrolls to top)
   const loadMore = useCallback(async () => {

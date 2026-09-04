@@ -19,7 +19,7 @@ type ChatMember = {
 export default function useChatParticipant(
   conversationId: string,
   memberIds: string | undefined,
-  needsPin: boolean,
+  keyReadyVersion: number,
   setUpKeys: () => Promise<boolean>,
 ) {
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
@@ -65,7 +65,7 @@ export default function useChatParticipant(
     return () => {
       mounted = false;
     };
-  }, [conversationId, memberIds, needsPin, setUpKeys]);
+  }, [conversationId, memberIds, keyReadyVersion, setUpKeys]);
 
   useEffect(() => {
     if (!conversationId) return;

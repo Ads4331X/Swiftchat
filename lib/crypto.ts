@@ -1,7 +1,9 @@
 import sodiumModule from "./sodium";
 // import sodium from "react-native-libsodium";
 import { Base64 } from "js-base64";
+import nacl from "tweetnacl";
 import { api } from "./api";
+import { getCurrentUserId } from "./auth";
 import {
   getPrivateKey,
   getPublicKey,
@@ -10,9 +12,22 @@ import {
 } from "./secureStorage";
 const sodium = (sodiumModule as any).default ?? sodiumModule;
 
+/**
+ * Key names in secure storage are scoped to the CURRENT logged-in user so that
+ * multiple accounts on one device each keep their own identity keypair. Without
+ * this scope, logging into a second account would reuse (and corrupt) the first
+ * account's keys. Falls back to the bare name when no user is logged in yet.
+ */
+async function userKeyName(base: string): Promise<string> {
+  const userId = await getCurrentUserId();
+  return userId ? `${base}_u${userId}` : base;
+}
+
 export async function generateKeyPair() {
   await sodium.ready;
-
+  console.log("sodium keys after ready:", Object.keys(sodium).slice(0, 20));
+  console.log("TextEncoder:", typeof TextEncoder);
+  console.log("TextDecoder:", typeof TextDecoder);
   if (typeof sodium.crypto_box_keypair !== "function") {
     throw new Error(
       "libsodium crypto_box_keypair is unavailable in this runtime",
@@ -58,15 +73,17 @@ export type EnsureKeysResult =
  * - Recovery backup exists → the PIN is needed to restore the SAME key
  *                            (reinstall / new device).
  * - No local key, no backup, but the server already holds a key for this
- *   account → the old key is lost (reinstall without backup). Never mint a
+ *   account → the key is lost (reinstall without backup). Never mint a
  *   replacement (would orphan history).
  * - No local key, no backup, server has NO key → brand-new account: generate a
  *   fresh keypair locally and report brandNew: true so the UI can invite the
  *   user to set a (skippable) Recovery PIN for this exact key.
  */
 export async function ensureLocalKeys(): Promise<EnsureKeysResult> {
-  const privateKey = await getPrivateKey("privateKey");
-  const publicKey = await getPublicKey("publicKey");
+  const privateKeyName = await userKeyName("privateKey");
+  const publicKeyName = await userKeyName("publicKey");
+  const privateKey = await getPrivateKey(privateKeyName);
+  const publicKey = await getPublicKey(publicKeyName);
 
   if (privateKey && publicKey) {
     await api.put("/api/user/public-key", { publicKey }).catch(() => {});
@@ -87,12 +104,18 @@ export async function ensureLocalKeys(): Promise<EnsureKeysResult> {
   }
 
   if (serverPublicKey) {
+    // The server already holds a public key but there's no local key or
+    // recovery backup, so its private key is unreachable. NEVER mint a
+    // replacement (would orphan every past conversation and weaken E2EE).
     return { ok: false, reason: "lost" };
   }
 
   const generated = await generateKeyPair();
-  await setPublicKey("publicKey", Base64.fromUint8Array(generated.publicKey));
-  await setPrivateKey("privateKey", Base64.fromUint8Array(generated.privateKey));
+  await setPublicKey(publicKeyName, Base64.fromUint8Array(generated.publicKey));
+  await setPrivateKey(
+    privateKeyName,
+    Base64.fromUint8Array(generated.privateKey),
+  );
   await api
     .put("/api/user/public-key", {
       publicKey: Base64.fromUint8Array(generated.publicKey),
@@ -106,8 +129,10 @@ export async function ensureLocalKeys(): Promise<EnsureKeysResult> {
  * replacement keypair here — that would orphan every past conversation.
  */
 export async function initializeKeys(pin: string) {
-  let privateKey = await getPrivateKey("privateKey");
-  let publicKey = await getPublicKey("publicKey");
+  const privateKeyName = await userKeyName("privateKey");
+  const publicKeyName = await userKeyName("publicKey");
+  let privateKey = await getPrivateKey(privateKeyName);
+  let publicKey = await getPublicKey(publicKeyName);
 
   if (privateKey && publicKey) {
     await api.put("/api/user/public-key", { publicKey });
@@ -119,9 +144,9 @@ export async function initializeKeys(pin: string) {
     throw new Error("Invalid recovery PIN");
   }
 
-  await setPrivateKey("privateKey", Base64.fromUint8Array(recovered));
-  publicKey = await syncPublicKeyFromPrivateKey(recovered);
-  privateKey = await getPrivateKey("privateKey");
+  await setPrivateKey(privateKeyName, Base64.fromUint8Array(recovered));
+  publicKey = await syncPublicKeyFromPrivateKey(recovered, publicKeyName);
+  privateKey = await getPrivateKey(privateKeyName);
 
   if (!publicKey || !privateKey) {
     throw new Error("Failed to initialize encryption keys");
@@ -136,7 +161,8 @@ export async function initializeKeys(pin: string) {
  * updating a recovery PIN). Never replaces the identity key.
  */
 export async function addRecoveryPin(password: string) {
-  const privateKey = await getPrivateKey("privateKey");
+  const privateKeyName = await userKeyName("privateKey");
+  const privateKey = await getPrivateKey(privateKeyName);
   if (!privateKey) {
     throw new Error("No local key found. Please log in first.");
   }
@@ -149,16 +175,19 @@ export async function addRecoveryPin(password: string) {
 export async function derivePublicKeyFromPrivateKey(
   privateKey: Uint8Array,
 ): Promise<Uint8Array> {
-  await sodium.ready;
-  return sodium.crypto_scalarmult_base(privateKey);
+  return nacl.box.keyPair.fromSecretKey(privateKey).publicKey;
 }
 
 async function syncPublicKeyFromPrivateKey(
   privateKey: Uint8Array,
+  publicKeyName?: string,
 ): Promise<string> {
   const derivedPublicKey = await derivePublicKeyFromPrivateKey(privateKey);
   const base64PublicKey = Base64.fromUint8Array(derivedPublicKey);
-  await setPublicKey("publicKey", base64PublicKey);
+  await setPublicKey(
+    publicKeyName ?? (await userKeyName("publicKey")),
+    base64PublicKey,
+  );
   return base64PublicKey;
 }
 
@@ -247,7 +276,8 @@ export async function getOrCreateConversationKey(
   const { encryptedConversationKey, nonce, createdById } =
     await getEncryptedConversationKey(conversationId);
 
-  const receiverPrivateKey = await getPrivateKey("privateKey");
+  const privateKeyName = await userKeyName("privateKey");
+  const receiverPrivateKey = await getPrivateKey(privateKeyName);
 
   // 2. If it already exists, attempt to decrypt it
   if (encryptedConversationKey && nonce && createdById) {
@@ -259,7 +289,9 @@ export async function getOrCreateConversationKey(
 
         if (senderPublicKeyResponse.data?.publicKey) {
           const { conversationKey } = await decryptConversationKey({
-            encryptedConversationKey: Base64.toUint8Array(encryptedConversationKey),
+            encryptedConversationKey: Base64.toUint8Array(
+              encryptedConversationKey,
+            ),
             nonce: Base64.toUint8Array(nonce),
             receiverPrivateKey: Base64.toUint8Array(receiverPrivateKey),
             senderPublicKey: Base64.toUint8Array(
@@ -294,6 +326,7 @@ export async function getOrCreateConversationKey(
 
   for (const memberId of memberIds) {
     const publicKeyResponse = await api.get(`/api/user/${memberId}/public-key`);
+    if (!publicKeyResponse.data?.publicKey) continue;
 
     const { encryptedKey, nonce: keyNonce } = await generateEncryptedKey({
       conversationKey,
@@ -352,10 +385,17 @@ export async function decryptMessage({
       decryptedConversationKey,
     );
 
-    return { decryptMessage: new TextDecoder().decode(decryptMessage) };
+    return { decryptMessage: sodium.to_string(decryptMessage) };
   } catch {
     return { decryptMessage: "[Encrypted Message]" };
   }
+}
+
+function encodeUtf8(str: string): Uint8Array {
+  if (typeof sodium.from_string === "function") {
+    return sodium.from_string(str);
+  }
+  return new TextEncoder().encode(str);
 }
 
 /**
@@ -370,7 +410,7 @@ async function deriveKeyFromPin(
   params: KeyBackupParams,
 ): Promise<Uint8Array> {
   await sodium.ready;
-  const pinBytes = new TextEncoder().encode(pin);
+  const pinBytes = encodeUtf8(pin);
   try {
     return sodium.crypto_pwhash(
       sodium.crypto_secretbox_KEYBYTES,

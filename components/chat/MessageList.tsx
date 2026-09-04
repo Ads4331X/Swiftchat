@@ -284,9 +284,9 @@ export default function MessageList({
                     </View>
                   ))}
                 </View>
-                {/* <Text style={{ color: subtleText }} className="text-sm">
+                <Text style={{ color: subtleText }} className="text-sm">
                   {typingText}
-                </Text> */}
+                </Text>
                 <TypingIndicator color={subtleText} />
               </View>
             </View>

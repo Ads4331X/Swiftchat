@@ -14,10 +14,15 @@ export function useKeySetup() {
   const [needsPin, setNeedsPin] = useState(false);
   const [pinMode, setPinMode] = useState<"enter" | "add">("enter");
   const [busy, setBusy] = useState(false);
+  // Bumps every time keys are successfully established (or re-established).
+  // Consumers depend on this (instead of `needsPin`) so that cancelling the
+  // PIN modal does NOT re-trigger key setup in an endless loop.
+  const [keyReadyVersion, setKeyReadyVersion] = useState(0);
 
   const setUpKeys = useCallback(async (): Promise<boolean> => {
     const result = await ensureLocalKeys();
     if (result.ok) {
+      setKeyReadyVersion((v) => v + 1);
       if (result.brandNew) {
         // Brand-new keypair was just generated. Show the (skippable) PIN setup
         // modal so the user can optionally back up THIS key.
@@ -46,6 +51,7 @@ export function useKeySetup() {
       // block correct decryption — wipe it so the app re-fetches from server.
       await clearAllLocalData();
       setNeedsPin(false);
+      setKeyReadyVersion((v) => v + 1);
       return { ok: true };
     } catch (err: any) {
       if (err?.isAxiosError || err?.message?.includes("Network Error")) {
@@ -68,11 +74,33 @@ export function useKeySetup() {
     setNeedsPin(true);
   }, []);
 
+  // Used by Settings' "Recovery PIN" row. Decides between:
+  //  - "add":   a local key already exists -> set/update its backup PIN
+  //  - "enter": the account has a server backup but no local key yet -> the
+  //             PIN must be ENTERED to recover the key (never "No local key").
+  const openRecoveryPin = useCallback(async (): Promise<"add" | "enter" | "none"> => {
+    const result = await ensureLocalKeys();
+    if (result.ok) {
+      setPinMode("add");
+      setNeedsPin(true);
+      return "add";
+    }
+    if (result.reason === "pinNeeded") {
+      setPinMode("enter");
+      setNeedsPin(true);
+      return "enter";
+    }
+    // "lost": the key is unrecoverable on this device — nothing to do.
+    setNeedsPin(false);
+    return "none";
+  }, []);
+
   const addPin = useCallback(async (pin: string) => {
     setBusy(true);
     try {
       await addRecoveryPin(pin);
       setNeedsPin(false);
+      setKeyReadyVersion((v) => v + 1);
       return { ok: true };
     } catch (err: any) {
       return { ok: false, error: err?.message || "Could not save PIN." };
@@ -103,9 +131,11 @@ export function useKeySetup() {
     needsPin,
     pinMode,
     busy,
+    keyReadyVersion,
     setUpKeys,
     initializeWithPin,
     startAddPin,
+    openRecoveryPin,
     addPin,
     submitPin,
     skip,

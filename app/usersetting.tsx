@@ -38,8 +38,8 @@ export default function UserSettings() {
     needsPin,
     pinMode,
     busy: pinBusy,
-    startAddPin,
-    addPin,
+    openRecoveryPin,
+    submitPin,
     skip: skipPin,
   } = useKeySetup();
 
@@ -166,7 +166,7 @@ export default function UserSettings() {
               subtitle="Protect your encrypted messages"
               onPress={() => {
                 setPinError(null);
-                startAddPin();
+                openRecoveryPin();
               }}
             />
             <SettingsCard
@@ -197,13 +197,19 @@ export default function UserSettings() {
         error={pinError}
         loading={pinBusy}
         onSubmit={async (pin) => {
-          const ok = await addPin(pin);
+          const ok = await submitPin(pin);
           if (!ok.ok) {
             setPinError(ok.error ?? "Incorrect PIN. Please try again.");
             return;
           }
           setPinError(null);
-          Toast.show({ type: "success", text1: "Recovery PIN saved" });
+          Toast.show({
+            type: "success",
+            text1:
+              pinMode === "enter"
+                ? "Encryption keys recovered"
+                : "Recovery PIN saved",
+          });
         }}
         onCancel={skipPin}
       />

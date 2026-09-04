@@ -53,6 +53,7 @@ export default function UserChat() {
     needsPin,
     pinMode,
     busy: pinBusy,
+    keyReadyVersion,
     setUpKeys,
     submitPin,
     skip: skipPin,
@@ -62,7 +63,7 @@ export default function UserChat() {
     useChatParticipant(
       id,
       memberIds,
-      needsPin,
+      keyReadyVersion,
       setUpKeys,
     );
   const { isOtherUserTyping, notifyDraftChange, stopTyping } = useChatTyping(
