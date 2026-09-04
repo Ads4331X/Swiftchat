@@ -353,8 +353,9 @@ export async function encryptMessage({
   await sodium.ready;
   const nonce = sodium.randombytes_buf(sodium.crypto_box_NONCEBYTES);
 
+  const messageBytes = encodeUtf8(message);
   const encryptMessage = sodium.crypto_secretbox_easy(
-    message,
+    messageBytes,
     nonce,
     decryptedConversationKey,
   );

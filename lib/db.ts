@@ -19,8 +19,8 @@ const STATEMENTS = [
     nonce TEXT NOT NULL,
     sentAt TEXT NOT NULL,
     editedAt TEXT,
-    readAt Text NOT NUll,
-    read Boolean NOT NULL,
+    readAt Text NOT NULL DEFAULT '',
+    read Boolean NOT NULL DEFAULT 0,
     reactions TEXT
   );`,
   `CREATE TABLE IF NOT EXISTS Conversation (
@@ -148,7 +148,7 @@ export async function saveMessage({
     const db = await getDb();
     if (!db) return;
     await db.runAsync(
-      `INSERT OR REPLACE INTO Message (id, text, sentAt, senderId, conversationId , nonce, reactions) VALUES (?, ?, ?, ?, ? , ?, ?)`,
+      `INSERT OR REPLACE INTO Message (id, text, sentAt, senderId, conversationId, nonce, reactions, readAt, read) VALUES (?, ?, ?, ?, ?, ?, ?, '', 0)`,
       [
         messageId,
         message,

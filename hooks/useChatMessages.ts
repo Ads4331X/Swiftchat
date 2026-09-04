@@ -70,9 +70,7 @@ function parseLocalMessage(
     const parsed = JSON.parse(reactions);
     return {
       ...rest,
-      reactions: Array.isArray(parsed)
-        ? (parsed as MessageReaction[])
-        : [],
+      reactions: Array.isArray(parsed) ? (parsed as MessageReaction[]) : [],
     };
   } catch {
     return { ...rest, reactions: [] };
@@ -143,9 +141,9 @@ export default function useChatMessages(
     const pendingIds = new Set(pending.map((p) => p.id));
 
     const confirmed = await decryptChatMessages({
-      serverMessages: (cache as (Message & { reactions?: string | null })[]).map(
-        parseLocalMessage,
-      ),
+      serverMessages: (
+        cache as (Message & { reactions?: string | null })[]
+      ).map(parseLocalMessage),
       decryptedConversationKey,
     });
 
@@ -170,6 +168,10 @@ export default function useChatMessages(
           if (replacement) {
             next.push({ ...replacement, key: m.key ?? keyFor(replacement) });
             representedIds.add(replacement.id);
+          } else {
+            // Not in pending table AND no confirmed match — don't silently
+            // drop it, keep it visible until we know what actually happened.
+            next.push(m);
           }
           continue;
         }
@@ -545,9 +547,7 @@ export default function useChatMessages(
           ConversationId: Number(msg.conversationId),
           SenderId: Number(msg.senderId),
           nonce: msg.nonce,
-          reactions: msg.reactions
-            ? JSON.stringify(msg.reactions)
-            : undefined,
+          reactions: msg.reactions ? JSON.stringify(msg.reactions) : undefined,
         }).catch(() => {});
       });
 
@@ -682,10 +682,6 @@ export default function useChatMessages(
     const trimmed = text.trim();
     if (!trimmed || !decryptedConversationKey) return;
 
-    const { encryptedMessage, nonce: encryptedNonce } = await encryptMessage({
-      message: trimmed,
-      decryptedConversationKey: decryptedConversationKey,
-    });
     const tempId = tempIdRef.current--;
     const optimisticMessage: Message = {
       id: tempId,
@@ -695,15 +691,25 @@ export default function useChatMessages(
       editedAt: null,
       senderId: currentUserId ?? -1,
       conversationId: Number(id),
-      nonce: encryptedNonce,
+      nonce: "",
     };
 
     setMessages((prev) => [...prev, optimisticMessage]);
 
-    // Hold the shared flush lock from BEFORE the pending row exists, so the
-    // background flusher can never observe it and double-send it.
     const held = await acquireFlushLock();
     try {
+      const { encryptedMessage, nonce: encryptedNonce } = await encryptMessage({
+        message: trimmed,
+        decryptedConversationKey,
+      });
+
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === tempId ? { ...m, nonce: encryptedNonce } : m,
+        ),
+      );
+      optimisticMessage.nonce = encryptedNonce;
+
       await savePendingMessage({
         message: encryptedMessage,
         nonce: encryptedNonce,
@@ -748,12 +754,9 @@ export default function useChatMessages(
         lastMessageSentAt: response.data.sentAt,
       }).catch(() => {});
 
-      // Swap the optimistic row IN PLACE — same key, same row, no remount.
       setMessages((prev) => {
-        let swapped = false;
         const next = prev.map((m) => {
           if (m.id === tempId) {
-            swapped = true;
             return {
               ...confirmedMessage,
               key: m.key ?? `m-${confirmedMessage.id}`,
@@ -761,17 +764,14 @@ export default function useChatMessages(
           }
           return m;
         });
-        if (swapped) return next;
         if (next.some((m) => m.id === confirmedMessage.id)) return next;
         return [
           ...next,
           { ...confirmedMessage, key: keyFor(confirmedMessage) },
         ];
       });
-    } catch {
-      // Still offline or server rejected — keep the pending row; the
-      // background sync will retry when connectivity returns.
-      console.log("Message saved as pending:", tempId);
+    } catch (err) {
+      console.error("sendMessage failed:", err);
     } finally {
       if (held) releaseFlushLock();
     }

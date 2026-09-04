@@ -22,14 +22,18 @@ export function useKeySetup() {
   const setUpKeys = useCallback(async (): Promise<boolean> => {
     const result = await ensureLocalKeys();
     if (result.ok) {
-      setKeyReadyVersion((v) => v + 1);
       if (result.brandNew) {
-        // Brand-new keypair was just generated. Show the (skippable) PIN setup
-        // modal so the user can optionally back up THIS key.
+        // Brand-new keypair was just generated. Bump the version so consumers
+        // re-run their key-dependent effects, then show the (skippable) PIN
+        // setup modal so the user can optionally back up THIS key.
+        setKeyReadyVersion((v) => v + 1);
         setPinMode("add");
         setNeedsPin(true);
         return false;
       }
+      // Keys already existed — no state change, so do NOT bump keyReadyVersion
+      // (doing so would re-trigger the useEffect that calls us, causing an
+      // infinite loop).
       setNeedsPin(false);
       return true;
     }
