@@ -36,7 +36,10 @@ export default function useChatParticipant(
 
     async function loadKey() {
       if (!conversationId || !memberIds) return;
-      if (!(await setUpKeys())) return;
+      // Let key setup run (may show PIN modal) but don't let it block
+      // loading the conversation key. The PIN is a backup feature and
+      // never gates chatting.
+      setUpKeys();
 
       try {
         const userId = await getCurrentUserId();
