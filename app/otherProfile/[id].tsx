@@ -8,9 +8,8 @@ import {
   Text,
   View,
 } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useRef, useState } from "react";
-import BottomSheet from "@gorhom/bottom-sheet";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useCallback, useState } from "react";
 import Feather from "@expo/vector-icons/Feather";
 import { api } from "@/lib/api";
 import { getCurrentUserId } from "@/lib/auth";
@@ -21,7 +20,6 @@ import OtherProfileHeader from "@/components/profile/OtherProfileHeader";
 import ProfileSettingsSection, {
   type ProfileRow,
 } from "@/components/profile/ProfileSettingsSection";
-import NewChatSheet from "@/components/chat/new-chat/NewChatSheet";
 
 type User = {
   avatar?: string;
@@ -69,14 +67,18 @@ export default function OtherProfile() {
   const [showAllMembers, setShowAllMembers] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [notificationsOn, setNotificationsOn] = useState(true);
-  const bottomSheetRef = useRef<BottomSheet>(null);
 
   const otherMemberIds = (memberIds ?? "")
     .split(",")
     .filter(Boolean)
     .map(Number);
   const isGroup = otherMemberIds.length > 1;
-  const memberCount = otherMemberIds.length + 1;
+  const memberCount =
+    members.length > 0
+      ? myId == null
+        ? members.length
+        : members.length + 1
+      : otherMemberIds.length + 1;
   const memberList =
     myId == null
       ? members
@@ -88,43 +90,45 @@ export default function OtherProfile() {
     ? memberList
     : memberList.slice(0, MAX_MEMBERS);
 
-  useEffect(() => {
-    async function getOtherProfile() {
-      if (!id) return;
+  const getOtherProfile = useCallback(async () => {
+    if (!id) return;
 
-      if (isGroup) {
-        const me = await getCurrentUserId();
-        if (me != null) {
-          setMyId(me);
-          const meData = await api.get(`/api/user/${me}`).catch(() => null);
-          setMyName(meData?.data?.username ?? "");
-          setMyAvatar(meData?.data?.avatar ?? "");
-        }
-
-        const { data } = await api.get("/api/conversations");
-        const chat = data.find(
-          (c: any) => String(c.conversationId ?? c.id) === String(id),
-        );
-        setIsAdmin(Boolean(chat?.isCurrentUserAdmin));
-        setMembers(
-          (chat?.members ?? []).map((m: any) => ({
-            id: Number(m.id),
-            username: m.username,
-            avatar: m.avatar ?? m.avatarUrl ?? undefined,
-          })),
-        );
-      } else {
-        const { data } = await api.get(`/api/user/${id}`);
-        setUser({
-          avatar: data.avatar,
-          username: data.username,
-          lastSeen: data.lastSeen,
-        });
+    if (isGroup) {
+      const me = await getCurrentUserId();
+      if (me != null) {
+        setMyId(me);
+        const meData = await api.get(`/api/user/${me}`).catch(() => null);
+        setMyName(meData?.data?.username ?? "");
+        setMyAvatar(meData?.data?.avatar ?? "");
       }
-    }
 
-    getOtherProfile();
+      const { data } = await api.get("/api/conversations");
+      const chat = data.find(
+        (c: any) => String(c.conversationId ?? c.id) === String(id),
+      );
+      setIsAdmin(Boolean(chat?.isCurrentUserAdmin));
+      setMembers(
+        (chat?.members ?? []).map((m: any) => ({
+          id: Number(m.id),
+          username: m.username,
+          avatar: m.avatar ?? m.avatarUrl ?? undefined,
+        })),
+      );
+    } else {
+      const { data } = await api.get(`/api/user/${id}`);
+      setUser({
+        avatar: data.avatar,
+        username: data.username,
+        lastSeen: data.lastSeen,
+      });
+    }
   }, [id, isGroup]);
+
+  useFocusEffect(
+    useCallback(() => {
+      getOtherProfile();
+    }, [getOtherProfile]),
+  );
 
   const muted = colors.text + "80";
   const faint = colors.text + "1f";
@@ -193,7 +197,11 @@ export default function OtherProfile() {
       key: "add-members",
       icon: "user-plus",
       label: "Add members to chat",
-      onPress: () => bottomSheetRef.current?.expand(),
+      onPress: () =>
+        router.push({
+          pathname: "/group/add-members/[id]",
+          params: { id, memberIds },
+        }),
     },
     {
       key: "groups",
@@ -350,7 +358,6 @@ export default function OtherProfile() {
         <ProfileSettingsSection title="Shared" rows={sharedRows} />
         <ProfileSettingsSection title="Danger zone" rows={dangerRows} />
       </ScrollView>
-      <NewChatSheet bottomSheetRef={bottomSheetRef} variant="add-member" />
     </View>
   );
 }

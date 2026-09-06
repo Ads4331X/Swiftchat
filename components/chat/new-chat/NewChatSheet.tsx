@@ -26,13 +26,11 @@ type SearchUser = {
 type NewChatSheetProps = {
   bottomSheetRef: React.RefObject<React.ElementRef<typeof BottomSheet> | null>;
   onChatCreated?: () => void;
-  variant?: "new-chat" | "add-member";
 };
 
 export default function NewChatSheet({
   bottomSheetRef,
   onChatCreated,
-  variant = "new-chat",
 }: NewChatSheetProps) {
   const theme = useTheme();
   const colors = theme.colors;
@@ -52,8 +50,6 @@ export default function NewChatSheet({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [creatingUsername, setCreatingUsername] = useState<string | null>(null);
   const inputRef = useRef<TextInput>(null);
-  const isAddMemberSheet = variant === "add-member";
-  const showNewGroup = variant === "new-chat";
 
   const openNewGroup = () => {
     closeSheet();
@@ -134,21 +130,18 @@ export default function NewChatSheet({
       <BottomSheetView>
         <NewChatSheetHeader
           onClose={closeSheet}
-          title={isAddMemberSheet ? "Add member" : "New Chat"}
+          title="New Chat"
         />
 
         <Text
           style={{ color: subtleText }}
           className="text-sm text-center mb-4"
         >
-          {isAddMemberSheet
-            ? "Add someone to this chat to create a group"
-            : "Search for a username to start a conversation"}
+          Search for a username to start a conversation
         </Text>
 
-        {showNewGroup && (
-          <Pressable
-            onPress={openNewGroup}
+        <Pressable
+          onPress={openNewGroup}
             className="flex-row items-center gap-3 mx-4 mb-4 px-4 py-4 active:opacity-60"
             style={{ backgroundColor: inputBg, borderRadius: 14 }}
           >
@@ -159,7 +152,10 @@ export default function NewChatSheet({
               <Feather name="users" size={20} color={BRAND_COLOR} />
             </View>
             <View className="flex-1">
-              <Text style={{ color: colors.text }} className="font-medium text-base">
+              <Text
+                style={{ color: colors.text }}
+                className="font-medium text-base"
+              >
                 New Group
               </Text>
               <Text style={{ color: subtleText }} className="text-sm">
@@ -169,10 +165,12 @@ export default function NewChatSheet({
             <Feather name="chevron-right" size={20} color={subtleText} />
             <View
               className="absolute bottom-0 left-[72px] right-0"
-              style={{ height: StyleSheet.hairlineWidth, backgroundColor: dividerColor }}
+              style={{
+                height: StyleSheet.hairlineWidth,
+                backgroundColor: dividerColor,
+              }}
             />
           </Pressable>
-        )}
 
         <View className="px-4">
           <Controller
@@ -205,7 +203,7 @@ export default function NewChatSheet({
                   key={user.id}
                   username={user.username}
                   loading={creatingUsername === user.username}
-                  actionIcon={isAddMemberSheet ? "user-plus" : "message-circle"}
+                  actionIcon="message-circle"
                   onPress={() => startChat(user.username)}
                 />
               ))}

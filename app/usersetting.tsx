@@ -1,5 +1,5 @@
-import { useRouter, useFocusEffect } from "expo-router";
-import { useCallback, useState } from "react";
+import { useRouter } from "expo-router";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -53,11 +53,9 @@ export default function UserSettings() {
     }
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      refetch();
-    }, [refetch]),
-  );
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
 
   const handleDeleteAccount = async () => {
     try {
@@ -86,7 +84,7 @@ export default function UserSettings() {
     }
 
     Alert.alert(
-      "Delete account",
+"Delete account",   
       "This will permanently delete your account, messages and conversations. This can't be undone.",
       [
         { text: "Cancel", style: "cancel" },

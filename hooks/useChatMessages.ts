@@ -88,6 +88,11 @@ export default function useChatMessages(
   const [hasMore, setHasMore] = useState(true);
   const tempIdRef = useRef(-1);
   const fetchedServerRef = useRef(false);
+  // Tracks the currently shown list so re-effects (e.g. the conversation key
+  // reference changing) don't flip the full-screen spinner on over content
+  // that is already on screen.
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
   // Keep the latest currentUserId available to socket listeners whose effect
   // doesn't re-run when the user id arrives asynchronously.
   const currentUserIdRef = useRef(currentUserId);
@@ -387,7 +392,9 @@ export default function useChatMessages(
       );
 
       const getMessages = async () => {
-        setLoading(true);
+        if (messagesRef.current.length === 0) {
+          setLoading(true);
+        }
         try {
           // 1. Load from local cache first (instant display < 10ms)
           try {

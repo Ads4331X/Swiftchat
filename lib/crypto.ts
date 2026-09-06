@@ -547,3 +547,37 @@ export async function recoverPrivateKey({ password }: { password: string }) {
     derivedKey?.fill(0);
   }
 }
+
+export async function shareConversationKeyWithMembers({
+  conversationId,
+  memberIds,
+}: {
+  conversationId: string;
+  memberIds: number[];
+}) {
+  const conversationKey = await getOrCreateConversationKey(
+    conversationId,
+    memberIds,
+  );
+  if (!conversationKey) return false; // device can't decrypt
+
+  const privateKeyName = await userKeyName("privateKey");
+  const receiverPrivateKey = await getPrivateKey(privateKeyName);
+  if (!receiverPrivateKey) return false;
+
+  for (const memberId of memberIds) {
+    const { data } = await api.get(`/api/user/${memberId}/public-key`);
+    if (!data?.publicKey) continue;
+
+    const { encryptedKey, nonce: keyNonce } = await generateEncryptedKey({
+      conversationKey,
+      receiverPublicKey: Base64.toUint8Array(data.publicKey),
+      senderPrivateKey: Base64.toUint8Array(receiverPrivateKey),
+    });
+    await api.put(`/api/conversations/${conversationId}/key/${memberId}`, {
+      encryptedKey: Base64.fromUint8Array(encryptedKey),
+      nonce: Base64.fromUint8Array(keyNonce),
+    });
+  }
+  return true;
+}

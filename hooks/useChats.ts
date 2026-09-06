@@ -51,9 +51,10 @@ export default function useChats() {
 
   const chatsRef = useRef(chats);
   chatsRef.current = chats;
+  const hasLoadedRef = useRef(false);
 
   const refetch = useCallback(async () => {
-    if (chatsRef.current.length === 0) {
+    if (!hasLoadedRef.current) {
       setLoading(true);
     }
 
@@ -167,6 +168,7 @@ export default function useChats() {
         }).catch(() => {});
       }
     } finally {
+      hasLoadedRef.current = true;
       setLoading(false);
     }
   }, []);
