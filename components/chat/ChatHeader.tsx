@@ -14,6 +14,8 @@ type ChatHeaderProps = {
   textColor: string;
   dividerColor: string;
   backgroundColor: string;
+  memberIds: string | undefined;
+  chatId: string;
 };
 
 export default function ChatHeader({
@@ -25,6 +27,8 @@ export default function ChatHeader({
   textColor,
   dividerColor,
   backgroundColor,
+  memberIds,
+  chatId,
 }: ChatHeaderProps) {
   const router = useRouter();
   const { subtleText } = useTheme();
@@ -52,12 +56,16 @@ export default function ChatHeader({
       </Pressable>
       <Avatar username={username ?? "?"} avatarUrl={avatarUrl} size={34} />
       <Pressable
-        disabled={!(isGroup === false && userId != null)}
         onPress={() => {
-          if (userId != null) {
+          if (isGroup) {
             router.push({
-              pathname: "/otherProfile/[id]" as never,
-              params: { id: userId },
+              pathname: "/otherProfile/[id]",
+              params: { id: chatId, username, avatarUrl, memberIds }, // group branch
+            });
+          } else if (userId != null) {
+            router.push({
+              pathname: "/otherProfile/[id]",
+              params: { id: userId }, // 1:1 unchanged
             });
           }
         }}

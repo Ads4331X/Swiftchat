@@ -36,6 +36,7 @@ export default function ProfileSettingsSection({
       </Text>
       <View>
         {rows.map((row) => (
+          
           <Pressable
             key={row.key}
             onPress={row.onPress}

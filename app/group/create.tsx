@@ -70,7 +70,10 @@ export default function CreateGroup() {
     setSelected((prev) =>
       isSelected(user.id)
         ? prev.filter((m) => m.id !== user.id)
-        : [...prev, { id: user.id, username: user.username, avatar: user.avatar }],
+        : [
+            ...prev,
+            { id: user.id, username: user.username, avatar: user.avatar },
+          ],
     );
   };
 
@@ -88,6 +91,7 @@ export default function CreateGroup() {
       const response = await api.get("/api/user/search", {
         params: { username: q },
       });
+
       setUsers(response.data.users ?? []);
     } catch (err: any) {
       setErrorMessage(err.response?.data?.error ?? "Something went wrong");
@@ -115,12 +119,13 @@ export default function CreateGroup() {
     setCreating(true);
     setErrorMessage(null);
     try {
-      const membersId = selected.map((m) => String(m.id));
+      const membersId = selected.map((m) => Number(m.id));
       const response = await api.post("/api/conversations/group", {
         name: name.trim(),
         membersId,
       });
       const group = response.data;
+
       const groupId = group?.id ? String(group.id) : "";
 
       joinConversation({ id: groupId || membersId.join(",") });
@@ -164,12 +169,21 @@ export default function CreateGroup() {
 
       {step === 1 ? (
         <>
-          <Text style={{ color: subtleText }} className="text-center text-sm mt-1 mb-4">
+          <Text
+            style={{ color: subtleText }}
+            className="text-center text-sm mt-1 mb-4"
+          >
             Select people to add
           </Text>
 
           <View className="flex-row items-center gap-2 px-4">
-            <View style={{ flex: 1, position: "relative", justifyContent: "center" }}>
+            <View
+              style={{
+                flex: 1,
+                position: "relative",
+                justifyContent: "center",
+              }}
+            >
               <View style={{ position: "absolute", left: 16, zIndex: 1 }}>
                 <Feather name="search" size={20} color={subtleText} />
               </View>
@@ -218,12 +232,20 @@ export default function CreateGroup() {
               {selected.map((member) => (
                 <View key={member.id} className="items-center gap-1">
                   <View>
-                    <Avatar username={member.username} avatarUrl={member.avatar} size={48} />
+                    <Avatar
+                      username={member.username}
+                      avatarUrl={member.avatar}
+                      size={48}
+                    />
                     <Pressable
                       onPress={() => removeMember(member.id)}
                       hitSlop={8}
                       className="absolute -top-1 -right-1 rounded-full items-center justify-center"
-                      style={{ width: 20, height: 20, backgroundColor: colors.text }}
+                      style={{
+                        width: 20,
+                        height: 20,
+                        backgroundColor: colors.text,
+                      }}
                     >
                       <Feather name="x" size={12} color={colors.background} />
                     </Pressable>
@@ -275,7 +297,11 @@ export default function CreateGroup() {
                       onPress={() => toggleMember(user)}
                       className="flex-row items-center gap-3 py-3 active:opacity-60"
                     >
-                      <Avatar username={user.username} avatarUrl={user.avatar} size={44} />
+                      <Avatar
+                        username={user.username}
+                        avatarUrl={user.avatar}
+                        size={44}
+                      />
                       <View className="flex-1">
                         <Text
                           style={{ color: colors.text }}
@@ -290,11 +316,17 @@ export default function CreateGroup() {
                           width: 22,
                           height: 22,
                           borderWidth: 2,
-                          borderColor: selectedNow ? BRAND_COLOR : subtleText + "66",
-                          backgroundColor: selectedNow ? BRAND_COLOR : "transparent",
+                          borderColor: selectedNow
+                            ? BRAND_COLOR
+                            : subtleText + "66",
+                          backgroundColor: selectedNow
+                            ? BRAND_COLOR
+                            : "transparent",
                         }}
                       >
-                        {selectedNow && <Feather name="check" size={14} color="#fff" />}
+                        {selectedNow && (
+                          <Feather name="check" size={14} color="#fff" />
+                        )}
                       </View>
                       <View
                         className="absolute bottom-0 right-0"
@@ -310,37 +342,47 @@ export default function CreateGroup() {
               </ScrollView>
             )}
 
-            {!isSearching && !errorMessage && users.length === 0 && query.trim() !== "" && (
-              <View className="mt-6">
-                <EmptyState
-                  icon="user-x"
-                  title="No users found"
-                  message="Try a different username."
-                />
-              </View>
-            )}
+            {!isSearching &&
+              !errorMessage &&
+              users.length === 0 &&
+              query.trim() !== "" && (
+                <View className="mt-6">
+                  <EmptyState
+                    icon="user-x"
+                    title="No users found"
+                    message="Try a different username."
+                  />
+                </View>
+              )}
 
-            {!isSearching && !errorMessage && users.length === 0 && query.trim() === "" && (
-              <View className="mt-6">
-                <EmptyState
-                  icon="users"
-                  title="Add members"
-                  message="Search for a username and tap to select who you want in the group."
-                />
-              </View>
-            )}
+            {!isSearching &&
+              !errorMessage &&
+              users.length === 0 &&
+              query.trim() === "" && (
+                <View className="mt-6">
+                  <EmptyState
+                    icon="users"
+                    title="Add members"
+                    message="Search for a username and tap to select who you want in the group."
+                  />
+                </View>
+              )}
           </View>
 
           <View
             className="px-4 pt-3 pb-4"
-            style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: dividerColor }}
+            style={{
+              borderTopWidth: StyleSheet.hairlineWidth,
+              borderTopColor: dividerColor,
+            }}
           >
             <Pressable
               onPress={goNext}
               disabled={selected.length < 1}
               className="h-[52px] rounded-xl items-center justify-center active:opacity-80"
               style={{
-                backgroundColor: selected.length < 1 ? subtleText + "40" : BRAND_COLOR,
+                backgroundColor:
+                  selected.length < 1 ? subtleText + "40" : BRAND_COLOR,
                 opacity: selected.length < 1 ? 0.6 : 1,
               }}
             >
@@ -416,7 +458,11 @@ export default function CreateGroup() {
                   <View className="flex-row gap-3">
                     {selected.map((member) => (
                       <View key={member.id} className="items-center gap-1">
-                        <Avatar username={member.username} avatarUrl={member.avatar} size={48} />
+                        <Avatar
+                          username={member.username}
+                          avatarUrl={member.avatar}
+                          size={48}
+                        />
                         <Text
                           numberOfLines={1}
                           style={{ color: colors.text, maxWidth: 64 }}
@@ -434,10 +480,16 @@ export default function CreateGroup() {
 
           <View
             className="px-4 pt-3 pb-4"
-            style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: dividerColor }}
+            style={{
+              borderTopWidth: StyleSheet.hairlineWidth,
+              borderTopColor: dividerColor,
+            }}
           >
             {errorMessage != null && (
-              <Text style={{ color: "#EF4444" }} className="text-sm text-center mb-2">
+              <Text
+                style={{ color: "#EF4444" }}
+                className="text-sm text-center mb-2"
+              >
                 {errorMessage}
               </Text>
             )}

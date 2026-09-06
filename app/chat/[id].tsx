@@ -60,12 +60,7 @@ export default function UserChat() {
   } = useKeySetup();
   const [pinError, setPinError] = useState<string | null>(null);
   const { currentUserId, conversationKey, otherUser, members } =
-    useChatParticipant(
-      id,
-      memberIds,
-      keyReadyVersion,
-      setUpKeys,
-    );
+    useChatParticipant(id, memberIds, keyReadyVersion, setUpKeys);
   const { isOtherUserTyping, notifyDraftChange, stopTyping } = useChatTyping(
     id,
     currentUserId,
@@ -134,13 +129,15 @@ export default function UserChat() {
     >
       <ChatHeader
         userId={otherUser?.userId}
-        username={isGroup ? username : otherUser?.username ?? username}
-        avatarUrl={isGroup ? "" : otherUser?.avatarUrl ?? avatarUrl}
+        username={isGroup ? username : (otherUser?.username ?? username)}
+        avatarUrl={isGroup ? "" : (otherUser?.avatarUrl ?? avatarUrl)}
         isGroup={isGroup}
         memberCount={memberCount}
         textColor={colors.text}
         dividerColor={dividerColor}
         backgroundColor={colors.background}
+        chatId={id}
+        memberIds={isGroup ? memberIds : undefined}
       />
       <MessageList
         messages={messages}
