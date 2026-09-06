@@ -106,7 +106,7 @@ export default function OtherProfile() {
       const chat = data.find(
         (c: any) => String(c.conversationId ?? c.id) === String(id),
       );
-      setIsAdmin(Boolean(chat?.isCurrentUserAdmin));
+      setIsAdmin(Boolean(chat) && me != null && Number(chat?.createdById) === me);
       setMembers(
         (chat?.members ?? []).map((m: any) => ({
           id: Number(m.id),
@@ -145,8 +145,22 @@ export default function OtherProfile() {
   };
 
   const removeMember = (member: GroupMember) => {
-    confirm("Remove member", `Remove ${member.username} from the group?`, () =>
-      setMembers((prev) => prev.filter((m) => m.id !== member.id)),
+    confirm(
+      "Remove member",
+      `Remove ${member.username} from the group?`,
+      async () => {
+        try {
+          await api.delete(
+            `/api/conversations/${id}/members/${member.id}`,
+          );
+          setMembers((prev) => prev.filter((m) => m.id !== member.id));
+        } catch (err: any) {
+          Alert.alert(
+            "Couldn't remove member",
+            err.response?.data?.error ?? "Something went wrong",
+          );
+        }
+      },
     );
   };
 
@@ -192,17 +206,19 @@ export default function OtherProfile() {
     },
   ];
 
+  const addMemberRow: ProfileRow = {
+    key: "add-members",
+    icon: "user-plus",
+    label: "Add members to chat",
+    onPress: () =>
+      router.push({
+        pathname: "/group/add-members/[id]",
+        params: { id, memberIds },
+      }),
+  };
+
   const sharedRows: ProfileRow[] = [
-    {
-      key: "add-members",
-      icon: "user-plus",
-      label: "Add members to chat",
-      onPress: () =>
-        router.push({
-          pathname: "/group/add-members/[id]",
-          params: { id, memberIds },
-        }),
-    },
+    ...(isGroup ? [addMemberRow] : []),
     {
       key: "groups",
       icon: "users",
@@ -223,9 +239,16 @@ export default function OtherProfile() {
             confirm(
               "Leave group",
               "You won't receive messages from this group anymore.",
-              () => {
-                const result = api.delete(`/api/conversations/${id}/leave`);
-                console.log("Left group", result);
+              async () => {
+                try {
+                  await api.delete(`/api/conversations/${id}/leave`);
+                  router.replace("/chat");
+                } catch (err: any) {
+                  Alert.alert(
+                    "Couldn't leave group",
+                    err.response?.data?.error ?? "Something went wrong",
+                  );
+                }
               },
             ),
         },
@@ -321,11 +344,13 @@ export default function OtherProfile() {
                     {member.username}
                   </Text>
                 </Pressable>
-                {isAdmin && member.id !== myId && (
+                {member.id !== myId && (
                   <Pressable
+                    disabled={!isAdmin}
                     onPress={() => removeMember(member)}
                     hitSlop={10}
                     className="p-2"
+                    style={{ opacity: isAdmin ? 1 : 0.3 }}
                   >
                     <Feather name="user-minus" size={18} color="#E5484D" />
                   </Pressable>

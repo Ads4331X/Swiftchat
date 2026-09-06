@@ -7,6 +7,7 @@ import { Controller, useForm } from "react-hook-form";
 import { useRef, useState } from "react";
 import { useRouter } from "expo-router";
 import { api } from "@/lib/api";
+import { getCurrentUserId } from "@/lib/auth";
 import NewChatSheetHeader from "./NewChatSheetHeader";
 import UsernameSearchInput from "./UsernameSearchInput";
 import SearchLoadingCard from "./SearchLoadingCard";
@@ -80,17 +81,35 @@ export default function NewChatSheet({
     }
   };
 
-  const startChat = async (username: string) => {
+  const startChat = async (user: SearchUser) => {
     if (creatingUsername) {
       return;
     }
 
-    setCreatingUsername(username);
+    setCreatingUsername(user.username);
     setErrorMessage(null);
 
     try {
-      await api.post("/api/conversations/new-conversation", {
-        targetUsername: username,
+      const response = await api.post("/api/conversations/new-conversation", {
+        targetUsername: user.username,
+      });
+
+      const conversation = (response.data as any)?.conversation;
+      const currentUserId = await getCurrentUserId();
+
+      const otherMemberIds = (conversation?.members ?? [])
+        .map((member: any) => Number(member.userId ?? member.user?.id))
+        .filter((memberId: number) => memberId !== currentUserId);
+
+      const memberIds = otherMemberIds.length ? otherMemberIds : [user.id];
+
+      router.push({
+        pathname: "/chat/[id]",
+        params: {
+          id: String(conversation?.id ?? user.id),
+          username: user.username,
+          memberIds: String(memberIds.join(",")),
+        },
       });
 
       onChatCreated?.();
@@ -204,7 +223,7 @@ export default function NewChatSheet({
                   username={user.username}
                   loading={creatingUsername === user.username}
                   actionIcon="message-circle"
-                  onPress={() => startChat(user.username)}
+                  onPress={() => startChat(user)}
                 />
               ))}
             </View>
