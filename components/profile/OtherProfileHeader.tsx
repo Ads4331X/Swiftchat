@@ -5,6 +5,7 @@ import { BRAND_COLOR } from "@/constants/theme";
 import Avatar from "@/components/profile/Avatar";
 
 type OtherProfileHeaderProps = {
+  isGroup?: boolean;
   username?: string;
   avatar?: string;
   presence: string;
@@ -16,6 +17,7 @@ type OtherProfileHeaderProps = {
 };
 
 export default function OtherProfileHeader({
+  isGroup = false,
   username,
   avatar,
   presence,
@@ -41,38 +43,53 @@ export default function OtherProfileHeader({
       </View>
 
       <View className="items-center mt-2 gap-1.5">
-        <Avatar username={username ?? "?"} avatarUrl={avatar} size={76} />
+        {isGroup ? (
+          <View
+            className="items-center justify-center rounded-full"
+            style={{
+              width: 76,
+              height: 76,
+              backgroundColor: BRAND_COLOR + "1a",
+            }}
+          >
+            <Feather name="users" size={34} color={BRAND_COLOR} />
+          </View>
+        ) : (
+          <Avatar username={username ?? "?"} avatarUrl={avatar} size={76} />
+        )}
         <Text
           style={{ color: textColor }}
           className="font-semibold text-[21px] mt-2"
         >
-          {username ?? "Unknown user"}
+          {username ?? (isGroup ? "Group" : "Unknown user")}
         </Text>
         <Text style={{ color: mutedColor }} className="text-[13px]">
           {presence}
         </Text>
       </View>
 
-      <View className="flex-row justify-center gap-8 mt-6 px-5">
-        <HeaderAction
-          icon="video"
-          label="Video"
-          mutedColor={mutedColor}
-          onPress={onVideoCall}
-        />
-        <HeaderAction
-          icon="phone"
-          label="Audio"
-          mutedColor={mutedColor}
-          onPress={onAudioCall}
-        />
-        <HeaderAction
-          icon="search"
-          label="Search"
-          mutedColor={mutedColor}
-          onPress={onSearch}
-        />
-      </View>
+      {!isGroup && (
+        <View className="flex-row justify-center gap-8 mt-6 px-5">
+          <HeaderAction
+            icon="video"
+            label="Video"
+            mutedColor={mutedColor}
+            onPress={onVideoCall}
+          />
+          <HeaderAction
+            icon="phone"
+            label="Audio"
+            mutedColor={mutedColor}
+            onPress={onAudioCall}
+          />
+          <HeaderAction
+            icon="search"
+            label="Search"
+            mutedColor={mutedColor}
+            onPress={onSearch}
+          />
+        </View>
+      )}
     </View>
   );
 }

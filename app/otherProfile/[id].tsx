@@ -67,6 +67,7 @@ export default function OtherProfile() {
   const [showAllMembers, setShowAllMembers] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [notificationsOn, setNotificationsOn] = useState(true);
+  const [groupName, setGroupName] = useState<string | null>(null);
 
   const otherMemberIds = (memberIds ?? "")
     .split(",")
@@ -107,6 +108,7 @@ export default function OtherProfile() {
         (c: any) => String(c.conversationId ?? c.id) === String(id),
       );
       setIsAdmin(Boolean(chat) && me != null && Number(chat?.createdById) === me);
+      setGroupName(chat?.name?.trim() || null);
       setMembers(
         (chat?.members ?? []).map((m: any) => ({
           id: Number(m.id),
@@ -289,7 +291,8 @@ export default function OtherProfile() {
         showsVerticalScrollIndicator={false}
       >
         <OtherProfileHeader
-          username={isGroup ? (username ?? "Group") : user?.username}
+          isGroup={isGroup}
+          username={isGroup ? (groupName ?? username ?? "Group") : user?.username}
           avatar={isGroup ? undefined : user?.avatar}
           presence={
             isGroup ? `${memberCount} members` : formatPresence(user?.lastSeen)
