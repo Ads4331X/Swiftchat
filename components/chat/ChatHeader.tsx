@@ -60,12 +60,24 @@ export default function ChatHeader({
           if (isGroup) {
             router.push({
               pathname: "/otherProfile/[id]",
-              params: { id: chatId, username, avatarUrl, memberIds }, // group branch
+              params: {
+                id: chatId,
+                chatId,
+                username,
+                avatarUrl,
+                memberIds,
+              },
             });
           } else if (userId != null) {
             router.push({
               pathname: "/otherProfile/[id]",
-              params: { id: userId }, // 1:1 unchanged
+              params: {
+                id: userId,
+                chatId,
+                username,
+                avatarUrl,
+                memberIds: String(userId),
+              },
             });
           }
         }}

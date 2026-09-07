@@ -1,11 +1,13 @@
 import {
   Alert,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
@@ -52,10 +54,11 @@ function formatPresence(lastSeen?: string) {
 }
 
 export default function OtherProfile() {
-  const { id, username, memberIds } = useLocalSearchParams<{
+  const { id, username, memberIds, chatId } = useLocalSearchParams<{
     id: string;
     username?: string;
     memberIds?: string;
+    chatId?: string;
   }>();
   const router = useRouter();
   const { colors } = useTheme();
@@ -68,6 +71,8 @@ export default function OtherProfile() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [notificationsOn, setNotificationsOn] = useState(true);
   const [groupName, setGroupName] = useState<string | null>(null);
+  const [renameVisible, setRenameVisible] = useState(false);
+  const [renameText, setRenameText] = useState("");
 
   const otherMemberIds = (memberIds ?? "")
     .split(",")
@@ -131,6 +136,18 @@ export default function OtherProfile() {
       getOtherProfile();
     }, [getOtherProfile]),
   );
+
+  const handleRename = async () => {
+    const trimmed = renameText.trim();
+    if (!trimmed) return;
+    try {
+      await api.patch(`/api/conversations/${id}`, { name: trimmed });
+      setGroupName(trimmed);
+      setRenameVisible(false);
+    } catch {
+      Alert.alert("Rename failed", "Could not rename the group.");
+    }
+  };
 
   const muted = colors.text + "80";
   const faint = colors.text + "1f";
@@ -215,12 +232,12 @@ export default function OtherProfile() {
     onPress: () =>
       router.push({
         pathname: "/group/add-members/[id]",
-        params: { id, memberIds },
+        params: { id: chatId ?? id, memberIds },
       }),
   };
 
   const sharedRows: ProfileRow[] = [
-    ...(isGroup ? [addMemberRow] : []),
+    addMemberRow,
     {
       key: "groups",
       icon: "users",
@@ -299,6 +316,14 @@ export default function OtherProfile() {
           }
           textColor={colors.text}
           mutedColor={muted}
+          onEditName={
+            isGroup && isAdmin
+              ? () => {
+                  setRenameText(groupName ?? "");
+                  setRenameVisible(true);
+                }
+              : undefined
+          }
           onVideoCall={() => console.log("Video call")}
           onAudioCall={() => console.log("Audio call")}
           onSearch={() => console.log("Search in chat")}
@@ -386,6 +411,72 @@ export default function OtherProfile() {
         <ProfileSettingsSection title="Shared" rows={sharedRows} />
         <ProfileSettingsSection title="Danger zone" rows={dangerRows} />
       </ScrollView>
+
+      <Modal
+        visible={renameVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setRenameVisible(false)}
+      >
+        <Pressable
+          style={{
+            flex: 1,
+            backgroundColor: "rgba(0,0,0,0.4)",
+            justifyContent: "center",
+            alignItems: "center",
+          }}
+          onPress={() => setRenameVisible(false)}
+        >
+          <Pressable
+            onPress={() => {}}
+            style={{
+              backgroundColor: colors.background,
+              borderRadius: 14,
+              padding: 20,
+              width: "85%",
+            }}
+          >
+            <Text
+              style={{ color: colors.text }}
+              className="text-[17px] font-semibold mb-3"
+            >
+              Rename group
+            </Text>
+            <TextInput
+              value={renameText}
+              onChangeText={setRenameText}
+              placeholder="Group name"
+              placeholderTextColor={muted}
+              autoFocus
+              style={{
+                color: colors.text,
+                borderWidth: StyleSheet.hairlineWidth,
+                borderColor: colors.text + "40",
+                borderRadius: 10,
+                padding: 12,
+                fontSize: 16,
+              }}
+            />
+            <View className="flex-row justify-end gap-4 mt-4">
+              <Pressable onPress={() => setRenameVisible(false)}>
+                <Text style={{ color: muted }} className="text-[15px]">
+                  Cancel
+                </Text>
+              </Pressable>
+              <Pressable onPress={handleRename} disabled={!renameText.trim()}>
+                <Text
+                  style={{
+                    color: renameText.trim() ? BRAND_COLOR : muted,
+                  }}
+                  className="text-[15px] font-semibold"
+                >
+                  Save
+                </Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }

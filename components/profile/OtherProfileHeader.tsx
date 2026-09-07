@@ -11,6 +11,7 @@ type OtherProfileHeaderProps = {
   presence: string;
   textColor: string;
   mutedColor: string;
+  onEditName?: () => void;
   onVideoCall: () => void;
   onAudioCall: () => void;
   onSearch: () => void;
@@ -23,6 +24,7 @@ export default function OtherProfileHeader({
   presence,
   textColor,
   mutedColor,
+  onEditName,
   onVideoCall,
   onAudioCall,
   onSearch,
@@ -57,12 +59,19 @@ export default function OtherProfileHeader({
         ) : (
           <Avatar username={username ?? "?"} avatarUrl={avatar} size={76} />
         )}
-        <Text
-          style={{ color: textColor }}
-          className="font-semibold text-[21px] mt-2"
-        >
-          {username ?? (isGroup ? "Group" : "Unknown user")}
-        </Text>
+        <View className="flex-row items-center gap-1 mt-2">
+          <Text
+            style={{ color: textColor }}
+            className="font-semibold text-[21px]"
+          >
+            {username ?? (isGroup ? "Group" : "Unknown user")}
+          </Text>
+          {onEditName && (
+            <Pressable onPress={onEditName} hitSlop={6} className="p-1">
+              <Feather name="edit-2" size={15} color={mutedColor} />
+            </Pressable>
+          )}
+        </View>
         <Text style={{ color: mutedColor }} className="text-[13px]">
           {presence}
         </Text>
