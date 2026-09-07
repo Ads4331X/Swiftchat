@@ -8,6 +8,7 @@ type OtherProfileHeaderProps = {
   isGroup?: boolean;
   username?: string;
   avatar?: string;
+  subtitle?: string;
   presence: string;
   textColor: string;
   mutedColor: string;
@@ -21,6 +22,7 @@ export default function OtherProfileHeader({
   isGroup = false,
   username,
   avatar,
+  subtitle,
   presence,
   textColor,
   mutedColor,
@@ -72,6 +74,11 @@ export default function OtherProfileHeader({
             </Pressable>
           )}
         </View>
+        {subtitle ? (
+          <Text style={{ color: mutedColor }} className="text-[13px]">
+            {subtitle}
+          </Text>
+        ) : null}
         <Text style={{ color: mutedColor }} className="text-[13px]">
           {presence}
         </Text>

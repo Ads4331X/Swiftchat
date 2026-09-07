@@ -10,6 +10,7 @@ import {
 import { useTheme } from "@/constants/theme-provider";
 import useChatMessages, { type Message } from "@/hooks/useChatMessages";
 import useChatParticipant from "@/hooks/useChatParticipant";
+import { conversationDisplayName } from "@/lib/conversation";
 import useChatTyping from "@/hooks/useChatTyping";
 import { useKeySetup } from "@/hooks/useKeySetup";
 import ChatActions from "@/components/chat/ChatActions";
@@ -59,7 +60,7 @@ export default function UserChat() {
     skip: skipPin,
   } = useKeySetup();
   const [pinError, setPinError] = useState<string | null>(null);
-  const { currentUserId, conversationKey, otherUser, members } =
+  const { currentUserId, conversationKey, conversationName, otherUser, members } =
     useChatParticipant(id, memberIds, keyReadyVersion, setUpKeys);
   const { isOtherUserTyping, notifyDraftChange, stopTyping } = useChatTyping(
     id,
@@ -121,6 +122,15 @@ export default function UserChat() {
     setMenuPosition(null);
   };
 
+  const otherMembers =
+    currentUserId == null
+      ? members.filter((m) => m.username !== "You")
+      : members.filter((m) => m.id !== currentUserId);
+  const headerName =
+    conversationName != null
+      ? conversationDisplayName(conversationName, otherMembers)
+      : username || otherUser?.username || "Chat";
+
   return (
     <SafeAreaView
       className="flex-1"
@@ -129,7 +139,7 @@ export default function UserChat() {
     >
       <ChatHeader
         userId={otherUser?.userId}
-        username={isGroup ? username : (otherUser?.username ?? username)}
+        username={headerName}
         avatarUrl={isGroup ? "" : (otherUser?.avatarUrl ?? avatarUrl)}
         isGroup={isGroup}
         memberCount={memberCount}

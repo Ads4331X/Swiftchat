@@ -6,6 +6,7 @@ import type { ChatCategory } from "./PillsNav";
 import type { Chat } from "@/hooks/useChats";
 import ChatCard from "./ChatCard";
 import { useRouter } from "expo-router";
+import { conversationDisplayName } from "@/lib/conversation";
 import {
   joinConversation,
   listenForTyping,
@@ -102,15 +103,8 @@ export default function ChatList({
     );
   }
 
-  const displayName = (chat: Chat) => {
-    const groupName = chat.name?.trim();
-    if (groupName) {
-      return groupName;
-    }
-    return chat.members.length > 1
-      ? chat.members.map((member) => member.username).join(", ")
-      : (chat.members[0]?.username ?? "Chat");
-  };
+  const displayName = (chat: Chat) =>
+    conversationDisplayName(chat.name, chat.members);
 
   const otherAvatar = (chat: Chat) =>
     chat.members.length === 1 ? (chat.members[0]?.avatar ?? "") : "";

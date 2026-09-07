@@ -128,8 +128,18 @@ export default function OtherProfile() {
         username: data.username,
         lastSeen: data.lastSeen,
       });
+      if (chatId) {
+        try {
+          const { data: convs } = await api.get("/api/conversations");
+          const chat = convs.find(
+            (c: any) => String(c.conversationId ?? c.id) === String(chatId),
+          );
+          setGroupName(chat?.name?.trim() || null);
+        } catch {
+        }
+      }
     }
-  }, [id, isGroup]);
+  }, [id, isGroup, chatId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -141,11 +151,11 @@ export default function OtherProfile() {
     const trimmed = renameText.trim();
     if (!trimmed) return;
     try {
-      await api.patch(`/api/conversations/${id}`, { name: trimmed });
+      await api.patch(`/api/conversations/${chatId ?? id}`, { name: trimmed });
       setGroupName(trimmed);
       setRenameVisible(false);
     } catch {
-      Alert.alert("Rename failed", "Could not rename the group.");
+      Alert.alert("Rename failed", "Could not rename the conversation.");
     }
   };
 
@@ -309,20 +319,32 @@ export default function OtherProfile() {
       >
         <OtherProfileHeader
           isGroup={isGroup}
-          username={isGroup ? (groupName ?? username ?? "Group") : user?.username}
+          username={
+            isGroup
+              ? (groupName ?? username ?? "Group")
+              : (groupName ?? username ?? user?.username ?? "Unknown user")
+          }
           avatar={isGroup ? undefined : user?.avatar}
+          subtitle={isGroup || !groupName ? undefined : user?.username}
           presence={
             isGroup ? `${memberCount} members` : formatPresence(user?.lastSeen)
           }
           textColor={colors.text}
           mutedColor={muted}
           onEditName={
-            isGroup && isAdmin
-              ? () => {
-                  setRenameText(groupName ?? "");
-                  setRenameVisible(true);
-                }
-              : undefined
+            isGroup
+              ? isAdmin
+                ? () => {
+                    setRenameText(groupName ?? "");
+                    setRenameVisible(true);
+                  }
+                : undefined
+              : chatId
+                ? () => {
+                    setRenameText(groupName ?? "");
+                    setRenameVisible(true);
+                  }
+                : undefined
           }
           onVideoCall={() => console.log("Video call")}
           onAudioCall={() => console.log("Audio call")}
@@ -440,12 +462,12 @@ export default function OtherProfile() {
               style={{ color: colors.text }}
               className="text-[17px] font-semibold mb-3"
             >
-              Rename group
+              Rename chat
             </Text>
             <TextInput
               value={renameText}
               onChangeText={setRenameText}
-              placeholder="Group name"
+              placeholder={isGroup ? "Group name" : "Nickname"}
               placeholderTextColor={muted}
               autoFocus
               style={{
