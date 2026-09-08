@@ -22,6 +22,7 @@ import OtherProfileHeader from "@/components/profile/OtherProfileHeader";
 import ProfileSettingsSection, {
   type ProfileRow,
 } from "@/components/profile/ProfileSettingsSection";
+import { deleteConversation } from "@/lib/db";
 
 type User = {
   avatar?: string;
@@ -300,6 +301,7 @@ export default function OtherProfile() {
               async () => {
                 try {
                   await api.delete(`/api/conversations/${id}`);
+                  await deleteConversation({ conversationId: Number(id) });
                   router.replace("/chat");
                 } catch (err: any) {
                   const isForbidden =

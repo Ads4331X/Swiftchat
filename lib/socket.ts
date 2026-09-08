@@ -135,3 +135,12 @@ export function listenForReactionUpdate(
     Socket?.off("message-reaction-update", callback);
   };
 }
+
+export function listenForGroupDelete(
+  callback: (data: { conversationId: number }) => void,
+) {
+  Socket?.on("group-deleted", callback);
+  return () => {
+    Socket?.off("group-deleted", callback);
+  };
+}

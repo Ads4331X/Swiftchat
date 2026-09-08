@@ -1,5 +1,5 @@
-import { useLocalSearchParams } from "expo-router";
-import { useRef, useState } from "react";
+import { router, useLocalSearchParams } from "expo-router";
+import { useEffect, useRef, useState } from "react";
 import { FlatList } from "react-native";
 import { useSharedValue, withSpring } from "react-native-reanimated";
 import {
@@ -18,6 +18,7 @@ import ChatComposer from "@/components/chat/ChatComposer";
 import ChatHeader from "@/components/chat/ChatHeader";
 import MessageList from "@/components/chat/MessageList";
 import PinModal from "@/components/security/PinModal";
+import { listenForGroupDelete } from "@/lib/socket";
 
 type Position = {
   pageX: number;
@@ -60,8 +61,13 @@ export default function UserChat() {
     skip: skipPin,
   } = useKeySetup();
   const [pinError, setPinError] = useState<string | null>(null);
-  const { currentUserId, conversationKey, conversationName, otherUser, members } =
-    useChatParticipant(id, memberIds, keyReadyVersion, setUpKeys);
+  const {
+    currentUserId,
+    conversationKey,
+    conversationName,
+    otherUser,
+    members,
+  } = useChatParticipant(id, memberIds, keyReadyVersion, setUpKeys);
   const { isOtherUserTyping, notifyDraftChange, stopTyping } = useChatTyping(
     id,
     currentUserId,
@@ -86,6 +92,17 @@ export default function UserChat() {
   const listRef = useRef<FlatList<Message>>(null);
   const scrollToEndRef = useRef<(() => void) | null>(null);
 
+  useEffect(() => {
+    const unsubscribe = listenForGroupDelete(({ conversationId }) => {
+      if (Number(conversationId) === Number(id)) {
+        router.replace("/chat");
+      }
+    });
+
+    return () => {
+      unsubscribe?.();
+    };
+  }, [id]);
   const handleSend = async () => {
     if (!draft.trim() || sending) return;
     const text = draft;

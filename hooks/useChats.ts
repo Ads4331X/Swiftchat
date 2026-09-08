@@ -1,7 +1,12 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { api } from "@/lib/api";
-import { listenForNewMessages, joinConversations } from "@/lib/socket";
 import {
+  listenForNewMessages,
+  joinConversations,
+  listenForGroupDelete,
+} from "@/lib/socket";
+import {
+  deleteConversation,
   getConversations,
   saveConversation,
   syncConversationsWithServer,
@@ -274,6 +279,23 @@ export default function useChats() {
       }
     });
 
+    return () => {
+      unsubscribe?.();
+    };
+  }, []);
+
+  // listen for group delete
+  useEffect(() => {
+    const unsubscribe = listenForGroupDelete(async ({ conversationId }) => {
+      try {
+        await deleteConversation({ conversationId: conversationId });
+        setChats((currentChats) =>
+          currentChats.filter((chat) => chat.id !== Number(conversationId)),
+        );
+      } catch (error) {
+        console.error("Failed to decrypt new message preview:", error);
+      }
+    });
     return () => {
       unsubscribe?.();
     };

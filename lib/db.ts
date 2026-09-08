@@ -395,6 +395,15 @@ export async function deleteConversation({
   try {
     const db = await getDb();
     if (!db) return;
+    await db.runAsync(`DELETE FROM MessageRead where conversationId = ?`, [
+      conversationId,
+    ]);
+    await db.runAsync(`DELETE FROM PendingMessage where conversationId = ?`, [
+      conversationId,
+    ]);
+    await db.runAsync(`DELETE FROM Message where conversationId = ?`, [
+      conversationId,
+    ]);
 
     await db.runAsync(`DELETE FROM Conversation WHERE id = ?`, [
       conversationId,
