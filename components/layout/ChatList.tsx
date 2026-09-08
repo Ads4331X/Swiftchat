@@ -61,7 +61,7 @@ export default function ChatList({
   }
   const visibleChats =
     filteredMode === "Groups"
-      ? chats.filter((chat) => chat.members.length > 2)
+      ? chats.filter((chat) => chat.members.length > 1)
       : chats;
 
   if (visibleChats.length === 0) {

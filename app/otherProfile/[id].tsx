@@ -112,7 +112,9 @@ export default function OtherProfile() {
       const chat = data.find(
         (c: any) => String(c.conversationId ?? c.id) === String(id),
       );
-      setIsAdmin(Boolean(chat) && me != null && Number(chat?.createdById) === me);
+      setIsAdmin(
+        Boolean(chat) && me != null && Number(chat?.createdById) === me,
+      );
       setGroupName(chat?.name?.trim() || null);
       setMembers(
         (chat?.members ?? []).map((m: any) => ({
@@ -135,8 +137,7 @@ export default function OtherProfile() {
             (c: any) => String(c.conversationId ?? c.id) === String(chatId),
           );
           setGroupName(chat?.name?.trim() || null);
-        } catch {
-        }
+        } catch {}
       }
     }
   }, [id, isGroup, chatId]);
@@ -179,9 +180,7 @@ export default function OtherProfile() {
       `Remove ${member.username} from the group?`,
       async () => {
         try {
-          await api.delete(
-            `/api/conversations/${id}/members/${member.id}`,
-          );
+          await api.delete(`/api/conversations/${id}/members/${member.id}`);
           setMembers((prev) => prev.filter((m) => m.id !== member.id));
         } catch (err: any) {
           Alert.alert(
@@ -280,6 +279,47 @@ export default function OtherProfile() {
                 }
               },
             ),
+        },
+        {
+          key: "delete-group",
+          icon: "x-circle",
+          label: "Delete Group",
+          destructive: true,
+          disabled: !isAdmin,
+          onPress: () => {
+            if (!isAdmin) {
+              Alert.alert(
+                "Only admins can delete the group",
+                "You don't have permission to delete this group. Only the group admin can delete it.",
+              );
+              return;
+            }
+            confirm(
+              "Delete Group",
+              "This will permanently remove the group and all messages for everyone. This can't be undone.",
+              async () => {
+                try {
+                  await api.delete(`/api/conversations/${id}`);
+                  router.replace("/chat");
+                } catch (err: any) {
+                  const isForbidden =
+                    err?.status === 403 ||
+                    err?.response?.status === 403 ||
+                    (err?.response?.data &&
+                      /admin|permission|forbidden/i.test(
+                        JSON.stringify(err.response.data),
+                      ));
+                  Alert.alert(
+                    "Couldn't delete group",
+                    isForbidden
+                      ? "Only the group admin can delete this group."
+                      : (err.response?.data?.error ??
+                          "Something went wrong. Please try again."),
+                  );
+                }
+              },
+            );
+          },
         },
       ]
     : [
