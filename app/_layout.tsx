@@ -6,6 +6,8 @@ import {
   ThemeProvider,
 } from "@react-navigation/native";
 
+import { View, Easing } from "react-native";
+
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import * as SystemUI from "expo-system-ui";
@@ -14,11 +16,7 @@ import "react-native-reanimated";
 import Toast from "react-native-toast-message";
 import { toastConfig } from "@/lib/toastConfig";
 
-import {
-  SafeAreaProvider,
-  SafeAreaView,
-  useSafeAreaInsets,
-} from "react-native-safe-area-context";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { AppThemeProvider, useTheme } from "@/constants/theme-provider";
 
@@ -28,22 +26,31 @@ import { KeyboardProvider } from "react-native-keyboard-controller";
 import { useEffect, useMemo } from "react";
 import { startPendingSync } from "@/lib/pendingSync";
 
-function ToastSafeAreaWrapper() {
-  const insets = useSafeAreaInsets();
-
+function ToastProvider() {
   return (
-    <SafeAreaView
+    <View
       style={{
         position: "absolute",
-        top: insets.top,
+        top: 0,
         left: 0,
         right: 0,
+        bottom: 0,
         zIndex: 999,
       }}
       pointerEvents="box-none"
     >
-      <Toast config={toastConfig} />
-    </SafeAreaView>
+      <Toast
+        config={toastConfig}
+        position="bottom"
+        bottomOffset={16}
+        keyboardOffset={16}
+        visibilityTime={4000}
+        animationConfig={{
+          enter: { type: "timing", duration: 200, easing: Easing.out(Easing.ease) },
+          exit: { type: "timing", duration: 150, easing: Easing.in(Easing.ease) },
+        }}
+      />
+    </View>
   );
 }
 
@@ -87,7 +94,7 @@ function AppNavigator() {
         <Stack.Screen name="chat/[id]" />
       </Stack>
 
-      <ToastSafeAreaWrapper />
+      <ToastProvider />
 
       <StatusBar style="auto" />
     </ThemeProvider>

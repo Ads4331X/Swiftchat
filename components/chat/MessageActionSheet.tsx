@@ -42,12 +42,14 @@ type MessageActionSheetProps = {
   position: Position | null;
   textColor: string;
   bubbleColor: string;
+  isGroup: boolean;
   onEdit: () => void;
   onDelete: () => void;
   onReact?: (emoji: string) => void;
   onReply?: () => void;
   onForward?: () => void;
   onPin?: () => void;
+  onInfo?: () => void;
   onClose: () => void;
   onDismissStart?: () => void;
 };
@@ -77,11 +79,15 @@ type Layout = {
   menuLeft: number;
 };
 
-function computeLayout(p: Position, isMine: boolean): Layout {
+function computeLayout(p: Position, isMine: boolean, isGroup: boolean): Layout {
   const menuRows = (
-    isMine
-      ? ["reply", "edit", "copy", "pin", "delete", "more"]
-      : ["reply", "copy", "forward", "more"]
+    isGroup
+      ? isMine
+        ? ["reply", "edit", "copy", "forward", "pin", "info", "delete"]
+        : ["reply", "copy", "forward", "pin", "info"]
+      : isMine
+        ? ["reply", "edit", "copy", "forward", "pin", "delete"]
+        : ["reply", "copy", "forward", "pin"]
   ).length;
 
   const menuHeight = menuRows * MENU_ROW_HEIGHT + MENU_PADDING_V * 2;
@@ -140,6 +146,7 @@ export function MessageActionSheet({
   visible,
   isMine,
   message,
+  isGroup,
   messageId,
   position,
   textColor,
@@ -150,6 +157,7 @@ export function MessageActionSheet({
   onReply,
   onForward,
   onPin,
+  onInfo,
   onClose,
   onDismissStart,
 }: MessageActionSheetProps) {
@@ -180,8 +188,8 @@ export function MessageActionSheet({
   ];
 
   const layout = useMemo(
-    () => (position ? computeLayout(position, isMine) : null),
-    [position, isMine],
+    () => (position ? computeLayout(position, isMine, isGroup) : null),
+    [position, isMine, isGroup],
   );
 
   const finishClose = useCallback(() => {
@@ -343,6 +351,79 @@ export function MessageActionSheet({
     (REACTIONS.length - 1) * REACTION_GAP +
     REACTION_BAR_PADDING_H * 2;
 
+  const menuItems = [
+    {
+      key: "reply",
+      icon: "corner-up-left" as const,
+      label: "Reply",
+      onPress: () => {
+        onReply?.();
+        dismiss();
+      },
+    },
+    ...(isMine
+      ? [
+          {
+            key: "edit",
+            icon: "edit-2" as const,
+            label: "Edit",
+            onPress: () => {
+              onEdit();
+              dismiss();
+            },
+          },
+        ]
+      : []),
+    {
+      key: "copy",
+      icon: "copy" as const,
+      label: "Copy",
+      onPress: handleCopy,
+    },
+    {
+      key: "forward",
+      icon: "corner-up-right" as const,
+      label: "Forward",
+      onPress: () => {
+        onForward?.();
+        dismiss();
+      },
+    },
+    {
+      key: "pin",
+      icon: "map-pin" as const,
+      label: "Pin",
+      onPress: () => {
+        onPin?.();
+        dismiss();
+      },
+    },
+    ...(isGroup
+      ? [
+          {
+            key: "info",
+            icon: "info" as const,
+            label: "Info",
+            onPress: () => {
+              onInfo?.();
+              dismiss();
+            },
+          },
+        ]
+      : []),
+    ...(isMine
+      ? [
+          {
+            key: "delete",
+            icon: "trash-2" as const,
+            label: "Delete",
+            color: "#EF4444",
+            onPress: handleDelete,
+          },
+        ]
+      : []),
+  ];
+
   return (
     <Modal
       visible={mounted}
@@ -461,52 +542,15 @@ export function MessageActionSheet({
             {renderBlur({}, 35)}
 
             <View style={{ zIndex: 30 }}>
-              <MenuItem
-                icon="corner-up-left"
-                label="Reply"
-                onPress={() => {
-                  onReply?.();
-                  dismiss();
-                }}
-              />
-              {isMine && (
+              {menuItems.map((item) => (
                 <MenuItem
-                  icon="edit-2"
-                  label="Edit"
-                  onPress={() => {
-                    onEdit();
-                    dismiss();
-                  }}
+                  key={item.key}
+                  icon={item.icon}
+                  label={item.label}
+                  color={item.color}
+                  onPress={item.onPress}
                 />
-              )}
-              <MenuItem icon="copy" label="Copy" onPress={handleCopy} />
-              {!isMine && (
-                <MenuItem
-                  icon="corner-up-right"
-                  label="Forward"
-                  onPress={() => {
-                    onForward?.();
-                    dismiss();
-                  }}
-                />
-              )}
-              <MenuItem
-                icon="map-pin"
-                label="Pin"
-                onPress={() => {
-                  onPin?.();
-                  dismiss();
-                }}
-              />
-              {isMine && (
-                <MenuItem
-                  icon="trash-2"
-                  label="Delete"
-                  color="#EF4444"
-                  onPress={handleDelete}
-                />
-              )}
-              <MenuItem icon="more-horizontal" label="More" onPress={dismiss} />
+              ))}
             </View>
           </Animated.View>
         </Animated.View>

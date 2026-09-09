@@ -128,6 +128,10 @@ export default function UserChat() {
     pressProgress.value = withSpring(1, { damping: 28, stiffness: 300 });
   };
 
+  const handleMessageInfo = () => {
+    router.push(`/chat/${id}/info`);
+  };
+
   const handleEdit = () => {
     if (!selectedMessage) return;
     setEditingMessageId(selectedMessage.id);
@@ -209,12 +213,14 @@ export default function UserChat() {
         backgroundColor={colors.background}
       />
       <ChatActions
+        isGroup={isGroup}
         message={selectedMessage}
         currentUserId={currentUserId}
         position={menuPosition}
         textColor={colors.text}
         bubbleColor={inputBg}
         onEdit={handleEdit}
+        onInfo={handleMessageInfo}
         onDelete={() => selectedMessage && deleteMessage(selectedMessage.id)}
         onReact={(emoji) =>
           selectedMessage && reactToMessage(selectedMessage.id, emoji)
