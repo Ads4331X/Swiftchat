@@ -25,6 +25,8 @@ type MessageBubbleProps = {
   otherUsername?: string;
   isGroup?: boolean;
   senderName?: string;
+  hasAnyoneRead?: boolean;
+  hasEveryoneRead?: boolean;
 };
 
 type MessageBubbleContentProps = {
@@ -37,6 +39,9 @@ type MessageBubbleContentProps = {
   subtleText?: string;
   isPending?: boolean;
   isRead?: boolean;
+  hasAnyoneRead?: boolean;
+  hasEveryoneRead?: boolean;
+  isGroup?: boolean;
 };
 
 function formatBubbleTime(iso: string): string {
@@ -138,7 +143,9 @@ function ReactionChips({
         >
           <Text style={{ fontSize: 13 }}>{emoji}</Text>
           {count > 1 && (
-            <Text style={{ fontSize: 12, color: countColor, fontWeight: "600" }}>
+            <Text
+              style={{ fontSize: 12, color: countColor, fontWeight: "600" }}
+            >
               {count}
             </Text>
           )}
@@ -158,13 +165,18 @@ export function MessageBubbleContent({
   subtleText,
   isPending,
   isRead,
+  hasAnyoneRead,
+  hasEveryoneRead,
+  isGroup = false,
 }: MessageBubbleContentProps) {
   const wasEdited =
     editedAt &&
     sentAt &&
     new Date(editedAt).getTime() > new Date(sentAt).getTime();
 
-  const tickColor = isMine ? "rgba(255,255,255,0.55)" : (subtleText ?? "#687076");
+  const tickColor = isMine
+    ? "rgba(255,255,255,0.55)"
+    : (subtleText ?? "#687076");
 
   return (
     <View
@@ -201,7 +213,10 @@ export function MessageBubbleContent({
           <ReadReceipts
             isPending={!!isPending}
             isRead={!!isRead}
-            color={isMine && isRead ? READ_TICK_COLOR : tickColor}
+            color={isMine && hasEveryoneRead ? READ_TICK_COLOR : tickColor}
+            hasAnyoneRead={hasAnyoneRead}
+            hasEveryoneRead={hasEveryoneRead}
+            isGroup={isGroup}
           />
         )}
       </View>
@@ -230,6 +245,8 @@ export default memo(function MessageBubble({
   otherUsername,
   isGroup = false,
   senderName,
+  hasAnyoneRead,
+  hasEveryoneRead,
 }: MessageBubbleProps) {
   const bubbleRef = useRef<View>(null);
   const AVATAR_SIZE = 28;
@@ -329,11 +346,11 @@ export default memo(function MessageBubble({
             sentAt={message.sentAt}
             isPending={message.id < 0}
             isRead={message.read}
+            hasAnyoneRead={hasAnyoneRead}
+            hasEveryoneRead={hasEveryoneRead}
+            isGroup={isGroup}
           />
-          <ReactionChips
-            reactions={message.reactions}
-            isMine={isMine}
-          />
+          <ReactionChips reactions={message.reactions} isMine={isMine} />
         </View>
       </View>
     </Pressable>

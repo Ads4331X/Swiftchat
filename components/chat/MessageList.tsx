@@ -71,7 +71,9 @@ export default function MessageList({
   members = [],
 }: MessageListProps) {
   const [showScrollButton, setShowScrollButton] = useState(false);
-
+  const [readersByMessage, setReadersByMessage] = useState<
+    Record<number, Set<number>>
+  >({});
   // Lookup sender display names/avatars for group bubbles & typing indicator.
   const memberById = useMemo(() => {
     const map = new Map<number, { username: string; avatar?: string }>();
@@ -129,11 +131,24 @@ export default function MessageList({
           userId,
           readAt,
         });
+
+        if (userId === currentUserId) return;
+
+        setReadersByMessage((prev) => {
+          const existing = prev[messageId] ?? new Set<number>();
+          const next = new Set(existing);
+          next.add(userId);
+
+          return {
+            ...prev,
+            [messageId]: next,
+          };
+        });
       },
     );
-    return unsubscribe;
-  }, []);
 
+    return unsubscribe;
+  }, [currentUserId]);
   const handleViewableItemsChanged = useCallback(
     async ({ viewableItems }: any) => {
       for (let i = viewableItems.length - 1; i >= 0; i--) {
@@ -185,22 +200,37 @@ export default function MessageList({
   // Stable renderItem so React.memo'ed MessageBubbles only re-render when
   // their own message actually changed — not on every array rebuild.
   const renderItem = useCallback(
-    ({ item }: { item: Message }) => (
-      <MessageBubble
-        message={item}
-        isMine={item.senderId === currentUserId}
-        textColor={textColor}
-        bubbleColor={bubbleColor}
-        subtleText={subtleText}
-        hidden={item.id === selectedMessageId}
-        onLongPress={(position) => onMessageLongPress(item, position)}
-        showAvatar={showAvatarSet.has(item.id)}
-        avatarUrl={otherAvatarUrl}
-        otherUsername={otherUsername}
-        isGroup={isGroup}
-        senderName={memberById.get(item.senderId)?.username}
-      />
-    ),
+    ({ item }: { item: Message }) => {
+      const readers = readersByMessage[item.id] ?? new Set<number>();
+
+      const otherMembers = members.filter(
+        (member) => member.id !== currentUserId,
+      );
+
+      const hasAnyoneRead = readers.size > 0;
+
+      const hasEveryoneRead =
+        otherMembers.length > 0 &&
+        otherMembers.every((member) => readers.has(member.id));
+      return (
+        <MessageBubble
+          message={item}
+          isMine={item.senderId === currentUserId}
+          textColor={textColor}
+          bubbleColor={bubbleColor}
+          subtleText={subtleText}
+          hidden={item.id === selectedMessageId}
+          onLongPress={(position) => onMessageLongPress(item, position)}
+          showAvatar={showAvatarSet.has(item.id)}
+          avatarUrl={otherAvatarUrl}
+          otherUsername={otherUsername}
+          isGroup={isGroup}
+          senderName={memberById.get(item.senderId)?.username}
+          hasAnyoneRead={hasAnyoneRead}
+          hasEveryoneRead={hasEveryoneRead}
+        />
+      );
+    },
     [
       currentUserId,
       textColor,
@@ -213,6 +243,8 @@ export default function MessageList({
       otherUsername,
       isGroup,
       memberById,
+      members,
+      readersByMessage,
     ],
   );
 

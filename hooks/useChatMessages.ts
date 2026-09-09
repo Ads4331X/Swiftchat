@@ -44,10 +44,17 @@ export type Message = {
   senderId: number;
   conversationId: number;
   nonce: string;
+
   /** Stable client key so optimistic rows keep their position when confirmed. */
   key?: string;
+
   /** Whether the recipient has read this message (own messages only). */
   read?: boolean;
+
+  /** Group read receipt state. */
+  hasAnyoneRead?: boolean;
+  hasEveryoneRead?: boolean;
+
   /** Emoji reactions attached to this message (from the server). */
   reactions?: MessageReaction[];
 };
@@ -333,6 +340,7 @@ export default function useChatMessages(
         ({ conversationId, messageId, userId, readAt }) => {
           if (Number(conversationId) !== Number(id)) return;
           if (Number(userId) === currentUserIdRef.current) return;
+          
           markRead({
             conversationId: Number(conversationId),
             messageId,
