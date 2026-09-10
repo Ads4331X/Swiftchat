@@ -129,7 +129,18 @@ export default function UserChat() {
   };
 
   const handleMessageInfo = () => {
-    router.push(`/chat/${id}/info`);
+    if (!selectedMessage) return;
+    router.push({
+      pathname: `/chat/${id}/info` as any,
+      params: {
+        messageId: String(selectedMessage.id),
+        messageText: selectedMessage.text,
+        sentAt: selectedMessage.sentAt ?? "",
+        membersJson: JSON.stringify(
+          members.filter((m) => m.username !== "You"),
+        ),
+      },
+    });
   };
 
   const handleEdit = () => {
