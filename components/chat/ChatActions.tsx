@@ -13,9 +13,10 @@ type ChatActionsProps = {
   textColor: string;
   bubbleColor: string;
   onEdit: () => void;
-  onDelete: () => void;
+  onDelete: () => void | Promise<void>;
   onReact: (emoji: string) => void;
   onReply: () => void;
+  onForward?: () => void;
   onInfo?: () => void;
   onDismissStart: () => void;
   onClose: () => void;
@@ -33,6 +34,7 @@ export default function ChatActions({
   onDelete,
   onReact,
   onReply,
+  onForward,
   onInfo,
   onDismissStart,
   onClose,
@@ -50,7 +52,7 @@ export default function ChatActions({
       onDelete={onDelete}
       onReact={onReact}
       onReply={onReply}
-      onForward={() => {}}
+      onForward={onForward}
       onPin={() => {}}
       onInfo={onInfo}
       onDismissStart={onDismissStart}

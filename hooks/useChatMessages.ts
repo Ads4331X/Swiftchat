@@ -24,6 +24,7 @@ import {
 } from "@/lib/socket";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNetInfo } from "@react-native-community/netinfo";
+import Toast from "react-native-toast-message";
 import {
   acquireFlushLock,
   flushPendingMessages,
@@ -69,6 +70,7 @@ export type Message = {
 
   /** ID of the original message this message is replying to. */
   replyToId?: number;
+  forwardedFromMsgId?: number;
 };
 
 const PAGE_SIZE = 50;
@@ -88,7 +90,9 @@ function parseLocalMessage(
   if (reactions) {
     try {
       const parsed = JSON.parse(reactions);
-      out.reactions = Array.isArray(parsed) ? (parsed as MessageReaction[]) : [];
+      out.reactions = Array.isArray(parsed)
+        ? (parsed as MessageReaction[])
+        : [];
     } catch {
       out.reactions = [];
     }
@@ -173,7 +177,10 @@ export default function useChatMessages(
 
     const confirmed = await decryptChatMessages({
       serverMessages: (
-        cache as (Message & { reactions?: string | null; repliedTo?: string | null })[]
+        cache as (Message & {
+          reactions?: string | null;
+          repliedTo?: string | null;
+        })[]
       ).map(parseLocalMessage),
       decryptedConversationKey,
     });
@@ -249,6 +256,13 @@ export default function useChatMessages(
     if (!id) return;
     let active = true;
 
+    if (!decryptedConversationKey) {
+      setMessages([]);
+      setLoading(true);
+      setHasMore(false);
+      return;
+    }
+
     // Reset state when conversation changes
     fetchedServerRef.current = false;
     setHasMore(true);
@@ -289,6 +303,7 @@ export default function useChatMessages(
           repliedTo: newMessage.repliedTo
             ? JSON.stringify(newMessage.repliedTo)
             : undefined,
+          forwardedFromMsgId: newMessage.forwardedFromMsgId,
         }).catch(() => {});
 
         setMessages((currentMsg) => {
@@ -432,7 +447,10 @@ export default function useChatMessages(
             const cache = (await readMsgsPaginated({
               conversationId: Number(id),
               limit: 200,
-})) as (Message & { reactions?: string | null; repliedTo?: string | null })[];
+            })) as (Message & {
+              reactions?: string | null;
+              repliedTo?: string | null;
+            })[];
 
             if (cache.length > 0) {
               const decryptedCache = await decryptChatMessages({
@@ -503,6 +521,7 @@ export default function useChatMessages(
               repliedTo: msg.repliedTo
                 ? JSON.stringify(msg.repliedTo)
                 : undefined,
+              forwardedFromMsgId: msg.forwardedFromMsgId,
             }).catch(() => {});
           });
 
@@ -592,6 +611,7 @@ export default function useChatMessages(
           reactions: msg.reactions ? JSON.stringify(msg.reactions) : undefined,
           replyToId: msg.replyToId,
           repliedTo: msg.repliedTo ? JSON.stringify(msg.repliedTo) : undefined,
+          forwardedFromMsgId: msg.forwardedFromMsgId,
         }).catch(() => {});
       });
 
@@ -608,7 +628,10 @@ export default function useChatMessages(
           conversationId: Number(id),
           before: oldest.sentAt,
           limit: PAGE_SIZE,
-        })) as (Message & { reactions?: string | null; repliedTo?: string | null })[];
+        })) as (Message & {
+          reactions?: string | null;
+          repliedTo?: string | null;
+        })[];
 
         if (localOlder.length === 0) {
           setHasMore(false);
@@ -681,9 +704,7 @@ export default function useChatMessages(
       });
 
       setMessages((prev) =>
-        prev.map((m) =>
-          m.id === tempId ? { ...m, nonce: replyNonce } : m,
-        ),
+        prev.map((m) => (m.id === tempId ? { ...m, nonce: replyNonce } : m)),
       );
       optimisticMessage.nonce = replyNonce;
 
@@ -728,6 +749,7 @@ export default function useChatMessages(
           repliedTo: repliedToSnapshot
             ? JSON.stringify(repliedToSnapshot)
             : undefined,
+          forwardedFromMsgId: response.data.forwardedFromMsgId,
         });
         await deletePendingMessage({ messageId: tempId });
       } catch (err) {
@@ -839,8 +861,52 @@ export default function useChatMessages(
   };
 
   const deleteMessage = async (messageId: string | number) => {
-    await api.delete(`/api/conversations/messages/${messageId}`);
-    await deleteMsg({ messageId: Number(messageId) });
+    const numericId = Number(messageId);
+
+    if (Number.isNaN(numericId)) return;
+
+    // local-only message that hasn't reached the server yet (pending) —
+    // remove locally, never call the API with a temp negative id
+    if (numericId < 0) {
+      await deletePendingMessage({ messageId: numericId }).catch(() => {});
+      await deleteMsg({ messageId: numericId }).catch(() => {});
+      setMessages((prev) => prev.filter((m) => m.id !== numericId));
+      return;
+    }
+
+    const removeLocalMessage = () => {
+      setMessages((prev) => {
+        const remaining = prev.filter((m) => m.id !== numericId);
+        if (remaining.length === prev.length) return prev;
+        if (prev[prev.length - 1]?.id === numericId) {
+          const last = remaining[remaining.length - 1];
+          updateConversationPreview({
+            id: Number(id),
+            lastMessageText: last?.text ?? "",
+            lastMessageSentAt: last?.sentAt ?? "",
+          }).catch(() => {});
+        }
+        return remaining;
+      });
+    };
+
+    try {
+      await api.delete(`/api/conversations/messages/${messageId}`);
+    } catch (err) {
+      const status = (err as any)?.response?.status;
+      if (status !== 403 && status !== 404) {
+        console.warn("Failed to delete message:", err);
+        Toast.show({
+          type: "error",
+          text1: "Couldn't delete message",
+          text2: "You can only delete your own sent messages.",
+        });
+        return;
+      }
+    } finally {
+      await deleteMsg({ messageId: numericId }).catch(() => {});
+      removeLocalMessage();
+    }
   };
 
   const sendMessage = async (text: string) => {
@@ -912,6 +978,7 @@ export default function useChatMessages(
           repliedTo: response.data.repliedTo
             ? JSON.stringify(response.data.repliedTo)
             : undefined,
+          forwardedFromMsgId: response.data.forwardedFromMsgId,
         });
         await deletePendingMessage({ messageId: tempId });
       } catch (err) {

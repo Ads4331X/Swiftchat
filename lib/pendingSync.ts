@@ -30,7 +30,9 @@ export function onPendingFlushed(listener: FlushListener): () => void {
 }
 
 function notifyFlushed(conversationId: number) {
-  listeners.forEach((listener) => listener({ conversationIds: [conversationId] }));
+  listeners.forEach((listener) =>
+    listener({ conversationIds: [conversationId] }),
+  );
 }
 
 /**
@@ -80,6 +82,7 @@ export async function flushPendingMessages(): Promise<void> {
           conversationId: pendingMessage.conversationId,
           nonce: pendingMessage.nonce,
           replyToId: pendingMessage.replyToId ?? null,
+          forwardedFromMsgId: pendingMessage.forwardedFromMsgId ?? null,
         });
 
         if (result.data?.id == null) {
@@ -95,6 +98,7 @@ export async function flushPendingMessages(): Promise<void> {
           nonce: result.data.nonce,
           replyToId: pendingMessage.replyToId ?? undefined,
           repliedTo: pendingMessage.repliedTo ?? undefined,
+          forwardedFromMsgId: pendingMessage.forwardedFromMsgId ?? undefined,
         });
 
         await deletePendingMessage({ messageId: pendingMessage.id });

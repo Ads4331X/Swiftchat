@@ -6,6 +6,7 @@ import {
   SafeAreaView,
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
+import BottomSheet from "@gorhom/bottom-sheet";
 
 import { useTheme } from "@/constants/theme-provider";
 import useChatMessages, { type Message } from "@/hooks/useChatMessages";
@@ -17,6 +18,7 @@ import ChatActions from "@/components/chat/ChatActions";
 import ChatComposer from "@/components/chat/ChatComposer";
 import ChatHeader from "@/components/chat/ChatHeader";
 import MessageList from "@/components/chat/MessageList";
+import ForwardSheet from "@/components/chat/forward/ForwardSheet";
 import PinModal from "@/components/security/PinModal";
 import { listenForGroupDelete } from "@/lib/socket";
 
@@ -93,8 +95,12 @@ export default function UserChat() {
   );
   const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
   const [menuPosition, setMenuPosition] = useState<Position | null>(null);
+  const [messageToForward, setMessageToForward] = useState<Message | null>(
+    null,
+  );
   const listRef = useRef<FlatList<Message>>(null);
   const scrollToEndRef = useRef<(() => void) | null>(null);
+  const forwardSheetRef = useRef<BottomSheet>(null);
 
   useEffect(() => {
     const unsubscribe = listenForGroupDelete(({ conversationId }) => {
@@ -161,6 +167,12 @@ export default function UserChat() {
     setDraft(selectedMessage.text);
   };
 
+  const handleForward = () => {
+    if (!selectedMessage) return;
+    setMessageToForward(selectedMessage);
+    forwardSheetRef.current?.expand();
+  };
+
   const closeActions = () => {
     setSelectedMessage(null);
     setMenuPosition(null);
@@ -175,9 +187,10 @@ export default function UserChat() {
       ? conversationDisplayName(conversationName, otherMembers)
       : username || otherUser?.username || "Chat";
 
-  const replyPreview = replyingMessageId != null
-    ? messages.find((m) => m.id === replyingMessageId)
-    : null;
+  const replyPreview =
+    replyingMessageId != null
+      ? messages.find((m) => m.id === replyingMessageId)
+      : null;
   const replyPreviewName = replyPreview
     ? currentUserId != null && replyPreview.senderId === currentUserId
       ? "You"
@@ -263,7 +276,15 @@ export default function UserChat() {
         onEdit={handleEdit}
         onInfo={handleMessageInfo}
         onReply={handleReplyMessage}
-        onDelete={() => selectedMessage && deleteMessage(selectedMessage.id)}
+        onForward={handleForward}
+        onDelete={async () => {
+          if (!selectedMessage) return;
+          try {
+            await deleteMessage(selectedMessage.id);
+          } finally {
+            closeActions();
+          }
+        }}
         onReact={(emoji) =>
           selectedMessage && reactToMessage(selectedMessage.id, emoji)
         }
@@ -271,6 +292,12 @@ export default function UserChat() {
           pressProgress.value = withSpring(0, { damping: 28, stiffness: 300 });
         }}
         onClose={closeActions}
+      />
+      <ForwardSheet
+        bottomSheetRef={forwardSheetRef}
+        message={messageToForward}
+        excludeConversationId={id}
+        onDone={() => setMessageToForward(null)}
       />
       <PinModal
         visible={needsPin}

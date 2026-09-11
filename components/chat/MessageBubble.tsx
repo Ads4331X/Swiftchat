@@ -47,6 +47,9 @@ type MessageBubbleProps = {
   /** Resolved quoted-message data (falls back to `message.repliedTo`). */
   repliedTo?: RepliedTo;
   replyToId?: number;
+
+  /** ID of the original message this message was forwarded from. */
+  forwardedFromMsgId?: number;
 };
 
 type MessageBubbleContentProps = {
@@ -64,6 +67,7 @@ type MessageBubbleContentProps = {
   isGroup?: boolean;
   repliedTo?: RepliedTo;
   replyToId?: number;
+  forwardedFromMsgId?: number;
   onQuotePress?: (messageId: number) => void;
   highlighted?: boolean;
 };
@@ -267,11 +271,7 @@ function RepliedToQuote({
   // a darker teal-green for own bubbles (WhatsApp-style), a deeper shade of
   // the neutral gray for incoming ones. Stays distinct from the teal/gray
   // message bubble below.
-  const replyBg = isMine
-    ? "#10645C"
-    : isDark
-      ? "#15181B"
-      : "#DDE1E4";
+  const replyBg = isMine ? "#10645C" : isDark ? "#15181B" : "#DDE1E4";
 
   const nameColor = isMine ? "rgba(255,255,255,0.85)" : accentColor;
 
@@ -364,7 +364,7 @@ function RepliedToQuote({
           >
             {isDeleted
               ? "This message was deleted"
-              : (repliedTo.text?.trim() || "…")}
+              : repliedTo.text?.trim() || "…"}
           </Text>
         </View>
 
@@ -399,6 +399,7 @@ export function MessageBubbleContent({
   replyToId,
   onQuotePress,
   highlighted,
+  forwardedFromMsgId,
 }: MessageBubbleContentProps) {
   const wasEdited =
     editedAt &&
@@ -447,6 +448,31 @@ export function MessageBubbleContent({
   return (
     <Animated.View style={{ transform: [{ scale: landScale }] }}>
       <View>
+        {forwardedFromMsgId && (
+          <View
+            className="flex-row items-center"
+            style={{ paddingHorizontal: 12, paddingBottom: 2 }}
+          >
+            <Feather
+              name="arrow-right"
+              size={12}
+              color={
+                isMine ? "rgba(255,255,255,0.85)" : (subtleText ?? "#687076")
+              }
+              style={{ marginRight: 6 }}
+            />
+            <Text
+              className="text-xs font-semibold"
+              style={{
+                color: isMine
+                  ? "rgba(255,255,255,0.85)"
+                  : (subtleText ?? "#687076"),
+              }}
+            >
+              Forwarded
+            </Text>
+          </View>
+        )}
         {repliedTo && (
           <RepliedToQuote
             repliedTo={repliedTo}
@@ -468,54 +494,54 @@ export function MessageBubbleContent({
             overflow: "hidden",
           }}
         >
-        <Text
-          className="text-[15px] leading-[20px]"
-          style={{
-            color: isMine ? "#fff" : textColor,
-            flexShrink: 1,
-          }}
-        >
-          {text}
-        </Text>
+          <Text
+            className="text-[15px] leading-[20px]"
+            style={{
+              color: isMine ? "#fff" : textColor,
+              flexShrink: 1,
+            }}
+          >
+            {text}
+          </Text>
 
-        <View className="flex-row items-center self-end pt-[2px] ml-4">
-          {wasEdited && !isPending && (
-            <Text
-              className="text-[10px]"
-              style={{ color: tickColor, marginRight: 6 }}
-            >
-              Edited
-            </Text>
-          )}
-          {sentAt && (
-            <Text
-              className="text-[10px]"
-              style={{ color: tickColor, marginRight: isMine ? 3 : 0 }}
-            >
-              {isPending ? "Sending…" : formatBubbleTime(sentAt)}
-            </Text>
-          )}
-          {isMine && (
-            <ReadReceipts
-              isPending={!!isPending}
-              isRead={!!isRead}
-              color={isMine && hasEveryoneRead ? READ_TICK_COLOR : tickColor}
-              hasAnyoneRead={hasAnyoneRead}
-              hasEveryoneRead={hasEveryoneRead}
-              isGroup={isGroup}
-            />
-          )}
-        </View>
-        <Animated.View
-          pointerEvents="none"
-          style={{
-            ...StyleSheet.absoluteFillObject,
-            borderRadius: 18,
-            borderWidth: 1.5,
-            borderColor: isMine ? "rgba(255,255,255,0.7)" : BRAND_COLOR,
-            opacity: glowOpacity,
-          }}
-        />
+          <View className="flex-row items-center self-end pt-[2px] ml-4">
+            {wasEdited && !isPending && (
+              <Text
+                className="text-[10px]"
+                style={{ color: tickColor, marginRight: 6 }}
+              >
+                Edited
+              </Text>
+            )}
+            {sentAt && (
+              <Text
+                className="text-[10px]"
+                style={{ color: tickColor, marginRight: isMine ? 3 : 0 }}
+              >
+                {isPending ? "Sending…" : formatBubbleTime(sentAt)}
+              </Text>
+            )}
+            {isMine && (
+              <ReadReceipts
+                isPending={!!isPending}
+                isRead={!!isRead}
+                color={isMine && hasEveryoneRead ? READ_TICK_COLOR : tickColor}
+                hasAnyoneRead={hasAnyoneRead}
+                hasEveryoneRead={hasEveryoneRead}
+                isGroup={isGroup}
+              />
+            )}
+          </View>
+          <Animated.View
+            pointerEvents="none"
+            style={{
+              ...StyleSheet.absoluteFillObject,
+              borderRadius: 18,
+              borderWidth: 1.5,
+              borderColor: isMine ? "rgba(255,255,255,0.7)" : BRAND_COLOR,
+              opacity: glowOpacity,
+            }}
+          />
         </View>
       </View>
     </Animated.View>
@@ -549,6 +575,7 @@ export default memo(function MessageBubble({
   highlighted,
   repliedTo: repliedToProp,
   replyToId: replyToIdProp,
+  forwardedFromMsgId: forwardedFromMsgIdProp,
   isFirstInGroup,
 }: MessageBubbleProps) {
   const bubbleRef = useRef<View>(null);
@@ -655,6 +682,7 @@ export default memo(function MessageBubble({
             isGroup={isGroup}
             repliedTo={repliedToProp ?? message.repliedTo}
             replyToId={replyToIdProp ?? message.replyToId}
+            forwardedFromMsgId={forwardedFromMsgIdProp ?? message.forwardedFromMsgId}
             onQuotePress={onQuotePress}
             highlighted={highlighted}
           />

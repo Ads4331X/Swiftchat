@@ -19,6 +19,7 @@ const STATEMENTS = [
     nonce TEXT NOT NULL,
     sentAt TEXT NOT NULL,
     editedAt TEXT,
+    forwardedFromMsgId INTEGER,
     readAt Text NOT NULL DEFAULT '',
     read Boolean NOT NULL DEFAULT 0,
     reactions TEXT,
@@ -42,6 +43,7 @@ const STATEMENTS = [
     sentAt TEXT NOT NULL,
     editedAt TEXT,
     replyToId INTEGER,
+    forwardedFromMsgId INTEGER,
     repliedTo TEXT
   );`,
   `CREATE TABLE IF NOT EXISTS User (
@@ -79,6 +81,16 @@ async function openDbOnce(): Promise<SQLite.SQLiteDatabase | null> {
         await database.execAsync(stmt);
       }
 
+      try {
+        await database.execAsync(
+          `ALTER TABLE Message ADD COLUMN forwardedFromMsgId INTEGER;`,
+        );
+      } catch {}
+      try {
+        await database.execAsync(
+          `ALTER TABLE PendingMessage ADD COLUMN forwardedFromMsgId INTEGER;`,
+        );
+      } catch {}
       try {
         await database.execAsync(
           `ALTER TABLE Conversation ADD COLUMN otherUserId INTEGER;`,
@@ -159,6 +171,7 @@ type SaveMsgParams = {
   reactions?: string;
   replyToId?: number;
   repliedTo?: string;
+  forwardedFromMsgId?: number;
 };
 
 export async function saveMessage({
@@ -171,12 +184,13 @@ export async function saveMessage({
   reactions,
   replyToId,
   repliedTo,
+  forwardedFromMsgId,
 }: SaveMsgParams) {
   try {
     const db = await getDb();
     if (!db) return;
     await db.runAsync(
-      `INSERT OR REPLACE INTO Message (id, text, sentAt, senderId, conversationId, nonce, reactions, readAt, read, replyToId, repliedTo) VALUES (?, ?, ?, ?, ?, ?, ?, '', 0, ?, ?)`,
+      `INSERT OR REPLACE INTO Message (id, text, sentAt, senderId, conversationId, nonce, reactions, readAt, read, replyToId, repliedTo, forwardedFromMsgId) VALUES (?, ?, ?, ?, ?, ?, ?, '', 0, ?, ?, ?)`,
       [
         messageId,
         message,
@@ -187,6 +201,7 @@ export async function saveMessage({
         reactions ?? null,
         replyToId ?? null,
         repliedTo ?? null,
+        forwardedFromMsgId ?? null,
       ],
     );
   } catch (err) {
@@ -526,12 +541,13 @@ export async function savePendingMessage({
   nonce,
   replyToId,
   repliedTo,
+  forwardedFromMsgId,
 }: SaveMsgParams) {
   try {
     const db = await getDb();
     if (!db) return;
     await db.runAsync(
-      `INSERT OR REPLACE INTO PendingMessage (id, text, sentAt, senderId, conversationId, nonce, replyToId, repliedTo) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR REPLACE INTO PendingMessage (id, text, sentAt, senderId, conversationId, nonce, replyToId, repliedTo, forwardedFromMsgId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         messageId,
         message,
@@ -541,6 +557,7 @@ export async function savePendingMessage({
         nonce,
         replyToId ?? null,
         repliedTo ?? null,
+        forwardedFromMsgId ?? null,
       ],
     );
   } catch (err) {
@@ -586,6 +603,7 @@ export type PendingMessage = {
   editedAt: string | null;
   replyToId?: number | null;
   repliedTo?: string | null;
+  forwardedFromMsgId?: number | null;
 };
 
 export async function getPendingMessages(): Promise<PendingMessage[]> {

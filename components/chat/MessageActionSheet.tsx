@@ -44,7 +44,7 @@ type MessageActionSheetProps = {
   bubbleColor: string;
   isGroup: boolean;
   onEdit: () => void;
-  onDelete: () => void;
+  onDelete: () => void | Promise<void>;
   onReact?: (emoji: string) => void;
   onReply: () => void;
   onForward?: () => void;
@@ -317,19 +317,16 @@ export function MessageActionSheet({
     dismiss();
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-    Alert.alert("Delete message?", "This action cannot be undone.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: () => {
-          onDelete();
-          dismiss();
-        },
-      },
-    ]);
+    try {
+      await onDelete();
+    } catch (error) {
+      console.warn("Delete action failed:", error);
+      Alert.alert("Delete failed", "The message could not be deleted.");
+    } finally {
+      dismiss();
+    }
   };
 
   const renderBlur = (bStyle: any, intensity = 40) => (
