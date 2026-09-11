@@ -15,6 +15,7 @@ type ChatActionsProps = {
   onEdit: () => void;
   onDelete: () => void;
   onReact: (emoji: string) => void;
+  onReply: () => void;
   onInfo?: () => void;
   onDismissStart: () => void;
   onClose: () => void;
@@ -31,6 +32,7 @@ export default function ChatActions({
   onEdit,
   onDelete,
   onReact,
+  onReply,
   onInfo,
   onDismissStart,
   onClose,
@@ -47,7 +49,7 @@ export default function ChatActions({
       onEdit={onEdit}
       onDelete={onDelete}
       onReact={onReact}
-      onReply={() => {}}
+      onReply={onReply}
       onForward={() => {}}
       onPin={() => {}}
       onInfo={onInfo}

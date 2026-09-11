@@ -80,6 +80,7 @@ export default function UserChat() {
     sendMessage,
     deleteMessage,
     editMessage,
+    replyMessage,
     reactToMessage,
     loadMore,
   } = useChatMessages(id, currentUserId, conversationKey);
@@ -87,6 +88,9 @@ export default function UserChat() {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
+  const [replyingMessageId, setReplyingMessageId] = useState<number | null>(
+    null,
+  );
   const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
   const [menuPosition, setMenuPosition] = useState<Position | null>(null);
   const listRef = useRef<FlatList<Message>>(null);
@@ -109,7 +113,10 @@ export default function UserChat() {
     setDraft("");
     setSending(true);
     try {
-      if (editingMessageId != null) {
+      if (replyingMessageId != null) {
+        await replyMessage(replyingMessageId, text, id);
+        setReplyingMessageId(null);
+      } else if (editingMessageId != null) {
         await editMessage(editingMessageId, text);
         setEditingMessageId(null);
       } else {
@@ -143,6 +150,11 @@ export default function UserChat() {
     });
   };
 
+  const handleReplyMessage = () => {
+    if (!selectedMessage) return;
+    setReplyingMessageId(selectedMessage.id);
+  };
+
   const handleEdit = () => {
     if (!selectedMessage) return;
     setEditingMessageId(selectedMessage.id);
@@ -162,6 +174,18 @@ export default function UserChat() {
     conversationName != null
       ? conversationDisplayName(conversationName, otherMembers)
       : username || otherUser?.username || "Chat";
+
+  const replyPreview = replyingMessageId != null
+    ? messages.find((m) => m.id === replyingMessageId)
+    : null;
+  const replyPreviewName = replyPreview
+    ? currentUserId != null && replyPreview.senderId === currentUserId
+      ? "You"
+      : (members.find((m) => m.id === replyPreview.senderId)?.username ??
+        otherUser?.username ??
+        username ??
+        `User ${replyPreview.senderId}`)
+    : null;
 
   return (
     <SafeAreaView
@@ -204,11 +228,17 @@ export default function UserChat() {
       <ChatComposer
         draft={draft}
         editing={editingMessageId != null}
+        replying={replyingMessageId != null}
+        replyPreview={replyPreview}
+        replySenderName={replyPreviewName}
         onDraftChange={(text) => {
           setDraft(text);
           notifyDraftChange();
         }}
         onSend={handleSend}
+        onCancelReply={() => {
+          setReplyingMessageId(null);
+        }}
         onCancelEdit={() => {
           setEditingMessageId(null);
           setDraft("");
@@ -232,6 +262,7 @@ export default function UserChat() {
         bubbleColor={inputBg}
         onEdit={handleEdit}
         onInfo={handleMessageInfo}
+        onReply={handleReplyMessage}
         onDelete={() => selectedMessage && deleteMessage(selectedMessage.id)}
         onReact={(emoji) =>
           selectedMessage && reactToMessage(selectedMessage.id, emoji)

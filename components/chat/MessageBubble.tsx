@@ -1,8 +1,21 @@
-import { Keyboard, Image, Pressable, Text, View } from "react-native";
-import { type Message, type MessageReaction } from "@/hooks/useChatMessages";
+import {
+  Keyboard,
+  Image,
+  Animated,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import Feather from "@expo/vector-icons/Feather";
+import {
+  type Message,
+  type MessageReaction,
+  type RepliedTo,
+} from "@/hooks/useChatMessages";
 import { BRAND_COLOR } from "@/constants/theme";
 import { useTheme } from "@/constants/theme-provider";
-import { memo, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import { ReadReceipts } from "./ReadReceipts";
 
 type Position = {
@@ -27,6 +40,13 @@ type MessageBubbleProps = {
   senderName?: string;
   hasAnyoneRead?: boolean;
   hasEveryoneRead?: boolean;
+  onQuotePress?: (messageId: number) => void;
+  highlighted?: boolean;
+  isFirstInGroup?: boolean;
+
+  /** Resolved quoted-message data (falls back to `message.repliedTo`). */
+  repliedTo?: RepliedTo;
+  replyToId?: number;
 };
 
 type MessageBubbleContentProps = {
@@ -42,6 +62,10 @@ type MessageBubbleContentProps = {
   hasAnyoneRead?: boolean;
   hasEveryoneRead?: boolean;
   isGroup?: boolean;
+  repliedTo?: RepliedTo;
+  replyToId?: number;
+  onQuotePress?: (messageId: number) => void;
+  highlighted?: boolean;
 };
 
 function formatBubbleTime(iso: string): string {
@@ -154,6 +178,209 @@ function ReactionChips({
     </View>
   );
 }
+// WhatsApp-style per-sender accent colors for group reply quotes, so a reply
+// to Alice vs. a reply to Bob is visually distinct without relying on names alone.
+const SENDER_ACCENTS = [
+  "#06D6A0",
+  "#F2994A",
+  "#EF476F",
+  "#8338EC",
+  "#3A86FF",
+  "#EC4899",
+];
+function accentForSender(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++)
+    hash = (hash << 5) - hash + name.charCodeAt(i);
+  return SENDER_ACCENTS[Math.abs(hash) % SENDER_ACCENTS.length];
+}
+
+function RepliedToQuote({
+  repliedTo,
+  replyToId,
+  isMine,
+  isGroup,
+  subtleText,
+  onQuotePress,
+}: {
+  repliedTo: RepliedTo;
+  replyToId?: number;
+  isMine: boolean;
+  isGroup?: boolean;
+  subtleText?: string;
+  onQuotePress?: (messageId: number) => void;
+}) {
+  const { isDark } = useTheme();
+  const isDeleted = !repliedTo.text || /message deleted/i.test(repliedTo.text);
+  // Deleted originals are NOT pressable — there's nowhere to jump.
+  const canPress = !isDeleted && replyToId != null;
+
+  // Press feedback: instant scale-down + an extra depress wash while held,
+  // then a tiny spring bounce back with the wash fading quickly on release.
+  const scale = useRef(new Animated.Value(1)).current;
+  const wash = useRef(new Animated.Value(0)).current;
+
+  const handlePressIn = () => {
+    if (!canPress) return;
+    Animated.parallel([
+      Animated.timing(scale, {
+        toValue: 0.97,
+        duration: 90,
+        useNativeDriver: true,
+      }),
+      Animated.timing(wash, {
+        toValue: 1,
+        duration: 60,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
+  const handlePressOut = () => {
+    if (!canPress) return;
+    Animated.parallel([
+      Animated.spring(scale, {
+        toValue: 1,
+        useNativeDriver: true,
+        speed: 25,
+        bounciness: 7,
+      }),
+      Animated.timing(wash, {
+        toValue: 0,
+        duration: 120,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
+  const handlePress = () => {
+    if (canPress && replyToId != null) onQuotePress?.(replyToId);
+  };
+
+  const accentColor = isMine
+    ? "rgba(255,255,255,0.85)"
+    : isGroup
+      ? accentForSender(repliedTo.senderName)
+      : BRAND_COLOR;
+
+  // Reply card background — matches its matching message bubble's color family:
+  // a darker teal-green for own bubbles (WhatsApp-style), a deeper shade of
+  // the neutral gray for incoming ones. Stays distinct from the teal/gray
+  // message bubble below.
+  const replyBg = isMine
+    ? "#10645C"
+    : isDark
+      ? "#15181B"
+      : "#DDE1E4";
+
+  const nameColor = isMine ? "rgba(255,255,255,0.85)" : accentColor;
+
+  const bodyColor = isDeleted
+    ? isMine
+      ? "rgba(255,255,255,0.45)"
+      : (subtleText ?? "#687076")
+    : isMine
+      ? "rgba(255,255,255,0.62)"
+      : isDark
+        ? "#98A1A8"
+        : "#4B5563";
+
+  return (
+    <Pressable
+      onPress={handlePress}
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
+      disabled={!canPress}
+      hitSlop={6}
+      style={{ marginBottom: 0 }}
+    >
+      <Animated.View
+        style={{
+          transform: [{ scale }],
+          flexDirection: "row",
+          alignItems: "stretch",
+          borderTopLeftRadius: 18,
+          borderTopRightRadius: 18,
+          borderBottomLeftRadius: 0,
+          borderBottomRightRadius: 0,
+          overflow: "hidden",
+          backgroundColor: replyBg,
+        }}
+      >
+        {/* 3px accent bar — full height, rounded left edge */}
+        <View
+          style={{
+            width: 3,
+            borderRadius: 1.5,
+            backgroundColor: accentColor,
+            opacity: isDeleted ? 0.3 : 1,
+          }}
+        />
+
+        <View
+          style={{
+            flex: 1,
+            minWidth: 0,
+            paddingLeft: 8,
+            paddingRight: 6,
+            paddingTop: 5,
+            paddingBottom: 6,
+          }}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <Text
+              numberOfLines={1}
+              style={{
+                flex: 1,
+                fontSize: 13,
+                fontWeight: "700",
+                color: nameColor,
+                lineHeight: 16,
+              }}
+            >
+              {repliedTo.senderName}
+            </Text>
+            {!isDeleted && (
+              <Feather
+                name="corner-up-left"
+                size={11}
+                color={
+                  isMine ? "rgba(255,255,255,0.4)" : (subtleText ?? accentColor)
+                }
+                style={{ opacity: 0.8 }}
+              />
+            )}
+          </View>
+          <Text
+            numberOfLines={2}
+            ellipsizeMode="tail"
+            style={{
+              marginTop: 1,
+              fontSize: 12.5,
+              lineHeight: 15.5,
+              color: bodyColor,
+              fontStyle: isDeleted ? "italic" : "normal",
+            }}
+          >
+            {isDeleted
+              ? "This message was deleted"
+              : (repliedTo.text?.trim() || "…")}
+          </Text>
+        </View>
+
+        {/* Extra depress wash shown only while the block is held */}
+        <Animated.View
+          pointerEvents="none"
+          style={{
+            ...StyleSheet.absoluteFillObject,
+            opacity: wash,
+            backgroundColor: "rgba(0,0,0,0.10)",
+          }}
+        />
+      </Animated.View>
+    </Pressable>
+  );
+}
 
 export function MessageBubbleContent({
   text,
@@ -168,6 +395,10 @@ export function MessageBubbleContent({
   hasAnyoneRead,
   hasEveryoneRead,
   isGroup = false,
+  repliedTo,
+  replyToId,
+  onQuotePress,
+  highlighted,
 }: MessageBubbleContentProps) {
   const wasEdited =
     editedAt &&
@@ -178,49 +409,116 @@ export function MessageBubbleContent({
     ? "rgba(255,255,255,0.55)"
     : (subtleText ?? "#687076");
 
-  return (
-    <View
-      className="max-w-[100%] self-start px-3 py-2 rounded-2xl"
-      style={{
-        backgroundColor: isMine ? BRAND_COLOR : bubbleColor,
-        borderBottomRightRadius: isMine ? 4 : 16,
-        borderBottomLeftRadius: isMine ? 16 : 4,
-        overflow: "hidden",
-      }}
-    >
-      <Text
-        className="text-[15px] leading-5"
-        style={{
-          color: isMine ? "#fff" : textColor,
-          flexShrink: 1,
-        }}
-      >
-        {text}
-      </Text>
+  const glowOpacity = useRef(new Animated.Value(0)).current;
+  const landScale = useRef(new Animated.Value(1)).current;
 
-      <View className="flex-row items-center gap-1 mt-1 self-end">
-        {wasEdited && !isPending && (
-          <Text className="text-[10px]" style={{ color: tickColor }}>
-            Edited
-          </Text>
-        )}
-        {sentAt && (
-          <Text className="text-[10px]" style={{ color: tickColor }}>
-            {isPending ? "Sending…" : formatBubbleTime(sentAt)}
-          </Text>
-        )}
-        {isMine && (
-          <ReadReceipts
-            isPending={!!isPending}
-            isRead={!!isRead}
-            color={isMine && hasEveryoneRead ? READ_TICK_COLOR : tickColor}
-            hasAnyoneRead={hasAnyoneRead}
-            hasEveryoneRead={hasEveryoneRead}
+  useEffect(() => {
+    if (!highlighted) return;
+    landScale.setValue(0.97);
+    const anim = Animated.parallel([
+      Animated.sequence([
+        Animated.timing(glowOpacity, {
+          toValue: 1,
+          duration: 150,
+          useNativeDriver: true,
+        }),
+        Animated.delay(550),
+        Animated.timing(glowOpacity, {
+          toValue: 0,
+          duration: 500,
+          useNativeDriver: true,
+        }),
+      ]),
+      Animated.spring(landScale, {
+        toValue: 1,
+        useNativeDriver: true,
+        speed: 20,
+        bounciness: 8,
+      }),
+    ]);
+    anim.start();
+    return () => {
+      anim.stop();
+      glowOpacity.setValue(0);
+      landScale.setValue(1);
+    };
+  }, [highlighted, glowOpacity, landScale]);
+
+  return (
+    <Animated.View style={{ transform: [{ scale: landScale }] }}>
+      <View>
+        {repliedTo && (
+          <RepliedToQuote
+            repliedTo={repliedTo}
+            replyToId={replyToId}
+            isMine={isMine}
             isGroup={isGroup}
+            subtleText={subtleText}
+            onQuotePress={onQuotePress}
           />
         )}
+        <View
+          className={`max-w-[100%] px-3 pt-2 pb-1 ${
+            repliedTo ? "" : "rounded-[18px]"
+          }`}
+          style={{
+            backgroundColor: isMine ? BRAND_COLOR : bubbleColor,
+            borderBottomRightRadius: isMine ? 4 : 18,
+            borderBottomLeftRadius: isMine ? 18 : 4,
+            overflow: "hidden",
+          }}
+        >
+        <Text
+          className="text-[15px] leading-[20px]"
+          style={{
+            color: isMine ? "#fff" : textColor,
+            flexShrink: 1,
+          }}
+        >
+          {text}
+        </Text>
+
+        <View className="flex-row items-center self-end pt-[2px] ml-4">
+          {wasEdited && !isPending && (
+            <Text
+              className="text-[10px]"
+              style={{ color: tickColor, marginRight: 6 }}
+            >
+              Edited
+            </Text>
+          )}
+          {sentAt && (
+            <Text
+              className="text-[10px]"
+              style={{ color: tickColor, marginRight: isMine ? 3 : 0 }}
+            >
+              {isPending ? "Sending…" : formatBubbleTime(sentAt)}
+            </Text>
+          )}
+          {isMine && (
+            <ReadReceipts
+              isPending={!!isPending}
+              isRead={!!isRead}
+              color={isMine && hasEveryoneRead ? READ_TICK_COLOR : tickColor}
+              hasAnyoneRead={hasAnyoneRead}
+              hasEveryoneRead={hasEveryoneRead}
+              isGroup={isGroup}
+            />
+          )}
+        </View>
+        <Animated.View
+          pointerEvents="none"
+          style={{
+            ...StyleSheet.absoluteFillObject,
+            borderRadius: 18,
+            borderWidth: 1.5,
+            borderColor: isMine ? "rgba(255,255,255,0.7)" : BRAND_COLOR,
+            opacity: glowOpacity,
+          }}
+        />
+        </View>
       </View>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -247,6 +545,11 @@ export default memo(function MessageBubble({
   senderName,
   hasAnyoneRead,
   hasEveryoneRead,
+  onQuotePress,
+  highlighted,
+  repliedTo: repliedToProp,
+  replyToId: replyToIdProp,
+  isFirstInGroup,
 }: MessageBubbleProps) {
   const bubbleRef = useRef<View>(null);
   const AVATAR_SIZE = 28;
@@ -276,7 +579,8 @@ export default memo(function MessageBubble({
   return (
     <Pressable onLongPress={handleLongPress} delayLongPress={300}>
       <View
-        className={`flex-row px-1 py-[1px] ${isMine ? "justify-end" : "justify-start"}`}
+        className={`flex-row px-1 ${isMine ? "justify-end" : "justify-start"}`}
+        style={{ marginTop: isFirstInGroup ? 10 : 2 }}
       >
         {/* Avatar space — only on other person's last-in-group message */}
         {!isMine ? (
@@ -349,6 +653,10 @@ export default memo(function MessageBubble({
             hasAnyoneRead={hasAnyoneRead}
             hasEveryoneRead={hasEveryoneRead}
             isGroup={isGroup}
+            repliedTo={repliedToProp ?? message.repliedTo}
+            replyToId={replyToIdProp ?? message.replyToId}
+            onQuotePress={onQuotePress}
+            highlighted={highlighted}
           />
           <ReactionChips reactions={message.reactions} isMine={isMine} />
         </View>

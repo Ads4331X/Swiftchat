@@ -5,9 +5,9 @@ import {
   Text,
   View,
 } from "react-native";
-import { type RefObject, useCallback, useMemo, useState } from "react";
+import { type RefObject, useCallback, useMemo, useRef, useState } from "react";
 import Feather from "@expo/vector-icons/Feather";
-import { type Message } from "@/hooks/useChatMessages";
+import { type Message, type RepliedTo } from "@/hooks/useChatMessages";
 import MessageBubble from "./MessageBubble";
 import { TypingIndicator } from "./TypingIndicator";
 import { BRAND_COLOR } from "@/constants/theme";
@@ -44,6 +44,7 @@ type MessageListProps = {
   otherUsername?: string;
   isGroup?: boolean;
   members?: { id: number; username: string; avatar?: string }[];
+  onQuotePress?: (messageId: number) => void;
 };
 
 // How far (px) from the bottom counts as "still at the bottom" for the
@@ -69,8 +70,11 @@ export default function MessageList({
   otherUsername,
   isGroup = false,
   members = [],
+  onQuotePress,
 }: MessageListProps) {
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [highlightedId, setHighlightedId] = useState<number | null>(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [readersByMessage, setReadersByMessage] = useState<
     Record<number, Set<number>>
   >({});
@@ -84,6 +88,41 @@ export default function MessageList({
     }
     return map;
   }, [members]);
+
+  // Lookup original messages by id — used to render reply quotes client-side.
+  const messageById = useMemo(() => {
+    const map = new Map<number, Message>();
+    for (const m of messages) {
+      map.set(m.id, m);
+    }
+    return map;
+  }, [messages]);
+
+  // Resolve the quoted message for a reply. Prefers the server-provided
+  // snapshot; falls back to deriving it from the message list (perfect for
+  // optimistic rows and messages sent right now).
+  const resolveRepliedTo = useCallback(
+    (message: Message): { repliedTo?: RepliedTo; replyToId?: number } | null => {
+      if (message.repliedTo) return null;
+      if (message.replyToId == null) return null;
+
+      const original = messageById.get(message.replyToId);
+      if (!original) return null;
+
+      const senderName =
+        original.senderId === currentUserId
+          ? "You"
+          : (memberById.get(original.senderId)?.username ??
+            otherUsername ??
+            `User ${original.senderId}`);
+
+      return {
+        repliedTo: { senderName, text: original.text },
+        replyToId: message.replyToId,
+      };
+    },
+    [messageById, memberById, currentUserId, otherUsername],
+  );
 
   // The people who are typing right now (with name + avatar for display).
   const typingMembers = useMemo(() => {
@@ -116,6 +155,19 @@ export default function MessageList({
     for (let i = 0; i < messages.length; i++) {
       const next = messages[i + 1];
       if (!next || next.senderId !== messages[i].senderId) {
+        set.add(messages[i].id);
+      }
+    }
+    return set;
+  }, [messages]);
+
+  // First message in a consecutive same-sender run — gets extra top spacing so
+  // groups read clearly, while consecutive messages stay tightly packed.
+  const firstInGroupSet = useMemo(() => {
+    const set = new Set<number>();
+    for (let i = 0; i < messages.length; i++) {
+      const prev = messages[i - 1];
+      if (!prev || prev.senderId !== messages[i].senderId) {
         set.add(messages[i].id);
       }
     }
@@ -197,6 +249,42 @@ export default function MessageList({
     [listRef],
   );
 
+  // Scroll to a specific message (used when tapping a reply quote).
+  const scrollToMessage = useCallback(
+    (messageId: number) => {
+      const index = invertedData.findIndex((m) => m.id === messageId);
+      if (index < 0) return;
+
+      if (highlightTimerRef.current) {
+        clearTimeout(highlightTimerRef.current);
+      }
+      setHighlightedId(messageId);
+      highlightTimerRef.current = setTimeout(() => {
+        setHighlightedId(null);
+        highlightTimerRef.current = null;
+      }, 1500);
+
+      listRef.current?.scrollToIndex({
+        index,
+        viewPosition: 0.5,
+        animated: true,
+      });
+    },
+    [invertedData, listRef],
+  );
+
+  const handleScrollToIndexFailed = useCallback(() => {
+    // The target message isn't rendered yet (virtualization). Scroll to the
+    // nearest rendered end, then retry on the next frame.
+    listRef.current?.scrollToOffset({ offset: 0, animated: false });
+    requestAnimationFrame(() => {
+      const target = highlightedId ?? null;
+      if (target != null) {
+        scrollToMessage(target);
+      }
+    });
+  }, [highlightedId, scrollToMessage, listRef]);
+
   // Stable renderItem so React.memo'ed MessageBubbles only re-render when
   // their own message actually changed — not on every array rebuild.
   const renderItem = useCallback(
@@ -212,6 +300,8 @@ export default function MessageList({
       const hasEveryoneRead =
         otherMembers.length > 0 &&
         otherMembers.every((member) => readers.has(member.id));
+
+      const resolved = resolveRepliedTo(item);
       return (
         <MessageBubble
           message={item}
@@ -222,12 +312,20 @@ export default function MessageList({
           hidden={item.id === selectedMessageId}
           onLongPress={(position) => onMessageLongPress(item, position)}
           showAvatar={showAvatarSet.has(item.id)}
+          isFirstInGroup={firstInGroupSet.has(item.id)}
           avatarUrl={otherAvatarUrl}
           otherUsername={otherUsername}
           isGroup={isGroup}
           senderName={memberById.get(item.senderId)?.username}
           hasAnyoneRead={hasAnyoneRead}
           hasEveryoneRead={hasEveryoneRead}
+          highlighted={item.id === highlightedId}
+          repliedTo={resolved?.repliedTo ?? item.repliedTo}
+          replyToId={resolved?.replyToId ?? item.replyToId}
+          onQuotePress={(id) => {
+            scrollToMessage(id);
+            onQuotePress?.(id);
+          }}
         />
       );
     },
@@ -239,12 +337,17 @@ export default function MessageList({
       selectedMessageId,
       onMessageLongPress,
       showAvatarSet,
+      firstInGroupSet,
       otherAvatarUrl,
       otherUsername,
       isGroup,
       memberById,
       members,
       readersByMessage,
+      highlightedId,
+      scrollToMessage,
+      onQuotePress,
+      resolveRepliedTo,
     ],
   );
 
@@ -339,6 +442,7 @@ export default function MessageList({
         scrollEventThrottle={100}
         onEndReached={handleEndReached}
         onEndReachedThreshold={0.4}
+        onScrollToIndexFailed={handleScrollToIndexFailed}
       />
 
       {showScrollButton && (

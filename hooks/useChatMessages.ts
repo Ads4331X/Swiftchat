@@ -36,6 +36,12 @@ export type MessageReaction = {
   user: { id: number };
 };
 
+export type RepliedTo = {
+  senderName: string;
+  senderAvatar?: string;
+  text: string;
+};
+
 export type Message = {
   id: number;
   text: string;
@@ -57,6 +63,12 @@ export type Message = {
 
   /** Emoji reactions attached to this message (from the server). */
   reactions?: MessageReaction[];
+
+  /** If this message is a reply, the quoted original message info. */
+  repliedTo?: RepliedTo;
+
+  /** ID of the original message this message is replying to. */
+  replyToId?: number;
 };
 
 const PAGE_SIZE = 50;
@@ -67,21 +79,28 @@ function keyFor(message: Message): string {
 
 // SQLite returns the `reactions` column as a JSON string. Parse it back into
 // the `MessageReaction[]` shape used in-memory, treating invalid/empty values
-// as "no reactions".
+// as "no reactions". Same for the `repliedTo` quote snapshot.
 function parseLocalMessage(
-  row: Message & { reactions?: string | null },
+  row: Message & { reactions?: string | null; repliedTo?: string | null },
 ): Message {
-  const { reactions, ...rest } = row;
-  if (!reactions) return { ...rest, reactions: [] };
-  try {
-    const parsed = JSON.parse(reactions);
-    return {
-      ...rest,
-      reactions: Array.isArray(parsed) ? (parsed as MessageReaction[]) : [],
-    };
-  } catch {
-    return { ...rest, reactions: [] };
+  const { reactions, repliedTo, ...rest } = row;
+  const out: Message = { ...rest, reactions: [] };
+  if (reactions) {
+    try {
+      const parsed = JSON.parse(reactions);
+      out.reactions = Array.isArray(parsed) ? (parsed as MessageReaction[]) : [];
+    } catch {
+      out.reactions = [];
+    }
   }
+  if (repliedTo) {
+    try {
+      out.repliedTo = JSON.parse(repliedTo) as RepliedTo;
+    } catch {
+      out.repliedTo = undefined;
+    }
+  }
+  return out;
 }
 
 export default function useChatMessages(
@@ -154,7 +173,7 @@ export default function useChatMessages(
 
     const confirmed = await decryptChatMessages({
       serverMessages: (
-        cache as (Message & { reactions?: string | null })[]
+        cache as (Message & { reactions?: string | null; repliedTo?: string | null })[]
       ).map(parseLocalMessage),
       decryptedConversationKey,
     });
@@ -266,6 +285,10 @@ export default function useChatMessages(
           reactions: newMessage.reactions
             ? JSON.stringify(newMessage.reactions)
             : undefined,
+          replyToId: newMessage.replyToId,
+          repliedTo: newMessage.repliedTo
+            ? JSON.stringify(newMessage.repliedTo)
+            : undefined,
         }).catch(() => {});
 
         setMessages((currentMsg) => {
@@ -340,7 +363,7 @@ export default function useChatMessages(
         ({ conversationId, messageId, userId, readAt }) => {
           if (Number(conversationId) !== Number(id)) return;
           if (Number(userId) === currentUserIdRef.current) return;
-          
+
           markRead({
             conversationId: Number(conversationId),
             messageId,
@@ -409,7 +432,7 @@ export default function useChatMessages(
             const cache = (await readMsgsPaginated({
               conversationId: Number(id),
               limit: 200,
-            })) as (Message & { reactions?: string | null })[];
+})) as (Message & { reactions?: string | null; repliedTo?: string | null })[];
 
             if (cache.length > 0) {
               const decryptedCache = await decryptChatMessages({
@@ -475,6 +498,10 @@ export default function useChatMessages(
               nonce: msg.nonce,
               reactions: msg.reactions
                 ? JSON.stringify(msg.reactions)
+                : undefined,
+              replyToId: msg.replyToId,
+              repliedTo: msg.repliedTo
+                ? JSON.stringify(msg.repliedTo)
                 : undefined,
             }).catch(() => {});
           });
@@ -563,6 +590,8 @@ export default function useChatMessages(
           SenderId: Number(msg.senderId),
           nonce: msg.nonce,
           reactions: msg.reactions ? JSON.stringify(msg.reactions) : undefined,
+          replyToId: msg.replyToId,
+          repliedTo: msg.repliedTo ? JSON.stringify(msg.repliedTo) : undefined,
         }).catch(() => {});
       });
 
@@ -579,7 +608,7 @@ export default function useChatMessages(
           conversationId: Number(id),
           before: oldest.sentAt,
           limit: PAGE_SIZE,
-        })) as (Message & { reactions?: string | null })[];
+        })) as (Message & { reactions?: string | null; repliedTo?: string | null })[];
 
         if (localOlder.length === 0) {
           setHasMore(false);
@@ -611,6 +640,127 @@ export default function useChatMessages(
       setLoadingMore(false);
     }
   }, [id, messages, loadingMore, hasMore, decryptedConversationKey]);
+
+  const replyMessage = async (
+    messageId: string | number,
+    text: string,
+    conversationId: number | string,
+  ) => {
+    if (!decryptedConversationKey) return;
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    const original = messages.find((m) => m.id === Number(messageId));
+    const tempId = tempIdRef.current--;
+    const repliedToSnapshot = original?.text
+      ? {
+          senderName: original.senderId === currentUserId ? "You" : "Reply",
+          text: original.text,
+        }
+      : undefined;
+    const optimisticMessage: Message = {
+      id: tempId,
+      key: `m-local-${tempId}`,
+      text: trimmed,
+      sentAt: new Date().toISOString(),
+      editedAt: null,
+      senderId: currentUserId ?? -1,
+      conversationId: Number(id),
+      nonce: "",
+      replyToId: Number(messageId),
+      repliedTo: repliedToSnapshot,
+    };
+
+    setMessages((prev) => [...prev, optimisticMessage]);
+
+    const held = await acquireFlushLock();
+    try {
+      const { encryptedMessage, nonce: replyNonce } = await encryptMessage({
+        message: trimmed,
+        decryptedConversationKey,
+      });
+
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === tempId ? { ...m, nonce: replyNonce } : m,
+        ),
+      );
+      optimisticMessage.nonce = replyNonce;
+
+      await savePendingMessage({
+        message: encryptedMessage,
+        nonce: replyNonce,
+        messageId: optimisticMessage.id,
+        SenderId: optimisticMessage.senderId,
+        ConversationId: optimisticMessage.conversationId,
+        sentAt: optimisticMessage.sentAt,
+        replyToId: Number(messageId),
+        repliedTo: repliedToSnapshot
+          ? JSON.stringify(repliedToSnapshot)
+          : undefined,
+      });
+
+      const response = await api.post(`/api/conversations/messages`, {
+        messageText: encryptedMessage,
+        conversationId: Number(conversationId),
+        nonce: replyNonce,
+        replyToId: Number(messageId),
+      });
+
+      const decryptedResponse = await decryptChatMessages({
+        serverMessages: [response.data],
+        decryptedConversationKey,
+      });
+      const confirmedMessage = decryptedResponse[0];
+
+      try {
+        await saveMessage({
+          messageId: Number(response.data.id),
+          message: response.data.text,
+          sentAt: response.data.sentAt,
+          SenderId: response.data.senderId,
+          ConversationId: response.data.conversationId,
+          nonce: replyNonce,
+          reactions: response.data.reactions
+            ? JSON.stringify(response.data.reactions)
+            : undefined,
+          replyToId: Number(messageId),
+          repliedTo: repliedToSnapshot
+            ? JSON.stringify(repliedToSnapshot)
+            : undefined,
+        });
+        await deletePendingMessage({ messageId: tempId });
+      } catch (err) {
+        console.error("Saved reply to server but failed to save locally:", err);
+      }
+      updateConversationPreview({
+        id: Number(id),
+        lastMessageText: confirmedMessage.text,
+        lastMessageSentAt: response.data.sentAt,
+      }).catch(() => {});
+
+      setMessages((prev) => {
+        const next = prev.map((m) => {
+          if (m.id === tempId) {
+            return {
+              ...confirmedMessage,
+              key: m.key ?? `m-${confirmedMessage.id}`,
+            };
+          }
+          return m;
+        });
+        if (next.some((m) => m.id === confirmedMessage.id)) return next;
+        return [
+          ...next,
+          { ...confirmedMessage, key: keyFor(confirmedMessage) },
+        ];
+      });
+    } catch (err) {
+      console.error("replyMessage failed:", err);
+    } finally {
+      if (held) releaseFlushLock();
+    }
+  };
 
   const editMessage = async (messageId: string | number, text: string) => {
     if (!decryptedConversationKey) return;
@@ -758,6 +908,10 @@ export default function useChatMessages(
           reactions: response.data.reactions
             ? JSON.stringify(response.data.reactions)
             : undefined,
+          replyToId: response.data.replyToId,
+          repliedTo: response.data.repliedTo
+            ? JSON.stringify(response.data.repliedTo)
+            : undefined,
         });
         await deletePendingMessage({ messageId: tempId });
       } catch (err) {
@@ -799,6 +953,7 @@ export default function useChatMessages(
     hasMore,
     sendMessage,
     editMessage,
+    replyMessage,
     deleteMessage,
     reactToMessage,
     loadMore,

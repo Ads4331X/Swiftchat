@@ -79,6 +79,7 @@ export async function flushPendingMessages(): Promise<void> {
           messageText: pendingMessage.text,
           conversationId: pendingMessage.conversationId,
           nonce: pendingMessage.nonce,
+          replyToId: pendingMessage.replyToId ?? null,
         });
 
         if (result.data?.id == null) {
@@ -92,6 +93,8 @@ export async function flushPendingMessages(): Promise<void> {
           SenderId: result.data.senderId,
           ConversationId: result.data.conversationId,
           nonce: result.data.nonce,
+          replyToId: pendingMessage.replyToId ?? undefined,
+          repliedTo: pendingMessage.repliedTo ?? undefined,
         });
 
         await deletePendingMessage({ messageId: pendingMessage.id });

@@ -46,7 +46,7 @@ type MessageActionSheetProps = {
   onEdit: () => void;
   onDelete: () => void;
   onReact?: (emoji: string) => void;
-  onReply?: () => void;
+  onReply: () => void;
   onForward?: () => void;
   onPin?: () => void;
   onInfo?: () => void;
@@ -357,7 +357,7 @@ export function MessageActionSheet({
       icon: "corner-up-left" as const,
       label: "Reply",
       onPress: () => {
-        onReply?.();
+        onReply();
         dismiss();
       },
     },
