@@ -17,10 +17,13 @@ type ChatActionsProps = {
   onReact: (emoji: string) => void;
   onReply: () => void;
   onForward?: () => void;
+  onPin?: () => void;
   onInfo?: () => void;
   onDismissStart: () => void;
   onClose: () => void;
   isGroup: boolean;
+  /** Whether pinning is allowed (group admins only; always true in 1:1). */
+  canPin?: boolean;
 };
 
 export default function ChatActions({
@@ -36,8 +39,10 @@ export default function ChatActions({
   onReply,
   onForward,
   onInfo,
+  onPin,
   onDismissStart,
   onClose,
+  canPin = true,
 }: ChatActionsProps) {
   return (
     <MessageActionSheet
@@ -53,11 +58,12 @@ export default function ChatActions({
       onReact={onReact}
       onReply={onReply}
       onForward={onForward}
-      onPin={() => {}}
+      onPin={onPin}
       onInfo={onInfo}
       onDismissStart={onDismissStart}
       onClose={onClose}
       isGroup={isGroup}
+      canPin={canPin}
     />
   );
 }

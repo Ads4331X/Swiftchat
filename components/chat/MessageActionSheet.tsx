@@ -52,6 +52,8 @@ type MessageActionSheetProps = {
   onInfo?: () => void;
   onClose: () => void;
   onDismissStart?: () => void;
+  /** False when the current user can't pin (non-admin in a group). */
+  canPin?: boolean;
 };
 
 const REACTIONS = ["❤️", "😂", "😮", "😢", "😡", "👍"] as const;
@@ -160,6 +162,7 @@ export function MessageActionSheet({
   onInfo,
   onClose,
   onDismissStart,
+  canPin = true,
 }: MessageActionSheetProps) {
   const [mounted, setMounted] = useState(visible);
   const isDismissingRef = useRef(false);
@@ -390,6 +393,7 @@ export function MessageActionSheet({
       key: "pin",
       icon: "map-pin" as const,
       label: "Pin",
+      disabled: !canPin,
       onPress: () => {
         onPin?.();
         dismiss();
@@ -545,6 +549,7 @@ export function MessageActionSheet({
                   icon={item.icon}
                   label={item.label}
                   color={item.color}
+                  disabled={item.disabled}
                   onPress={item.onPress}
                 />
               ))}
@@ -592,11 +597,13 @@ function MenuItem({
   icon,
   label,
   color = "#fff",
+  disabled,
   onPress,
 }: {
   icon: keyof typeof Feather.glyphMap;
   label: string;
   color?: string;
+  disabled?: boolean;
   onPress: () => void;
 }) {
   const scale = useSharedValue(1);
@@ -606,15 +613,20 @@ function MenuItem({
   }));
 
   const handlePressIn = () => {
+    if (disabled) return;
     scale.value = withSpring(0.96, { damping: 20, stiffness: 400 });
   };
 
   const handlePressOut = () => {
+    if (disabled) return;
     scale.value = withSpring(1, { damping: 20, stiffness: 400 });
   };
 
+  const itemColor = disabled ? "rgba(255,255,255,0.35)" : color;
+
   return (
     <Pressable
+      disabled={disabled}
       onPress={onPress}
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
@@ -631,8 +643,8 @@ function MenuItem({
           animatedStyle,
         ]}
       >
-        <Feather name={icon} size={17} color={color} />
-        <Text style={{ color, fontSize: 15 }}>{label}</Text>
+        <Feather name={icon} size={17} color={itemColor} />
+        <Text style={{ color: itemColor, fontSize: 15 }}>{label}</Text>
       </Animated.View>
     </Pressable>
   );

@@ -40,6 +40,7 @@ type MessageListProps = {
   isOtherUserTyping?: number[];
   onLoadMore: () => void;
   onScrollToEndRef?: RefObject<(() => void) | null>;
+  scrollToMessageRef?: RefObject<((messageId: number) => void) | null>;
   otherAvatarUrl?: string;
   otherUsername?: string;
   isGroup?: boolean;
@@ -66,6 +67,7 @@ export default function MessageList({
   isOtherUserTyping,
   onLoadMore,
   onScrollToEndRef,
+  scrollToMessageRef,
   otherAvatarUrl,
   otherUsername,
   isGroup = false,
@@ -354,6 +356,11 @@ export default function MessageList({
   // Expose a force-scroll-to-bottom to the parent (used after sending).
   if (onScrollToEndRef) {
     onScrollToEndRef.current = () => scrollToBottom(true);
+  }
+
+  // Expose scroll-to-message to the parent (used when tapping a pinned banner).
+  if (scrollToMessageRef) {
+    scrollToMessageRef.current = scrollToMessage;
   }
 
   if (loading) {

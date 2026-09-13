@@ -28,6 +28,7 @@ export default function useChatParticipant(
   const [otherUser, setOtherUser] = useState<ChatParticipant | null>(null);
   const [conversationName, setConversationName] = useState<string | null>(null);
   const [members, setMembers] = useState<ChatMember[]>([]);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     getCurrentUserId().then(setCurrentUserId);
@@ -97,6 +98,13 @@ export default function useChatParticipant(
       setConversationName(
         typeof conversation?.name === "string" ? conversation.name : null,
       );
+      // Group admins are the conversation creator (matches the server's
+      // checkAdmin). Everyone else may not pin messages.
+      setIsAdmin(
+        myId != null && conversation?.createdById != null
+          ? Number(conversation.createdById) === myId
+          : false,
+      );
       if (!conversationMembers.length) {
         return;
       }
@@ -131,5 +139,12 @@ export default function useChatParticipant(
     }, [loadParticipant]),
   );
 
-  return { currentUserId, conversationKey, conversationName, otherUser, members };
+  return {
+    currentUserId,
+    conversationKey,
+    conversationName,
+    otherUser,
+    members,
+    isAdmin,
+  };
 }

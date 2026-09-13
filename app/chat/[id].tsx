@@ -21,6 +21,8 @@ import MessageList from "@/components/chat/MessageList";
 import ForwardSheet from "@/components/chat/forward/ForwardSheet";
 import PinModal from "@/components/security/PinModal";
 import { listenForGroupDelete } from "@/lib/socket";
+import PinnedMessages from "@/components/chat/PinnedMessages";
+import { api } from "@/lib/api";
 
 type Position = {
   pageX: number;
@@ -69,6 +71,7 @@ export default function UserChat() {
     conversationName,
     otherUser,
     members,
+    isAdmin,
   } = useChatParticipant(id, memberIds, keyReadyVersion, setUpKeys);
   const { isOtherUserTyping, notifyDraftChange, stopTyping } = useChatTyping(
     id,
@@ -90,6 +93,13 @@ export default function UserChat() {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
+  const [pinnedMessageId, setPinnedMessageId] = useState<number | null>(null);
+  const pinnedFetchedRef = useRef(false);
+  const scrollToMessageRef = useRef<((messageId: number) => void) | null>(null);
+  const pinnedMsg =
+    pinnedMessageId != null
+      ? (messages.find((m) => m.id === pinnedMessageId) ?? null)
+      : null;
   const [replyingMessageId, setReplyingMessageId] = useState<number | null>(
     null,
   );
@@ -113,6 +123,27 @@ export default function UserChat() {
       unsubscribe?.();
     };
   }, [id]);
+
+  // Fetch the pinned message banner once messages have loaded.
+  useEffect(() => {
+    if (pinnedFetchedRef.current || messages.length === 0) return;
+    pinnedFetchedRef.current = true;
+    (async () => {
+      try {
+        const newest = messages[messages.length - 1];
+        if (!newest) return;
+        const res = await api.get(
+          `/api/conversations/${id}/messages/${newest.id}/pin`,
+        );
+        const list = Array.isArray(res.data) ? res.data : [];
+        if (list.length) {
+          setPinnedMessageId(Number(list[list.length - 1].messageId));
+        }
+      } catch {
+        // not pinned (or not permitted) — banner just stays hidden
+      }
+    })();
+  }, [messages, id]);
   const handleSend = async () => {
     if (!draft.trim() || sending) return;
     const text = draft;
@@ -167,6 +198,32 @@ export default function UserChat() {
     setDraft(selectedMessage.text);
   };
 
+  const handlePin = async () => {
+    if (!selectedMessage) return;
+    try {
+      await api.post(
+        `/api/conversations/${id}/messages/${selectedMessage.id}/pin`,
+      );
+      setPinnedMessageId(selectedMessage.id);
+    } catch {
+      // message may already be pinned — ignore
+    }
+  };
+
+  const navToPinMsg = () => {
+    if (pinnedMsg) scrollToMessageRef.current?.(pinnedMsg.id);
+  };
+  const unPinMsg = async () => {
+    if (!pinnedMsg) return;
+    setPinnedMessageId(null);
+    try {
+      await api.delete(
+        `/api/conversations/${id}/messages/${pinnedMsg.id}/pin`,
+      );
+    } catch {
+      // banner already cleared — ignore server error
+    }
+  };
   const handleForward = () => {
     if (!selectedMessage) return;
     setMessageToForward(selectedMessage);
@@ -200,6 +257,15 @@ export default function UserChat() {
         `User ${replyPreview.senderId}`)
     : null;
 
+  const pinnedSenderName = pinnedMsg
+    ? currentUserId != null && pinnedMsg.senderId === currentUserId
+      ? "You"
+      : (members.find((m) => m.id === pinnedMsg.senderId)?.username ??
+        otherUser?.username ??
+        username ??
+        `User ${pinnedMsg.senderId}`)
+    : undefined;
+
   return (
     <SafeAreaView
       className="flex-1"
@@ -218,6 +284,16 @@ export default function UserChat() {
         chatId={id}
         memberIds={isGroup ? memberIds : undefined}
       />
+      {pinnedMsg && (
+        <PinnedMessages
+          msg={pinnedMsg}
+          onPress={navToPinMsg}
+          onUnpin={unPinMsg}
+          isGroup={isGroup}
+          senderName={pinnedSenderName}
+          currentUserId={currentUserId}
+        />
+      )}
       <MessageList
         messages={messages}
         loading={loading}
@@ -233,6 +309,7 @@ export default function UserChat() {
         isOtherUserTyping={isOtherUserTyping}
         onLoadMore={loadMore}
         onScrollToEndRef={scrollToEndRef}
+        scrollToMessageRef={scrollToMessageRef}
         otherAvatarUrl={otherUser?.avatarUrl ?? avatarUrl ?? ""}
         otherUsername={otherUser?.username ?? username ?? ""}
         isGroup={isGroup}
@@ -277,6 +354,8 @@ export default function UserChat() {
         onInfo={handleMessageInfo}
         onReply={handleReplyMessage}
         onForward={handleForward}
+        onPin={handlePin}
+        canPin={!isGroup || isAdmin}
         onDelete={async () => {
           if (!selectedMessage) return;
           try {
