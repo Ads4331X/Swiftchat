@@ -17,6 +17,7 @@ type ChatListProps = {
   filteredMode: ChatCategory;
   chats: Chat[];
   loading: boolean;
+  clearChat: (conversationId: number) => Promise<void>;
 };
 
 function formatTime(iso: string): string {
@@ -37,6 +38,7 @@ export default function ChatList({
   filteredMode,
   chats,
   loading,
+  clearChat,
 }: ChatListProps) {
   const router = useRouter();
   const [typingMap, setTypingMap] = useState<Record<number, boolean>>({});
@@ -131,6 +133,7 @@ export default function ChatList({
           username={displayName(chat)}
           avatarUrl={otherAvatar(chat)}
           lastMessage={chat.lastMessage?.text}
+          onClear={() => clearChat(Number(chat.id))}
           typing={typingMap[chat.id]}
           time={
             chat.lastMessage ? formatTime(chat.lastMessage.sentAt) : undefined

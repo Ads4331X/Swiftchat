@@ -18,7 +18,7 @@ export default function Chat() {
     useState<ChatCategory>("All");
   const { colors } = useTheme();
   const bottomSheetRef = useRef<BottomSheet>(null);
-  const { chats, loading, refetch } = useChats();
+  const { chats, loading, refetch, clearChat } = useChats();
   const {
     needsPin,
     pinMode,
@@ -60,6 +60,7 @@ export default function Chat() {
           filteredMode={activeChatCategory}
           chats={chats}
           loading={loading}
+          clearChat={clearChat}
         />
       </ScrollView>
 

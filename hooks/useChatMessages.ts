@@ -31,6 +31,7 @@ import {
   onPendingFlushed,
   releaseFlushLock,
 } from "@/lib/pendingSync";
+import { onChatCleared } from "@/lib/clearChat";
 
 export type MessageReaction = {
   emoji: string;
@@ -252,6 +253,19 @@ export default function useChatMessages(
 
     return unsubscribe;
   }, [isConnected, isInternetReachable, id, reconcileMessages]);
+
+  // React when this conversation is cleared from anywhere in the app (swipe
+  // action, profile screen): drop the in-memory list so the screen shows empty.
+  useEffect(() => {
+    const unsubscribe = onChatCleared(({ conversationId }) => {
+      if (Number(conversationId) === Number(id)) {
+        setMessages([]);
+        setHasMore(true);
+      }
+    });
+    return unsubscribe;
+  }, [id]);
+
   useEffect(() => {
     if (!id) return;
     let active = true;

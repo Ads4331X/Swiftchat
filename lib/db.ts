@@ -32,7 +32,8 @@ const STATEMENTS = [
     otherUsername TEXT,
     otherAvatarUrl TEXT,
     lastMessageText TEXT,
-    lastMessageSentAt TEXT
+    lastMessageSentAt TEXT,
+    clearedAt TEXT
   );`,
   `CREATE TABLE IF NOT EXISTS PendingMessage (
     id INTEGER PRIMARY KEY,
@@ -62,6 +63,10 @@ const STATEMENTS = [
     key TEXT PRIMARY KEY NOT NULL,
     value TEXT NOT NULL
   );`,
+  `CREATE TABLE IF NOT EXISTS PinnedMessage (
+    conversationId INTEGER PRIMARY KEY,
+    messageId INTEGER NOT NULL
+  );`,
 ];
 
 async function openDbOnce(): Promise<SQLite.SQLiteDatabase | null> {
@@ -80,7 +85,11 @@ async function openDbOnce(): Promise<SQLite.SQLiteDatabase | null> {
       for (const stmt of STATEMENTS) {
         await database.execAsync(stmt);
       }
-
+      try {
+        await database.execAsync(
+          `ALTER TABLE Conversation ADD COLUMN clearedAt TEXT;`,
+        );
+      } catch {}
       try {
         await database.execAsync(
           `ALTER TABLE Message ADD COLUMN forwardedFromMsgId INTEGER;`,
@@ -432,6 +441,27 @@ export async function getConversations(): Promise<CachedConversation[]> {
   }
 }
 
+export async function clearChatLocalMessages(conversationId: number) {
+  try {
+    const db = await getDb();
+    if (!db) return;
+    await db.runAsync(`DELETE FROM MessageRead WHERE conversationId = ?`, [
+      conversationId,
+    ]);
+    await db.runAsync(`DELETE FROM PendingMessage WHERE conversationId = ?`, [
+      conversationId,
+    ]);
+    await db.runAsync(`DELETE FROM Message WHERE conversationId = ?`, [
+      conversationId,
+    ]);
+    await db.runAsync(`DELETE FROM PinnedMessage WHERE conversationId = ?`, [
+      conversationId,
+    ]);
+  } catch (err) {
+    console.warn("clearChatLocalMessages skipped:", err);
+  }
+}
+
 export async function deleteConversation({
   conversationId,
 }: {
@@ -447,6 +477,9 @@ export async function deleteConversation({
       conversationId,
     ]);
     await db.runAsync(`DELETE FROM Message where conversationId = ?`, [
+      conversationId,
+    ]);
+    await db.runAsync(`DELETE FROM PinnedMessage where conversationId = ?`, [
       conversationId,
     ]);
 
@@ -466,6 +499,7 @@ export async function clearAllLocalData() {
     await db.execAsync("DELETE FROM Conversation;");
     await db.execAsync("DELETE FROM PendingMessage;");
     await db.execAsync("DELETE FROM User;");
+    await db.execAsync("DELETE FROM PinnedMessage;");
   } catch (err) {
     console.warn("clearAllLocalData skipped:", err);
   }
@@ -736,4 +770,104 @@ export async function getSetting(key: string) {
   );
 
   return result?.value ?? null;
+}
+
+export async function savePinnedMessage({
+  conversationId,
+  messageId,
+}: {
+  conversationId: number;
+  messageId: number;
+}) {
+  try {
+    const db = await getDb();
+    if (!db) return;
+    await db.runAsync(
+      `INSERT OR REPLACE INTO PinnedMessage (conversationId, messageId) VALUES (?, ?)`,
+      [conversationId, messageId],
+    );
+  } catch (err) {
+    console.warn("savePinnedMessage skipped:", err);
+  }
+}
+
+export async function deletePinnedMessageLocal({
+  conversationId,
+}: {
+  conversationId: number;
+}) {
+  try {
+    const db = await getDb();
+    if (!db) return;
+    await db.runAsync(`DELETE FROM PinnedMessage WHERE conversationId = ?`, [
+      conversationId,
+    ]);
+  } catch (err) {
+    console.warn("deletePinnedMessageLocal skipped:", err);
+  }
+}
+
+export async function getPinnedMessageLocal(conversationId: number) {
+  try {
+    const db = await getDb();
+    if (!db) return null;
+    return await db.getFirstAsync<{
+      conversationId: number;
+      messageId: number;
+    }>(`SELECT * FROM PinnedMessage WHERE conversationId = ?`, [
+      conversationId,
+    ]);
+  } catch (err) {
+    console.warn("getPinnedMessageLocal skipped:", err);
+    return null;
+  }
+}
+
+export async function setConversationClearedAt({
+  conversationId,
+  clearedAt,
+}: {
+  conversationId: number;
+  clearedAt: string;
+}) {
+  try {
+    const db = await getDb();
+    if (!db) return null;
+    await db.runAsync(
+      `INSERT INTO Conversation (id, clearedAt) VALUES (?, ?)
+       ON CONFLICT(id) DO UPDATE SET clearedAt = excluded.clearedAt`,
+      [conversationId, clearedAt],
+    );
+  } catch (err) {
+    console.warn("Could not clear the chat locally", err);
+  }
+}
+
+export async function getConversationClearedAt(conversationId: number) {
+  try {
+    const db = await getDb();
+    if (!db) return null;
+
+    return await db.getFirstAsync<{ clearedAt: string | null }>(
+      `SELECT clearedAt FROM Conversation WHERE id = ?`,
+      [conversationId],
+    );
+  } catch (err) {
+    console.warn("getConversationClearedAt skipped:", err);
+    return null;
+  }
+}
+
+export async function clearConversationPreview(conversationId: number) {
+  try {
+    const db = await getDb();
+    if (!db) return;
+
+    await db.runAsync(
+      `UPDATE Conversation SET lastMessageText = NULL, lastMessageSentAt = NULL WHERE id = ?`,
+      [conversationId],
+    );
+  } catch (err) {
+    console.warn("clearConversationPreview skipped:", err);
+  }
 }

@@ -23,6 +23,7 @@ import ProfileSettingsSection, {
   type ProfileRow,
 } from "@/components/profile/ProfileSettingsSection";
 import { deleteConversation } from "@/lib/db";
+import { clearChat } from "@/lib/clearChat";
 
 type User = {
   avatar?: string;
@@ -328,13 +329,29 @@ export default function OtherProfile() {
         {
           key: "delete",
           icon: "x-circle",
-          label: "Delete chat",
+          label: "Clear chat",
           destructive: true,
           onPress: () =>
             confirm(
-              "Delete chat",
-              "This will remove the conversation from your chat list.",
-              () => console.log("Chat deleted"),
+              "Clear chat",
+              "This will clear the chat history with this contact.",
+              async () => {
+                const conversationId = Number(chatId);
+                if (!conversationId) return;
+                try {
+                  await clearChat(conversationId);
+                  Alert.alert(
+                    "Chat cleared",
+                    "Chat history cleared successfully.",
+                  );
+                } catch (err: any) {
+                  Alert.alert(
+                    "Couldn't clear chat",
+                    (err?.response?.data?.error as string) ??
+                      "Something went wrong. Please try again.",
+                  );
+                }
+              },
             ),
         },
         {

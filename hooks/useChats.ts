@@ -11,9 +11,11 @@ import {
   saveConversation,
   syncConversationsWithServer,
 } from "@/lib/db";
+import { clearChat as clearChatOnServer, onChatCleared } from "@/lib/clearChat";
 import { getCurrentUserId } from "@/lib/auth";
 import { decryptMessage, getOrCreateConversationKey } from "@/lib/crypto";
 import NetInfo from "@react-native-community/netinfo";
+import Toast from "react-native-toast-message";
 
 export type ChatMember = {
   id: number;
@@ -301,12 +303,38 @@ export default function useChats() {
     };
   }, []);
 
-  /*
-   * Fetch conversations
-   */
+  const clearChat = async (conversationId: number) => {
+    try {
+      await clearChatOnServer(conversationId);
+      Toast.show({
+        type: "success",
+        text1: "Chat cleared successfully",
+      });
+    } catch (error: any) {
+      Toast.show({
+        type: "error",
+        text1: "Could not clear chat. Please try again later",
+        text2: error.response?.data?.error ?? "Something went wrong",
+      });
+    }
+  };
+
+  useEffect(() => {
+    const unsubscribe = onChatCleared(({ conversationId }) => {
+      setChats((prev) =>
+        prev.map((chat) =>
+          chat.id === conversationId
+            ? { ...chat, lastMessage: undefined }
+            : chat,
+        ),
+      );
+    });
+    return unsubscribe;
+  }, []);
 
   return {
     chats,
+    clearChat,
     loading,
     refetch,
   };

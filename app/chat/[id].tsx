@@ -21,6 +21,11 @@ import MessageList from "@/components/chat/MessageList";
 import ForwardSheet from "@/components/chat/forward/ForwardSheet";
 import PinModal from "@/components/security/PinModal";
 import { listenForGroupDelete } from "@/lib/socket";
+import {
+  deletePinnedMessageLocal,
+  getPinnedMessageLocal,
+  savePinnedMessage,
+} from "@/lib/db";
 import PinnedMessages from "@/components/chat/PinnedMessages";
 import { api } from "@/lib/api";
 
@@ -129,6 +134,11 @@ export default function UserChat() {
     if (pinnedFetchedRef.current || messages.length === 0) return;
     pinnedFetchedRef.current = true;
     (async () => {
+      const local = await getPinnedMessageLocal(Number(id));
+      if (local) {
+        setPinnedMessageId(local.messageId);
+        return;
+      }
       try {
         const newest = messages[messages.length - 1];
         if (!newest) return;
@@ -137,7 +147,9 @@ export default function UserChat() {
         );
         const list = Array.isArray(res.data) ? res.data : [];
         if (list.length) {
-          setPinnedMessageId(Number(list[list.length - 1].messageId));
+          const messageId = Number(list[list.length - 1].messageId);
+          setPinnedMessageId(messageId);
+          savePinnedMessage({ conversationId: Number(id), messageId });
         }
       } catch {
         // not pinned (or not permitted) — banner just stays hidden
@@ -200,13 +212,17 @@ export default function UserChat() {
 
   const handlePin = async () => {
     if (!selectedMessage) return;
+    setPinnedMessageId(selectedMessage.id);
+    savePinnedMessage({
+      conversationId: Number(id),
+      messageId: selectedMessage.id,
+    });
     try {
       await api.post(
         `/api/conversations/${id}/messages/${selectedMessage.id}/pin`,
       );
-      setPinnedMessageId(selectedMessage.id);
     } catch {
-      // message may already be pinned — ignore
+      // server may be unreachable — pin is already saved locally
     }
   };
 
@@ -216,12 +232,13 @@ export default function UserChat() {
   const unPinMsg = async () => {
     if (!pinnedMsg) return;
     setPinnedMessageId(null);
+    deletePinnedMessageLocal({ conversationId: Number(id) });
     try {
       await api.delete(
         `/api/conversations/${id}/messages/${pinnedMsg.id}/pin`,
       );
     } catch {
-      // banner already cleared — ignore server error
+      // banner already cleared locally
     }
   };
   const handleForward = () => {
