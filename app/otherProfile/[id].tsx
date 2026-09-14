@@ -12,16 +12,17 @@ import {
 } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
-import Feather from "@expo/vector-icons/Feather";
 import { api } from "@/lib/api";
 import { getCurrentUserId } from "@/lib/auth";
 import { BRAND_COLOR } from "@/constants/theme";
 import { useTheme } from "@/constants/theme-provider";
-import Avatar from "@/components/profile/Avatar";
 import OtherProfileHeader from "@/components/profile/OtherProfileHeader";
 import ProfileSettingsSection, {
   type ProfileRow,
 } from "@/components/profile/ProfileSettingsSection";
+import GroupMemberList, {
+  type GroupMember,
+} from "@/components/profile/GroupMemberList";
 import { deleteConversation } from "@/lib/db";
 import { clearChat } from "@/lib/clearChat";
 
@@ -30,14 +31,6 @@ type User = {
   username: string;
   lastSeen?: string;
 };
-
-type GroupMember = {
-  id: number;
-  username: string;
-  avatar?: string;
-};
-
-const MAX_MEMBERS = 5;
 
 function formatPresence(lastSeen?: string) {
   if (!lastSeen) return "Offline";
@@ -71,6 +64,7 @@ export default function OtherProfile() {
   const [myAvatar, setMyAvatar] = useState("");
   const [showAllMembers, setShowAllMembers] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [adminId, setAdminId] = useState<number | null>(null);
   const [notificationsOn, setNotificationsOn] = useState(true);
   const [groupName, setGroupName] = useState<string | null>(null);
   const [renameVisible, setRenameVisible] = useState(false);
@@ -94,9 +88,6 @@ export default function OtherProfile() {
           ...members.filter((m) => m.id !== myId),
           { id: myId, username: `You (${myName})`, avatar: myAvatar },
         ];
-  const visibleMembers = showAllMembers
-    ? memberList
-    : memberList.slice(0, MAX_MEMBERS);
 
   const getOtherProfile = useCallback(async () => {
     if (!id) return;
@@ -117,6 +108,7 @@ export default function OtherProfile() {
       setIsAdmin(
         Boolean(chat) && me != null && Number(chat?.createdById) === me,
       );
+      setAdminId(chat?.createdById ? Number(chat.createdById) : null);
       setGroupName(chat?.name?.trim() || null);
       setMembers(
         (chat?.members ?? []).map((m: any) => ({
@@ -260,6 +252,34 @@ export default function OtherProfile() {
 
   const dangerRows: ProfileRow[] = isGroup
     ? [
+        {
+          key: "clear-chat",
+          icon: "x-circle",
+          label: "Clear chat",
+          destructive: true,
+          onPress: () =>
+            confirm(
+              "Clear chat",
+              "This will clear the chat history for this group.",
+              async () => {
+                const conversationId = Number(chatId ?? id);
+                if (!conversationId) return;
+                try {
+                  await clearChat(conversationId);
+                  Alert.alert(
+                    "Chat cleared",
+                    "Chat history cleared successfully.",
+                  );
+                } catch (err: any) {
+                  Alert.alert(
+                    "Couldn't clear chat",
+                    (err?.response?.data?.error as string) ??
+                      "Something went wrong. Please try again.",
+                  );
+                }
+              },
+            ),
+        },
         {
           key: "leave-group",
           icon: "user-x",
@@ -417,74 +437,23 @@ export default function OtherProfile() {
           }}
         />
         {isGroup && (
-          <View className="mt-7">
-            <Text
-              style={{ color: BRAND_COLOR + "cc" }}
-              className="text-xs font-semibold uppercase tracking-wide px-5 mb-1.5"
-            >
-              Members ({memberCount})
-            </Text>
-            {visibleMembers.map((member) => (
-              <View key={member.id} className="flex-row items-center px-5 py-2">
-                <Pressable
-                  disabled={member.id === myId}
-                  onPress={() => {
-                    if (member.id !== myId) {
-                      router.push({
-                        pathname: "/otherProfile/[id]",
-                        params: { id: member.id },
-                      });
-                    }
-                  }}
-                  className="flex-1 flex-row items-center py-1"
-                  style={({ pressed }) => ({
-                    backgroundColor: pressed ? faint : "transparent",
-                  })}
-                >
-                  <Avatar
-                    username={member.id === myId ? myName : member.username}
-                    avatarUrl={member.avatar}
-                    size={40}
-                  />
-                  <Text
-                    style={{ color: colors.text }}
-                    className="flex-1 text-[15px] ml-4"
-                  >
-                    {member.username}
-                  </Text>
-                </Pressable>
-                {member.id !== myId && (
-                  <Pressable
-                    disabled={!isAdmin}
-                    onPress={() => removeMember(member)}
-                    hitSlop={10}
-                    className="p-2"
-                    style={{ opacity: isAdmin ? 1 : 0.3 }}
-                  >
-                    <Feather name="user-minus" size={18} color="#E5484D" />
-                  </Pressable>
-                )}
-              </View>
-            ))}
-            {memberList.length > MAX_MEMBERS && (
-              <Pressable
-                onPress={() => setShowAllMembers((v) => !v)}
-                className="flex-row items-center px-5 py-3"
-                style={({ pressed }) => ({
-                  backgroundColor: pressed ? faint : "transparent",
-                })}
-              >
-                <Text
-                  style={{ color: BRAND_COLOR }}
-                  className="text-[15px] font-medium"
-                >
-                  {showAllMembers
-                    ? "Show less"
-                    : `See all ${memberCount} members`}
-                </Text>
-              </Pressable>
-            )}
-          </View>
+          <GroupMemberList
+            members={memberList}
+            memberCount={memberCount}
+            myId={myId}
+            myName={myName}
+            adminId={adminId}
+            canRemove={isAdmin}
+            showAll={showAllMembers}
+            onToggleShowAll={() => setShowAllMembers((v) => !v)}
+            onOpen={(memberId) =>
+              router.push({
+                pathname: "/otherProfile/[id]",
+                params: { id: memberId },
+              })
+            }
+            onRemove={removeMember}
+          />
         )}
         <ProfileSettingsSection title="Media" rows={mediaRows} />
         <ProfileSettingsSection title="Notifications" rows={notificationRows} />
