@@ -1,5 +1,4 @@
 import {
-  ActivityIndicator,
   FlatList,
   Pressable,
   Text,
@@ -10,14 +9,14 @@ import Feather from "@expo/vector-icons/Feather";
 import { type Message, type RepliedTo } from "@/hooks/useChatMessages";
 import MessageBubble from "./MessageBubble";
 import { TypingIndicator } from "./TypingIndicator";
-import { BRAND_COLOR } from "@/constants/theme";
+import MessageSkeleton from "./MessageSkeleton";
 import EmptyState from "@/components/ui/EmptyState";
 import { markRead } from "@/lib/db";
 import { api } from "@/lib/api";
 import { listenForMarkRead } from "@/lib/socket";
 import { useEffect } from "react";
 import Avatar from "../profile/Avatar";
-
+import useChats from "@/hooks/useChats";
 type Position = {
   pageX: number;
   pageY: number;
@@ -27,7 +26,7 @@ type Position = {
 
 type MessageListProps = {
   messages: Message[]; // chronological, oldest -> newest (unchanged from hook)
-  loading: boolean;
+  initialized: boolean;
   loadingMore: boolean;
   hasMore: boolean;
   currentUserId: number | null;
@@ -46,6 +45,7 @@ type MessageListProps = {
   isGroup?: boolean;
   members?: { id: number; username: string; avatar?: string }[];
   onQuotePress?: (messageId: number) => void;
+  showSkeleton?: boolean;
 };
 
 // How far (px) from the bottom counts as "still at the bottom" for the
@@ -54,7 +54,7 @@ const SHOW_BUTTON_THRESHOLD = 300;
 
 export default function MessageList({
   messages,
-  loading,
+  initialized,
   loadingMore,
   hasMore,
   currentUserId,
@@ -73,6 +73,7 @@ export default function MessageList({
   isGroup = false,
   members = [],
   onQuotePress,
+  showSkeleton = false,
 }: MessageListProps) {
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [highlightedId, setHighlightedId] = useState<number | null>(null);
@@ -80,6 +81,8 @@ export default function MessageList({
   const [readersByMessage, setReadersByMessage] = useState<
     Record<number, Set<number>>
   >({});
+
+  const { refetch } = useChats();
   // Lookup sender display names/avatars for group bubbles & typing indicator.
   const memberById = useMemo(() => {
     const map = new Map<number, { username: string; avatar?: string }>();
@@ -104,7 +107,9 @@ export default function MessageList({
   // snapshot; falls back to deriving it from the message list (perfect for
   // optimistic rows and messages sent right now).
   const resolveRepliedTo = useCallback(
-    (message: Message): { repliedTo?: RepliedTo; replyToId?: number } | null => {
+    (
+      message: Message,
+    ): { repliedTo?: RepliedTo; replyToId?: number } | null => {
       if (message.repliedTo) return null;
       if (message.replyToId == null) return null;
 
@@ -363,25 +368,7 @@ export default function MessageList({
     scrollToMessageRef.current = scrollToMessage;
   }
 
-  if (loading) {
-    return (
-      <View className="flex-1 items-center justify-center">
-        <ActivityIndicator color={BRAND_COLOR} size="large" />
-      </View>
-    );
-  }
-
-  if (messages.length === 0) {
-    return (
-      <EmptyState
-        icon="message-square"
-        title="Say hi"
-        message="Send your first message to start the conversation."
-      />
-    );
-  }
-
-  return (
+  const renderList = () => (
     <View style={{ flex: 1 }}>
       <FlatList
         ref={listRef}
@@ -434,13 +421,7 @@ export default function MessageList({
             </View>
           ) : null
         }
-        ListFooterComponent={
-          loadingMore ? (
-            <View className="py-3 items-center">
-              <ActivityIndicator color={BRAND_COLOR} size="small" />
-            </View>
-          ) : null
-        }
+        ListFooterComponent={null}
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingVertical: 12 }}
         keyboardShouldPersistTaps="handled"
@@ -478,4 +459,33 @@ export default function MessageList({
       )}
     </View>
   );
+
+  // Messages are the priority — even on the first frame of a reopen they
+  // render immediately, so no skeleton/"Say hi" can flash over real content.
+  if (messages.length > 0) {
+    return renderList();
+  }
+
+  // Instagram-style skeleton: only on the very first time opening this chat.
+  if (showSkeleton) {
+    return <MessageSkeleton />;
+  }
+
+  if (!initialized) {
+    // Brief window before the cache read resolves on a REOPEN (already seen
+    // this session) — render nothing so no misleading empty state appears.
+    return <View className="flex-1" />;
+  }
+
+  if (messages.length === 0) {
+    return (
+      <EmptyState
+        icon="message-square"
+        title="Say hi"
+        message="Send your first message to start the conversation."
+      />
+    );
+  }
+
+  return renderList();
 }

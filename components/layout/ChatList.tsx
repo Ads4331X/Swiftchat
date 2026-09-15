@@ -1,4 +1,3 @@
-import { View } from "react-native";
 import { useState, useEffect } from "react";
 import SkeletonLoader from "./SkeletonLoader";
 import EmptyState from "@/components/ui/EmptyState";
@@ -12,7 +11,7 @@ import {
   listenForTyping,
   listenForStopTyping,
 } from "@/lib/socket";
-
+import { View } from "react-native";
 type ChatListProps = {
   filteredMode: ChatCategory;
   chats: Chat[];

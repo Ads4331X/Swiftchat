@@ -67,6 +67,10 @@ const STATEMENTS = [
     conversationId INTEGER PRIMARY KEY,
     messageId INTEGER NOT NULL
   );`,
+  `CREATE TABLE IF NOT EXISTS ConversationKey (
+    conversationId INTEGER PRIMARY KEY,
+    keyBase64 TEXT NOT NULL
+  );`,
 ];
 
 async function openDbOnce(): Promise<SQLite.SQLiteDatabase | null> {
@@ -869,5 +873,51 @@ export async function clearConversationPreview(conversationId: number) {
     );
   } catch (err) {
     console.warn("clearConversationPreview skipped:", err);
+  }
+}
+
+export async function getConversationKeyCache(
+  conversationId: number,
+): Promise<string | null> {
+  try {
+    const db = await getDb();
+    if (!db) return null;
+    const row = await db.getFirstAsync<{ keyBase64: string }>(
+      `SELECT keyBase64 FROM ConversationKey WHERE conversationId = ?`,
+      [conversationId],
+    );
+    return row?.keyBase64 ?? null;
+  } catch (err) {
+    console.warn("getConversationKeyCache skipped:", err);
+    return null;
+  }
+}
+
+export async function setConversationKeyCache(
+  conversationId: number,
+  keyBase64: string,
+) {
+  try {
+    const db = await getDb();
+    if (!db) return;
+    await db.runAsync(
+      `INSERT OR REPLACE INTO ConversationKey (conversationId, keyBase64) VALUES (?, ?)`,
+      [conversationId, keyBase64],
+    );
+  } catch (err) {
+    console.warn("setConversationKeyCache skipped:", err);
+  }
+}
+
+export async function clearConversationKeyCache(conversationId: number) {
+  try {
+    const db = await getDb();
+    if (!db) return;
+    await db.runAsync(
+      `DELETE FROM ConversationKey WHERE conversationId = ?`,
+      [conversationId],
+    );
+  } catch (err) {
+    console.warn("clearConversationKeyCache skipped:", err);
   }
 }

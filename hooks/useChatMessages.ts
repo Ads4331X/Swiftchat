@@ -32,6 +32,11 @@ import {
   releaseFlushLock,
 } from "@/lib/pendingSync";
 import { onChatCleared } from "@/lib/clearChat";
+import {
+  hasSeenConversation,
+  isConversationSeen,
+  markConversationSeen,
+} from "@/lib/conversationSeen";
 
 export type MessageReaction = {
   emoji: string;
@@ -114,16 +119,36 @@ export default function useChatMessages(
   decryptedConversationKey: Uint8Array | undefined,
 ) {
   const [messages, setMessages] = useState<Message[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [initialized, setInitialized] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
+  const [firstLoad, setFirstLoad] = useState(
+    () => !hasSeenConversation(Number(id)),
+  );
+  // Skeleton only on the very first time this conversation is ever opened on
+  // this device. On native the persisted "seen" flag loads asynchronously, so
+  // resolve it here too after the store is read.
+  useEffect(() => {
+    let active = true;
+    isConversationSeen(Number(id)).then((seen) => {
+      if (!active) return;
+      setFirstLoad(!seen);
+    });
+    return () => {
+      active = false;
+    };
+  }, [id]);
+  const showSkeleton = firstLoad && !initialized;
   const tempIdRef = useRef(-1);
   const fetchedServerRef = useRef(false);
-  // Tracks the currently shown list so re-effects (e.g. the conversation key
-  // reference changing) don't flip the full-screen spinner on over content
-  // that is already on screen.
-  const messagesRef = useRef(messages);
-  messagesRef.current = messages;
+
+  // Once this conversation has actually loaded, remember it so later opens
+  // (even after an app restart/reload) skip the skeleton.
+  useEffect(() => {
+    if (initialized) {
+      markConversationSeen(Number(id));
+    }
+  }, [initialized, id]);
   // Keep the latest currentUserId available to socket listeners whose effect
   // doesn't re-run when the user id arrives asynchronously.
   const currentUserIdRef = useRef(currentUserId);
@@ -169,6 +194,10 @@ export default function useChatMessages(
   // Unchanged messages keep their previous object reference so memoized
   // bubbles skip re-rendering (no full-list flash on flush).
   const reconcileMessages = useCallback(async () => {
+    // No key yet (still loading on mount) — don't render the cache as
+    // "[Encrypted Message]" placeholders; the real load decrypts properly.
+    if (!decryptedConversationKey) return;
+
     const cache = await readMsgsPaginated({
       conversationId: Number(id),
       limit: 200,
@@ -272,7 +301,6 @@ export default function useChatMessages(
 
     if (!decryptedConversationKey) {
       setMessages([]);
-      setLoading(true);
       setHasMore(false);
       return;
     }
@@ -452,9 +480,6 @@ export default function useChatMessages(
       );
 
       const getMessages = async () => {
-        if (messagesRef.current.length === 0) {
-          setLoading(true);
-        }
         try {
           // 1. Load from local cache first (instant display < 10ms)
           try {
@@ -474,8 +499,10 @@ export default function useChatMessages(
 
               if (active && decryptedCache.length > 0) {
                 setMessages(decryptedCache);
-                setLoading(false); // <--- Instant WhatsApp-style local rendering!
               }
+            }
+            if (active) {
+              setInitialized(true); // local cache read — we know the real state
             }
           } catch {
             // cache unavailable
@@ -516,7 +543,6 @@ export default function useChatMessages(
               );
               return [...localOnly, ...merged];
             });
-            setLoading(false);
           }
 
           // 4. Save server messages to local cache
@@ -548,7 +574,7 @@ export default function useChatMessages(
           console.warn("Error fetching server messages:", err);
         } finally {
           if (active) {
-            setLoading(false);
+            setInitialized(true);
           }
         }
       };
@@ -1029,7 +1055,8 @@ export default function useChatMessages(
 
   return {
     messages,
-    loading,
+    showSkeleton,
+    initialized,
     loadingMore,
     hasMore,
     sendMessage,

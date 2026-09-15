@@ -68,9 +68,12 @@ export default function useChats() {
     try {
       const currentUserId = await getCurrentUserId();
 
-      /*
-       * 1. Load local conversations first
-       */
+/*
+     * 1. Load local conversations first (only on the initial load — on
+     *    later refetches we already have the server-ordered list on screen,
+     *    and swapping in the cache order would visibly rearrange the list).
+     */
+    if (!hasLoadedRef.current) {
       try {
         const cache = await getConversations();
 
@@ -81,6 +84,7 @@ export default function useChats() {
       } catch {
         // Local cache unavailable.
       }
+    }
 
       /*
        * 2. Get conversations from server

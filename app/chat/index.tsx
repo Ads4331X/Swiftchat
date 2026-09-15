@@ -3,7 +3,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useTheme } from "@/constants/theme-provider";
 import PillsNav, { ChatCategory } from "@/components/layout/PillsNav";
 import { useCallback, useRef, useState } from "react";
-import { ScrollView, View } from "react-native";
+import { ScrollView, RefreshControl, View } from "react-native";
 import ChatList from "@/components/layout/ChatList";
 import NewChatFab from "@/components/chat/new-chat/NewChatFab";
 import NewChatSheet from "@/components/chat/new-chat/NewChatSheet";
@@ -19,6 +19,15 @@ export default function Chat() {
   const { colors } = useTheme();
   const bottomSheetRef = useRef<BottomSheet>(null);
   const { chats, loading, refetch, clearChat } = useChats();
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refetch();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refetch]);
   const {
     needsPin,
     pinMode,
@@ -49,12 +58,14 @@ export default function Chat() {
       />
 
       <ScrollView
-        className="flex-1"
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{
           paddingBottom: 120,
+          flexGrow: 1,
         }}
-        removeClippedSubviews={true}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
       >
         <ChatList
           filteredMode={activeChatCategory}

@@ -10,7 +10,16 @@ import {
   setPrivateKey,
   setPublicKey,
 } from "./secureStorage";
+import {
+  getConversationKeyCache,
+  setConversationKeyCache,
+} from "./db";
 const sodium = (sodiumModule as any).default ?? sodiumModule;
+
+// In-memory conversation key cache so re-opening a chat is instant (no
+// network round-trip to fetch/decrypt the key again). Persisted to SQLite as
+// a fast fallback on next launch.
+const conversationKeyCache = new Map<string, Uint8Array>();
 
 /**
  * Key names in secure storage are scoped to the CURRENT logged-in user so that
@@ -272,6 +281,22 @@ export async function getOrCreateConversationKey(
   conversationId: string,
   memberIds: number[],
 ) {
+  // 0. Instant fast path — key already decrypted in this session.
+  const cached = conversationKeyCache.get(conversationId);
+  if (cached) return cached;
+
+  // 0b. Quick fallback — key decrypted on a previous session.
+  const persisted = await getConversationKeyCache(Number(conversationId));
+  if (persisted) {
+    try {
+      const key = Base64.toUint8Array(persisted);
+      conversationKeyCache.set(conversationId, key);
+      return key;
+    } catch {
+      // corrupt cache row — ignore
+    }
+  }
+
   // 1. Try to fetch an existing key for this conversation
   const { encryptedConversationKey, nonce, createdById } =
     await getEncryptedConversationKey(conversationId);
@@ -299,6 +324,11 @@ export async function getOrCreateConversationKey(
             ),
           });
 
+          conversationKeyCache.set(conversationId, conversationKey);
+          setConversationKeyCache(
+            Number(conversationId),
+            Base64.fromUint8Array(conversationKey),
+          ).catch(() => {});
           return conversationKey;
         }
       } catch {
@@ -339,6 +369,12 @@ export async function getOrCreateConversationKey(
       nonce: Base64.fromUint8Array(keyNonce),
     });
   }
+
+  conversationKeyCache.set(conversationId, conversationKey);
+  setConversationKeyCache(
+    Number(conversationId),
+    Base64.fromUint8Array(conversationKey),
+  ).catch(() => {});
 
   return conversationKey;
 }

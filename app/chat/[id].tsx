@@ -84,7 +84,8 @@ export default function UserChat() {
   );
   const {
     messages,
-    loading,
+    showSkeleton,
+    initialized,
     loadingMore,
     hasMore,
     sendMessage,
@@ -313,7 +314,8 @@ export default function UserChat() {
       )}
       <MessageList
         messages={messages}
-        loading={loading}
+        showSkeleton={showSkeleton}
+        initialized={initialized}
         loadingMore={loadingMore}
         hasMore={hasMore}
         currentUserId={currentUserId}

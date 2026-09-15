@@ -1,5 +1,6 @@
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { memo } from "react";
+import Feather from "@expo/vector-icons/Feather";
 import { useTheme } from "@/constants/theme-provider";
 import { BRAND_COLOR } from "@/constants/theme";
 import ReanimatedSwipeable from "react-native-gesture-handler/ReanimatedSwipeable";
@@ -9,6 +10,8 @@ import Reanimated, {
 } from "react-native-reanimated";
 
 const ONLINE_COLOR = "#25D366";
+const CLEAR_ACTION_COLOR = "#E5484D";
+const CLEAR_ACTION_WIDTH = 96;
 
 type ChatCardProps = {
   username: string;
@@ -75,24 +78,20 @@ export default memo(function ChatCard({
 }: ChatCardProps) {
   const { colors, subtleText, dividerColor } = useTheme();
 
-  function RightAction(prog: SharedValue<number>, drag: SharedValue<number>) {
-    const styleAnimation = useAnimatedStyle(() => {
-      console.log("showRightProgress:", prog.value);
-      console.log("appliedTranslation:", drag.value);
-
-      return {
-        transform: [{ translateX: drag.value + 60 }],
-        backgroundColor: "red",
-      };
-    });
+  function RightAction(prog: SharedValue<number>) {
+    const opacity = useAnimatedStyle(() => ({ opacity: prog.value }));
 
     return (
-      <Reanimated.View style={styleAnimation} className="p-2 m-2">
+      <Reanimated.View style={[styles.clearActionWrap, opacity]}>
         <Pressable
-          className="flex-1 justify-center items-center  "
           onPress={onClear}
+          style={({ pressed }) => [
+            styles.clearAction,
+            { opacity: pressed ? 0.7 : 1 },
+          ]}
         >
-          <Text style={{ color: colors.text }}>Clear Chat</Text>
+          <Feather name="trash-2" size={20} color="#fff" />
+          <Text style={styles.clearActionText}>Clear</Text>
         </Pressable>
       </Reanimated.View>
     );
@@ -177,4 +176,24 @@ export default memo(function ChatCard({
       </Pressable>
     </ReanimatedSwipeable>
   );
+});
+
+const styles = StyleSheet.create({
+  clearActionWrap: {
+    height: "100%",
+    width: CLEAR_ACTION_WIDTH,
+  },
+  clearAction: {
+    flex: 1,
+    borderRadius: 14,
+    backgroundColor: CLEAR_ACTION_COLOR,
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 6,
+  },
+  clearActionText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "600",
+  },
 });
