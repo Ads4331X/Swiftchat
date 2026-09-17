@@ -1,5 +1,5 @@
 import { Base64 } from "js-base64";
-import { getToken } from "@/lib/secureStorage";
+import { getToken } from "./token";
 
 export async function getCurrentUserId(): Promise<number | null> {
   const token = await getToken("token");

@@ -2,7 +2,7 @@ import axios from "axios";
 import Constants from "expo-constants";
 import { Platform } from "react-native";
 import { router } from "expo-router";
-import { getToken, removeToken } from "@/lib/secureStorage";
+import { getToken, removeToken } from "@/lib/auth";
 
 export function getBackendUrl(): string {
   let envUrl = process.env.EXPO_PUBLIC_BACKEND_URL;
@@ -73,7 +73,7 @@ api.interceptors.response.use(
       // in-flight requests from each firing a redirect.
       sessionExpiredHandled = true;
       await removeToken("token").catch(() => {});
-      const { disconnectSocket } = await import("./socket");
+      const { disconnectSocket } = await import("@/lib/socket");
       disconnectSocket();
       try {
         router.replace("/");
@@ -87,4 +87,3 @@ api.interceptors.response.use(
     return Promise.reject(error);
   },
 );
-

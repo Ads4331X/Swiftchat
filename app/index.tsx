@@ -1,7 +1,7 @@
 import WelcomePage from "@/components/WelcomePage";
 import SplashScreen from "@/components/SplashScreen";
 import PinModal from "@/components/security/PinModal";
-import { getToken } from "@/lib/secureStorage";
+import { getToken } from "@/lib/auth";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import { connectSocket } from "@/lib/socket";

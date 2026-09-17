@@ -1,7 +1,7 @@
 import { AppState } from "react-native";
 import NetInfo from "@react-native-community/netinfo";
 import { api } from "@/lib/api";
-import { getToken } from "@/lib/secureStorage";
+import { getToken } from "@/lib/auth";
 import {
   deletePendingMessage,
   getPendingMessages,

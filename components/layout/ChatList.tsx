@@ -5,7 +5,7 @@ import type { ChatCategory } from "./PillsNav";
 import type { Chat } from "@/hooks/useChats";
 import ChatCard from "./ChatCard";
 import { useRouter } from "expo-router";
-import { conversationDisplayName } from "@/lib/conversation";
+import { conversationDisplayName } from "@/lib/utils";
 import {
   joinConversation,
   listenForTyping,

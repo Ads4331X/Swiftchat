@@ -11,7 +11,7 @@ import BottomSheet from "@gorhom/bottom-sheet";
 import { useTheme } from "@/constants/theme-provider";
 import useChatMessages, { type Message } from "@/hooks/useChatMessages";
 import useChatParticipant from "@/hooks/useChatParticipant";
-import { conversationDisplayName } from "@/lib/conversation";
+import { conversationDisplayName } from "@/lib/utils";
 import useChatTyping from "@/hooks/useChatTyping";
 import { useKeySetup } from "@/hooks/useKeySetup";
 import ChatActions from "@/components/chat/ChatActions";

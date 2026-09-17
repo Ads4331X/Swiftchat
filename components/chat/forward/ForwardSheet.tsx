@@ -17,7 +17,7 @@ import NewChatSheetHeader from "@/components/chat/new-chat/NewChatSheetHeader";
 import EmptyState from "@/components/ui/EmptyState";
 import { BRAND_COLOR } from "@/constants/theme";
 import { useTheme } from "@/constants/theme-provider";
-import { conversationDisplayName } from "@/lib/conversation";
+import { conversationDisplayName } from "@/lib/utils";
 import { type Chat } from "@/hooks/useChats";
 import { type Message } from "@/hooks/useChatMessages";
 import { api } from "@/lib/api";
@@ -27,7 +27,7 @@ import {
   saveMessage,
   savePendingMessage,
 } from "@/lib/db";
-import { acquireFlushLock, releaseFlushLock } from "@/lib/pendingSync";
+import { acquireFlushLock, releaseFlushLock } from "@/lib/sync";
 import { encryptMessage, getOrCreateConversationKey } from "@/lib/crypto";
 
 type ForwardSheetProps = {

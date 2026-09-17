@@ -14,7 +14,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import Feather from "@expo/vector-icons/Feather";
 import { useTheme } from "@/constants/theme-provider";
 import { api } from "@/lib/api";
-import { removeToken } from "@/lib/secureStorage";
+import { removeToken } from "@/lib/auth";
 import { disconnectSocket } from "@/lib/socket";
 import Toast from "react-native-toast-message";
 import UserProfileCard from "@/components/profile/UserProfileCard";

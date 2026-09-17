@@ -16,7 +16,7 @@ import { useTheme } from "@/constants/theme-provider";
 import Toast from "react-native-toast-message";
 import { Image } from "expo-image";
 import AntDesign from "@expo/vector-icons/AntDesign";
-import { setToken } from "@/lib/secureStorage";
+import { setToken } from "@/lib/auth";
 import { connectSocket } from "@/lib/socket";
 import { useKeySetup } from "@/hooks/useKeySetup";
 import PinModal from "@/components/security/PinModal";

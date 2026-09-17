@@ -11,7 +11,7 @@ import {
   saveConversation,
   syncConversationsWithServer,
 } from "@/lib/db";
-import { clearChat as clearChatOnServer, onChatCleared } from "@/lib/clearChat";
+import { clearChat as clearChatOnServer, onChatCleared } from "@/lib/sync";
 import { getCurrentUserId } from "@/lib/auth";
 import { decryptMessage, getOrCreateConversationKey } from "@/lib/crypto";
 import NetInfo from "@react-native-community/netinfo";

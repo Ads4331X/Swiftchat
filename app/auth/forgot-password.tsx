@@ -9,7 +9,7 @@ import {
   Platform,
 } from "react-native";
 import { api } from "@/lib/api";
-import { useCooldown } from "@/lib/cooldown";
+import { useCooldown } from "@/lib/utils";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useForm, Controller } from "react-hook-form";
 import { router } from "expo-router";

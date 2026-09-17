@@ -14,7 +14,7 @@ import * as SystemUI from "expo-system-ui";
 import "react-native-reanimated";
 
 import Toast from "react-native-toast-message";
-import { toastConfig } from "@/lib/toastConfig";
+import { toastConfig } from "@/lib/utils";
 
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -24,7 +24,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 
 import { useEffect, useMemo } from "react";
-import { startPendingSync } from "@/lib/pendingSync";
+import { startPendingSync } from "@/lib/sync";
 
 function ToastProvider() {
   return (

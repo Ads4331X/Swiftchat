@@ -1,5 +1,5 @@
 import { Platform } from "react-native";
-import { getSetting, setSetting } from "./db";
+import { getSetting, setSetting } from "@/lib/db";
 
 /**
  * Tracks which conversations have already been opened & loaded at least once

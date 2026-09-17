@@ -24,7 +24,7 @@ import GroupMemberList, {
   type GroupMember,
 } from "@/components/profile/GroupMemberList";
 import { deleteConversation } from "@/lib/db";
-import { clearChat } from "@/lib/clearChat";
+import { clearChat } from "@/lib/sync";
 
 type User = {
   avatar?: string;

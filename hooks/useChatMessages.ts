@@ -30,13 +30,13 @@ import {
   flushPendingMessages,
   onPendingFlushed,
   releaseFlushLock,
-} from "@/lib/pendingSync";
-import { onChatCleared } from "@/lib/clearChat";
+} from "@/lib/sync";
+import { onChatCleared } from "@/lib/sync";
 import {
   hasSeenConversation,
   isConversationSeen,
   markConversationSeen,
-} from "@/lib/conversationSeen";
+} from "@/lib/sync";
 
 export type MessageReaction = {
   emoji: string;
