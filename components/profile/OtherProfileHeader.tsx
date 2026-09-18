@@ -84,28 +84,26 @@ export default function OtherProfileHeader({
         </Text>
       </View>
 
-      {!isGroup && (
-        <View className="flex-row justify-center gap-8 mt-6 px-5">
-          <HeaderAction
-            icon="video"
-            label="Video"
-            mutedColor={mutedColor}
-            onPress={onVideoCall}
-          />
-          <HeaderAction
-            icon="phone"
-            label="Audio"
-            mutedColor={mutedColor}
-            onPress={onAudioCall}
-          />
-          <HeaderAction
-            icon="search"
-            label="Search"
-            mutedColor={mutedColor}
-            onPress={onSearch}
-          />
-        </View>
-      )}
+      <View className="flex-row justify-center gap-8 mt-6 px-5">
+        <HeaderAction
+          icon="video"
+          label="Video"
+          mutedColor={mutedColor}
+          onPress={onVideoCall}
+        />
+        <HeaderAction
+          icon="phone"
+          label="Audio"
+          mutedColor={mutedColor}
+          onPress={onAudioCall}
+        />
+        <HeaderAction
+          icon="search"
+          label="Search"
+          mutedColor={mutedColor}
+          onPress={onSearch}
+        />
+      </View>
     </View>
   );
 }

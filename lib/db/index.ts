@@ -71,12 +71,13 @@ const STATEMENTS = [
     conversationId INTEGER PRIMARY KEY,
     keyBase64 TEXT NOT NULL
   );`,
-  `CREATE VIRTUAL TABLE MessageSearch
-    USING fts5(
-    messageId UNINDEXED,
-    content
-);`,
 ];
+
+let fts5Available = false;
+
+export function isFts5Available(): boolean {
+  return fts5Available;
+}
 
 async function openDbOnce(): Promise<SQLite.SQLiteDatabase | null> {
   const maxAttempts = isWeb ? 3 : 1;
@@ -93,6 +94,18 @@ async function openDbOnce(): Promise<SQLite.SQLiteDatabase | null> {
 
       for (const stmt of STATEMENTS) {
         await database.execAsync(stmt);
+      }
+      try {
+        await database.execAsync(
+          `CREATE VIRTUAL TABLE IF NOT EXISTS MessageSearch USING fts5(content);`,
+        );
+        fts5Available = true;
+      } catch (ftsErr) {
+        fts5Available = false;
+        console.warn(
+          "FTS5 SQLite extension is unavailable on this device/runtime. Local search will be disabled.",
+          ftsErr,
+        );
       }
       try {
         await database.execAsync(

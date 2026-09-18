@@ -308,3 +308,24 @@ export async function clearConversationPreview(conversationId: number) {
     console.warn("clearConversationPreview skipped:", err);
   }
 }
+
+export async function getConversationMemberIds(
+  conversationId: number,
+  currentUserId: number,
+) {
+  try {
+    const db = await getDb();
+    if (!db) return [];
+
+    const conversation = await db.getFirstAsync<{
+      otherUserId: number | null;
+    }>(`SELECT otherUserId FROM Conversation WHERE id = ?`, [conversationId]);
+
+    if (!conversation?.otherUserId) return [];
+
+    return [currentUserId, conversation.otherUserId];
+  } catch (err) {
+    console.warn("getConversationMemberIds skipped:", err);
+    return [];
+  }
+}

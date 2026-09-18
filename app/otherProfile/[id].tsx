@@ -427,7 +427,15 @@ export default function OtherProfile() {
           }
           onVideoCall={() => console.log("Video call")}
           onAudioCall={() => console.log("Audio call")}
-          onSearch={() => console.log("Search in chat")}
+          onSearch={() => {
+            router.push({
+              pathname: "/otherProfile/Search",
+              params: {
+                conversationId: String(chatId),
+              },
+            });
+            console.log("Search in chat");
+          }}
         />
         <View
           style={{

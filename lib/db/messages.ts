@@ -1,3 +1,4 @@
+import { Message } from "@/hooks/useChatMessages";
 import { getDb } from "./index";
 
 type SaveMsgParams = {
@@ -221,6 +222,27 @@ export async function getPendingMessages(): Promise<PendingMessage[]> {
     `);
   } catch (err) {
     console.warn("getPendingMessages skipped:", err);
+    return [];
+  }
+}
+
+export async function getMessagesByIds({
+  messageIds,
+}: {
+  messageIds: number[];
+}) {
+  try {
+    const db = await getDb();
+    if (!db || messageIds.length === 0) return [];
+
+    const placeholders = messageIds.map(() => "?").join(",");
+
+    return await db.getAllAsync<Message>(
+      `SELECT * FROM Message WHERE id IN (${placeholders})`,
+      messageIds,
+    );
+  } catch (err) {
+    console.warn("getMessagesByIds skipped:", err);
     return [];
   }
 }

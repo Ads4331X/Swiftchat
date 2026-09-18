@@ -7,7 +7,6 @@ import { Controller, useForm } from "react-hook-form";
 import { useRef, useState } from "react";
 import { useRouter } from "expo-router";
 import { api } from "@/lib/api";
-import { getCurrentUserId } from "@/lib/auth";
 import NewChatSheetHeader from "./NewChatSheetHeader";
 import UsernameSearchInput from "./UsernameSearchInput";
 import SearchLoadingCard from "./SearchLoadingCard";

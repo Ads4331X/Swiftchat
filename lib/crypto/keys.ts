@@ -80,8 +80,17 @@ export type EnsureKeysResult =
 export async function ensureLocalKeys(): Promise<EnsureKeysResult> {
   const privateKeyName = await userKeyName("privateKey");
   const publicKeyName = await userKeyName("publicKey");
-  const privateKey = await getPrivateKey(privateKeyName);
-  const publicKey = await getPublicKey(publicKeyName);
+  let privateKey = await getPrivateKey(privateKeyName);
+  let publicKey = await getPublicKey(publicKeyName);
+
+  if (privateKey && !publicKey) {
+    try {
+      publicKey = await syncPublicKeyFromPrivateKey(
+        Base64.toUint8Array(privateKey),
+        publicKeyName,
+      );
+    } catch {}
+  }
 
   if (privateKey && publicKey) {
     await api.put("/api/user/public-key", { publicKey }).catch(() => {});
@@ -132,8 +141,16 @@ export async function initializeKeys(pin: string) {
   let privateKey = await getPrivateKey(privateKeyName);
   let publicKey = await getPublicKey(publicKeyName);
 
+  if (privateKey && !publicKey) {
+    try {
+      publicKey = await syncPublicKeyFromPrivateKey(
+        Base64.toUint8Array(privateKey),
+        publicKeyName,
+      );
+    } catch {}
+  }
+
   if (privateKey && publicKey) {
-    await api.put("/api/user/public-key", { publicKey });
     return { publicKey, privateKey };
   }
 
@@ -142,15 +159,35 @@ export async function initializeKeys(pin: string) {
     throw new Error("Invalid recovery PIN");
   }
 
+  const derivedPublicKeyBytes = await derivePublicKeyFromPrivateKey(recovered);
+  const derivedPublicKey = Base64.fromUint8Array(derivedPublicKeyBytes);
+
+  let serverPublicKey: string | undefined;
+  try {
+    const details = await api.get("/api/user/user-details");
+    serverPublicKey = details.data?.publicKey ?? undefined;
+  } catch {
+    // network check optional
+  }
+
+  if (serverPublicKey && serverPublicKey !== derivedPublicKey) {
+    throw new Error(
+      "Restored identity key does not match the public key registered on the server.",
+    );
+  }
+
   await setPrivateKey(privateKeyName, Base64.fromUint8Array(recovered));
-  publicKey = await syncPublicKeyFromPrivateKey(recovered, publicKeyName);
+  await setPublicKey(publicKeyName, derivedPublicKey);
   privateKey = await getPrivateKey(privateKeyName);
+  publicKey = await getPublicKey(publicKeyName);
 
   if (!publicKey || !privateKey) {
     throw new Error("Failed to initialize encryption keys");
   }
 
-  await api.put("/api/user/public-key", { publicKey });
+  if (!serverPublicKey) {
+    await api.put("/api/user/public-key", { publicKey });
+  }
   return { publicKey, privateKey };
 }
 
@@ -207,6 +244,24 @@ export async function getEncryptedConversationKey(conversationId: string) {
     encryptedConversationKey: response.data.encryptedConversationKey,
     nonce: response.data.nonce,
     createdById: response.data.createdById,
+    // The member who actually generated/sealed the conversation key. Not the
+    // same as createdById when a non-creator opened the chat first. All copies
+    // are sealed with THIS member's private key, so every device must open its
+    // copy using this member's public key.
+    keyCreatedById: response.data.keyCreatedById ?? null,
+    senderUserId: response.data.senderUserId ?? response.data.createdById ?? null,
+  };
+}
+
+/**
+ * First device to open a conversation claims the right to generate its key.
+ * The server returns 409 with `claimed: false` if another device won.
+ */
+export async function claimConversationKey(conversationId: string) {
+  const response = await api.post(`/api/conversations/${conversationId}/key`);
+  return {
+    claimed: Boolean(response.data?.claimed),
+    keyCreatedById: response.data?.keyCreatedById ?? null,
   };
 }
 
@@ -270,61 +325,51 @@ export async function getOrCreateConversationKey(
     }
   }
 
-  // 1. Try to fetch an existing key for this conversation
-  const { encryptedConversationKey, nonce, createdById } =
-    await getEncryptedConversationKey(conversationId);
-
   const privateKeyName = await userKeyName("privateKey");
   const receiverPrivateKey = await getPrivateKey(privateKeyName);
-
-  // 2. If it already exists, attempt to decrypt it
-  if (encryptedConversationKey && nonce && createdById) {
-    if (receiverPrivateKey) {
-      try {
-        const senderPublicKeyResponse = await api.get(
-          `/api/user/${createdById}/public-key`,
-        );
-
-        if (senderPublicKeyResponse.data?.publicKey) {
-          const { conversationKey } = await decryptConversationKey({
-            encryptedConversationKey: Base64.toUint8Array(
-              encryptedConversationKey,
-            ),
-            nonce: Base64.toUint8Array(nonce),
-            receiverPrivateKey: Base64.toUint8Array(receiverPrivateKey),
-            senderPublicKey: Base64.toUint8Array(
-              senderPublicKeyResponse.data.publicKey,
-            ),
-          });
-
-          conversationKeyCache.set(conversationId, conversationKey);
-          setConversationKeyCache(
-            Number(conversationId),
-            Base64.fromUint8Array(conversationKey),
-          ).catch(() => {});
-          return conversationKey;
-        }
-      } catch {
-        console.warn(
-          `Could not decrypt existing conversation key for conversation ${conversationId}.`,
-        );
-      }
-    }
-
-    // The key exists but this device can't decrypt it (no private key, or the
-    // local keys don't match the conversation's members). NEVER regenerate it
-    // here — reassigning the key would orphan every previously-encrypted
-    // message for the OTHER members who can still decrypt. Only this device
-    // should see a placeholder until it restores its real private key.
-    return null;
-  }
-
-  // 3. Doesn't exist yet — generate one and distribute it to every member.
-  //    Only possible if we actually hold a private key to sign with.
   if (!receiverPrivateKey) {
+    // No private key on this device — can never decrypt messages.
     return null;
   }
 
+  // 1. Try to decrypt an existing key for this conversation.
+  const row = await getEncryptedConversationKey(conversationId);
+  if (row?.encryptedConversationKey && row?.nonce) {
+    return await openConversationKey({
+      conversationId,
+      row,
+      receiverPrivateKey,
+    });
+  }
+
+  // 2. No usable key yet — claim the right to generate one.
+  let claimed = false;
+  try {
+    const result = await claimConversationKey(conversationId);
+    claimed = result.claimed;
+  } catch (err: any) {
+    // 409 = another device generated (or is generating) the key.
+    if (err?.response?.status !== 409) {
+      console.warn("Failed to claim conversation key:", err);
+      return null;
+    }
+  }
+
+  // 3. Someone else won the race — fetch their key and open our copy.
+  if (!claimed) {
+    const winnerRow = await getEncryptedConversationKey(conversationId);
+    if (winnerRow?.encryptedConversationKey && winnerRow?.nonce) {
+      return await openConversationKey({
+        conversationId,
+        row: winnerRow,
+        receiverPrivateKey,
+      });
+    }
+    return null;
+  }
+
+  // 4. We won — generate the conversation key and seal a copy for every
+  //    member using OUR private key (the server records us as keyCreatedById).
   const conversationKey = await generateConversationKey();
 
   for (const memberId of memberIds) {
@@ -350,6 +395,62 @@ export async function getOrCreateConversationKey(
   ).catch(() => {});
 
   return conversationKey;
+}
+
+/**
+ * Tries to open this device's per-member copy of the conversation key using
+ * the public key of the member who actually generated/sealed it
+ * (`senderUserId`). Returns null when the copy can't be opened — messages must
+ * then render as "[Encrypted Message]" and the key must NEVER be regenerated
+ * here (that would orphan history for every other member).
+ */
+async function openConversationKey({
+  conversationId,
+  row,
+  receiverPrivateKey,
+}: {
+  conversationId: string;
+  row: {
+    encryptedConversationKey: string;
+    nonce: string;
+    senderUserId: number | null;
+    createdById: number | null;
+  };
+  receiverPrivateKey: string;
+}): Promise<Uint8Array | null> {
+  const senderUserId = row.senderUserId ?? row.createdById;
+  if (!senderUserId) {
+    console.warn(
+      `Conversation ${conversationId} has a key but no known sender.`,
+    );
+    return null;
+  }
+
+  try {
+    const senderPublicKeyResponse = await api.get(
+      `/api/user/${senderUserId}/public-key`,
+    );
+    if (!senderPublicKeyResponse.data?.publicKey) return null;
+
+    const { conversationKey } = await decryptConversationKey({
+      encryptedConversationKey: Base64.toUint8Array(row.encryptedConversationKey),
+      nonce: Base64.toUint8Array(row.nonce),
+      receiverPrivateKey: Base64.toUint8Array(receiverPrivateKey),
+      senderPublicKey: Base64.toUint8Array(senderPublicKeyResponse.data.publicKey),
+    });
+
+    conversationKeyCache.set(conversationId, conversationKey);
+    setConversationKeyCache(
+      Number(conversationId),
+      Base64.fromUint8Array(conversationKey),
+    ).catch(() => {});
+    return conversationKey;
+  } catch {
+    console.warn(
+      `Could not decrypt existing conversation key for conversation ${conversationId}.`,
+    );
+    return null;
+  }
 }
 
 export async function shareConversationKeyWithMembers({

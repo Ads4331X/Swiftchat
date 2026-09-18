@@ -37,6 +37,11 @@ import {
   isConversationSeen,
   markConversationSeen,
 } from "@/lib/sync";
+import {
+  indexMessage,
+  removeMessageFromSearch,
+  updateMessageInSearch,
+} from "@/lib/db/search";
 
 export type MessageReaction = {
   emoji: string;
@@ -331,7 +336,7 @@ export default function useChatMessages(
           lastMessageSentAt: newMessage.sentAt,
         }).catch(() => {});
 
-        saveMessage({
+        await saveMessage({
           messageId: newMessage.id,
           message: newMessage.text,
           sentAt: newMessage.sentAt,
@@ -347,6 +352,14 @@ export default function useChatMessages(
             : undefined,
           forwardedFromMsgId: newMessage.forwardedFromMsgId,
         }).catch(() => {});
+
+        // for searching index the db a new vtirual table using fts5
+        for (let decryptMsg of decryptNewMessage) {
+          await indexMessage({
+            messageId: decryptMsg.id,
+            content: decryptMsg.text,
+          });
+        }
 
         setMessages((currentMsg) => {
           if (currentMsg.some((message) => message.id === newMessage.id)) {
@@ -399,6 +412,13 @@ export default function useChatMessages(
             nonce: updatedMessage.nonce,
           }).catch(() => {});
 
+          for (let decryptMessage of decryptUpdatedMessage) {
+            updateMessageInSearch({
+              messageId: Number(decryptMessage.id),
+              content: decryptMessage.text,
+            });
+          }
+
           setMessages((currentMsg) =>
             currentMsg.map((current) =>
               current.id === message.id ? message : current,
@@ -410,6 +430,9 @@ export default function useChatMessages(
       const unsubscribeMessageDelete = listenForMessageDeletes(
         ({ id: deletedId }) => {
           deleteMsg({ messageId: Number(deletedId) }).catch(() => {});
+          removeMessageFromSearch({ messageId: Number(deletedId) }).catch(
+            () => {},
+          );
           setMessages((currentMsg) =>
             currentMsg.filter((message) => message.id !== Number(deletedId)),
           );
@@ -565,6 +588,12 @@ export default function useChatMessages(
             }).catch(() => {});
           });
 
+          for (let decryptMessage of decryptedServerMessages) {
+            await indexMessage({
+              messageId: decryptMessage.id,
+              content: decryptMessage.text,
+            });
+          }
           if (decryptedServerMessages.length < PAGE_SIZE) {
             setHasMore(false);
           }
@@ -654,6 +683,13 @@ export default function useChatMessages(
           forwardedFromMsgId: msg.forwardedFromMsgId,
         }).catch(() => {});
       });
+
+      for (let decryptMessage of decryptedOlderMessages) {
+        await indexMessage({
+          messageId: decryptMessage.id,
+          content: decryptMessage.text,
+        });
+      }
 
       if (decryptedOlderMessages.length < PAGE_SIZE) {
         setHasMore(false);
@@ -791,6 +827,12 @@ export default function useChatMessages(
             : undefined,
           forwardedFromMsgId: response.data.forwardedFromMsgId,
         });
+        for (let decryptMessage of decryptedResponse) {
+          await indexMessage({
+            messageId: decryptMessage.id,
+            content: decryptMessage.text,
+          });
+        }
         await deletePendingMessage({ messageId: tempId });
       } catch (err) {
         console.error("Saved reply to server but failed to save locally:", err);
@@ -840,6 +882,11 @@ export default function useChatMessages(
       editedAt: String(new Date().toISOString()),
       message: encryptEditedMessage,
       nonce: editedNonce,
+    });
+
+    await updateMessageInSearch({
+      messageId: Number(messageId),
+      content: text,
     });
   };
 
@@ -910,6 +957,7 @@ export default function useChatMessages(
     if (numericId < 0) {
       await deletePendingMessage({ messageId: numericId }).catch(() => {});
       await deleteMsg({ messageId: numericId }).catch(() => {});
+      await removeMessageFromSearch({ messageId: numericId }).catch(() => {});
       setMessages((prev) => prev.filter((m) => m.id !== numericId));
       return;
     }
@@ -945,6 +993,7 @@ export default function useChatMessages(
       }
     } finally {
       await deleteMsg({ messageId: numericId }).catch(() => {});
+      await removeMessageFromSearch({ messageId: numericId }).catch(() => {});
       removeLocalMessage();
     }
   };
@@ -1020,6 +1069,13 @@ export default function useChatMessages(
             : undefined,
           forwardedFromMsgId: response.data.forwardedFromMsgId,
         });
+
+        for (let decryptMessage of decryptedResponse) {
+          await indexMessage({
+            messageId: decryptMessage.id,
+            content: decryptMessage.text,
+          });
+        }
         await deletePendingMessage({ messageId: tempId });
       } catch (err) {
         console.error("Saved to server but failed to save locally:", err);

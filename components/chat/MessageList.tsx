@@ -1,9 +1,4 @@
-import {
-  FlatList,
-  Pressable,
-  Text,
-  View,
-} from "react-native";
+import { FlatList, Pressable, Text, View } from "react-native";
 import { type RefObject, useCallback, useMemo, useRef, useState } from "react";
 import Feather from "@expo/vector-icons/Feather";
 import { type Message, type RepliedTo } from "@/hooks/useChatMessages";
@@ -81,6 +76,26 @@ export default function MessageList({
   const [readersByMessage, setReadersByMessage] = useState<
     Record<number, Set<number>>
   >({});
+
+  useEffect(() => {
+    if (!scrollToMessageRef) return;
+
+    scrollToMessageRef.current = (messageId: number) => {
+      const index = messages.findIndex((message) => message.id === messageId);
+
+      if (index === -1) return;
+
+      listRef.current?.scrollToIndex({
+        index,
+        animated: true,
+        viewPosition: 0.5,
+      });
+    };
+
+    return () => {
+      scrollToMessageRef.current = null;
+    };
+  }, [messages]);
 
   const { refetch } = useChats();
   // Lookup sender display names/avatars for group bubbles & typing indicator.

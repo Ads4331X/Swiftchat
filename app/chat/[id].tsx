@@ -21,6 +21,7 @@ import MessageList from "@/components/chat/MessageList";
 import ForwardSheet from "@/components/chat/forward/ForwardSheet";
 import PinModal from "@/components/security/PinModal";
 import { listenForGroupDelete } from "@/lib/socket";
+import { onScrollToMessage } from "@/lib/sync/scrollToMessage";
 import {
   deletePinnedMessageLocal,
   getPinnedMessageLocal,
@@ -37,12 +38,14 @@ type Position = {
 };
 
 export default function UserChat() {
-  const { id, username, avatarUrl, memberIds } = useLocalSearchParams<{
-    id: string;
-    username?: string;
-    avatarUrl?: string;
-    memberIds?: string;
-  }>();
+  const { id, username, avatarUrl, memberIds, messageId } =
+    useLocalSearchParams<{
+      id: string;
+      username?: string;
+      avatarUrl?: string;
+      memberIds?: string;
+      messageId?: string;
+    }>();
 
   const otherMemberIds = (memberIds ?? "")
     .split(",")
@@ -119,6 +122,28 @@ export default function UserChat() {
   const forwardSheetRef = useRef<BottomSheet>(null);
 
   useEffect(() => {
+    if (!messageId || messages.length === 0) return;
+
+    const timer = setTimeout(() => {
+      scrollToMessageRef.current?.(Number(messageId));
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, [messageId, messages]);
+
+  // A message-search screen can jump us here by emitting an event (then the
+  // search screen dismisses back into this already-mounted chat). Scroll to
+  // the target message whenever it's reported.
+  useEffect(() => {
+    return onScrollToMessage(({ conversationId, messageId }) => {
+      if (Number(conversationId) !== Number(id)) return;
+      setTimeout(() => {
+        scrollToMessageRef.current?.(Number(messageId));
+      }, 100);
+    });
+  }, [id]);
+
+  useEffect(() => {
     const unsubscribe = listenForGroupDelete(({ conversationId }) => {
       if (Number(conversationId) === Number(id)) {
         router.replace("/chat");
@@ -133,6 +158,8 @@ export default function UserChat() {
   // Fetch the pinned message banner once messages have loaded.
   useEffect(() => {
     if (pinnedFetchedRef.current || messages.length === 0) return;
+    const realMsg = messages.find((m) => m.id > 0);
+    if (!realMsg) return;
     pinnedFetchedRef.current = true;
     (async () => {
       const local = await getPinnedMessageLocal(Number(id));
@@ -141,10 +168,8 @@ export default function UserChat() {
         return;
       }
       try {
-        const newest = messages[messages.length - 1];
-        if (!newest) return;
         const res = await api.get(
-          `/api/conversations/${id}/messages/${newest.id}/pin`,
+          `/api/conversations/${id}/messages/${realMsg.id}/pin`,
         );
         const list = Array.isArray(res.data) ? res.data : [];
         if (list.length) {
@@ -212,7 +237,7 @@ export default function UserChat() {
   };
 
   const handlePin = async () => {
-    if (!selectedMessage) return;
+    if (!selectedMessage || selectedMessage.id <= 0) return;
     setPinnedMessageId(selectedMessage.id);
     savePinnedMessage({
       conversationId: Number(id),
@@ -231,13 +256,11 @@ export default function UserChat() {
     if (pinnedMsg) scrollToMessageRef.current?.(pinnedMsg.id);
   };
   const unPinMsg = async () => {
-    if (!pinnedMsg) return;
+    if (!pinnedMsg || pinnedMsg.id <= 0) return;
     setPinnedMessageId(null);
     deletePinnedMessageLocal({ conversationId: Number(id) });
     try {
-      await api.delete(
-        `/api/conversations/${id}/messages/${pinnedMsg.id}/pin`,
-      );
+      await api.delete(`/api/conversations/${id}/messages/${pinnedMsg.id}/pin`);
     } catch {
       // banner already cleared locally
     }

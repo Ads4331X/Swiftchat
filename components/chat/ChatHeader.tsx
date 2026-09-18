@@ -101,6 +101,19 @@ export default function ChatHeader({
         ) : null}
       </Pressable>
       <View className="flex-row items-center gap-4">
+        <Pressable
+          onPress={() => {
+            router.push({
+              pathname: "/otherProfile/Search",
+              params: {
+                conversationId: chatId,
+              },
+            });
+          }}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Feather name="search" size={22} color={BRAND_COLOR} />
+        </Pressable>
         <Pressable>
           <Feather name="phone" size={22} color={BRAND_COLOR} />
         </Pressable>
