@@ -42,8 +42,14 @@ export default function MemberPicker({
   onSearch,
   onSelectionChange,
 }: MemberPickerProps) {
-  const { colors, subtleText, inputBg, inputBorderColor, placeholderColor, dividerColor } =
-    useTheme();
+  const {
+    colors,
+    subtleText,
+    inputBg,
+    inputBorderColor,
+    placeholderColor,
+    dividerColor,
+  } = useTheme();
 
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<PickedMember[]>([]);
@@ -55,7 +61,10 @@ export default function MemberPicker({
   const toggleMember = (user: MemberSearchUser) => {
     const next = isSelected(user.id)
       ? selected.filter((m) => m.id !== user.id)
-      : [...selected, { id: user.id, username: user.username, avatar: user.avatar }];
+      : [
+          ...selected,
+          { id: user.id, username: user.username, avatar: user.avatar },
+        ];
 
     setSelected(next);
     onSelectionChange(next);
@@ -145,6 +154,7 @@ export default function MemberPicker({
                   username={member.username}
                   avatarUrl={member.avatar}
                   size={48}
+                  userId={Number(member.id)}
                 />
                 <Pressable
                   onPress={() => removeMember(member.id)}
@@ -210,6 +220,7 @@ export default function MemberPicker({
                     username={user.username}
                     avatarUrl={user.avatar}
                     size={44}
+                    userId={Number(user.id)}
                   />
                   <View className="flex-1">
                     <Text
@@ -251,18 +262,15 @@ export default function MemberPicker({
           </ScrollView>
         )}
 
-        {!loading &&
-          !errorMessage &&
-          visibleUsers.length === 0 &&
-          searched && (
-            <View className="mt-6">
-              <EmptyState
-                icon="user-x"
-                title="No users found"
-                message="Try a different username."
-              />
-            </View>
-          )}
+        {!loading && !errorMessage && visibleUsers.length === 0 && searched && (
+          <View className="mt-6">
+            <EmptyState
+              icon="user-x"
+              title="No users found"
+              message="Try a different username."
+            />
+          </View>
+        )}
 
         {!loading &&
           !errorMessage &&

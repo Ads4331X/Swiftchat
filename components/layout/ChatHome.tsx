@@ -9,6 +9,7 @@ import { api } from "@/lib/api";
 type UserDetails = {
   username: string;
   avatarUrl?: string;
+  id: number;
 };
 
 export default function ChatHome() {
@@ -29,7 +30,12 @@ export default function ChatHome() {
     <View className="w-full">
       <View className="w-full px-4 flex-row items-center justify-between">
         <Pressable onPress={() => router.push("/usersetting")}>
-          <Avatar username={user?.username ?? "?"} avatarUrl={user?.avatarUrl} size={40} />
+          <Avatar
+            username={user?.username ?? "?"}
+            avatarUrl={user?.avatarUrl}
+            size={40}
+            userId={Number(user?.id)}
+          />
         </Pressable>
 
         <Text className="text-[#29A195] font-bold text-xl">SwiftChat</Text>

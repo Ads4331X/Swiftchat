@@ -66,6 +66,7 @@ export default function GroupMemberList({
               username={member.id === myId ? myName : member.username}
               avatarUrl={member.avatar}
               size={40}
+              userId={Number(member.id)}
             />
             <Text
               style={{ color: colors.text }}
@@ -102,7 +103,10 @@ export default function GroupMemberList({
             backgroundColor: pressed ? faint : "transparent",
           })}
         >
-          <Text style={{ color: BRAND_COLOR }} className="text-[15px] font-medium">
+          <Text
+            style={{ color: BRAND_COLOR }}
+            className="text-[15px] font-medium"
+          >
             {showAll ? "Show less" : `See all ${memberCount} members`}
           </Text>
         </Pressable>

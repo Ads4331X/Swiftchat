@@ -5,12 +5,14 @@ type AvatarProps = {
   username: string;
   avatarUrl?: string;
   size?: number;
+  userId?: number;
 };
 
 export default function Avatar({
   username,
   avatarUrl,
   size = 48,
+  userId,
 }: AvatarProps) {
   const initial = username.charAt(0).toUpperCase() || "?";
 
@@ -33,9 +35,7 @@ export default function Avatar({
         backgroundColor: BRAND_COLOR,
       }}
     >
-      <Text
-        style={{ color: "#fff", fontSize: size * 0.4, fontWeight: "bold" }}
-      >
+      <Text style={{ color: "#fff", fontSize: size * 0.4, fontWeight: "bold" }}>
         {initial}
       </Text>
     </View>

@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from "react-native";
+import {
+  ActivityIndicator,
+  FlatList,
+  Pressable,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import Feather from "@expo/vector-icons/Feather";
 import { useTheme } from "@/constants/theme-provider";
 import { BRAND_COLOR } from "@/constants/theme";
@@ -154,11 +161,9 @@ export default function Search() {
     const userId = await getCurrentUserId();
     let memberIds = "";
     if (userId) {
-      memberIds = (await getConversationMemberIds(
-        Number(conversationId),
-        userId,
-      ))
-        .join(",");
+      memberIds = (
+        await getConversationMemberIds(Number(conversationId), userId)
+      ).join(",");
     }
     // dismissTo pops back to the existing chat if it's below in the stack;
     // otherwise it replaces this screen with a fresh chat (which scrolls via
@@ -342,63 +347,73 @@ export default function Search() {
           </Text>
         </View>
       )}
-      {hasSearched && !searching && searchResults.length > 0 && searchResults.map((result) => {
-        const user = userMap[result.senderId];
+      {hasSearched &&
+        !searching &&
+        searchResults.length > 0 &&
+        searchResults.map((result) => {
+          const user = userMap[result.senderId];
 
-        return (
-          <Pressable
-            onPress={() => navToMsg(result.id)}
-            key={result.id}
-            className="mx-4 mt-2 flex-row items-center rounded-xl px-3 py-3"
-            style={{
-              backgroundColor: inputBg,
-              borderWidth: 1,
-              borderColor: inputBorderColor,
-            }}
-          >
-            {/* Profile picture */}
-            <View
-              className="mr-3 h-11 w-11 items-center justify-center rounded-full"
-              style={{ backgroundColor: BRAND_COLOR }}
+          return (
+            <Pressable
+              onPress={() => navToMsg(result.id)}
+              key={result.id}
+              className="mx-4 mt-2 flex-row items-center rounded-xl px-3 py-3"
+              style={{
+                backgroundColor: inputBg,
+                borderWidth: 1,
+                borderColor: inputBorderColor,
+              }}
             >
-              <Avatar
-                username={user?.username ?? `User ${result.senderId}`}
-                avatarUrl={user?.avatarUrl ?? undefined}
-                size={38}
-              />
-            </View>
-
-            {/* Username + Message */}
-            <View className="mr-3 flex-1">
-              <Text
-                style={{ color: colors.icon }}
-                className="text-[12px]"
-                numberOfLines={2}
+              {/* Profile picture */}
+              <View
+                className="mr-3 h-11 w-11 items-center justify-center rounded-full"
+                style={{ backgroundColor: BRAND_COLOR }}
               >
-                {user?.username ?? `User ${result.senderId}`}
-              </Text>
-              <Text
-                style={{ color: colors.text }}
-                className="text-[16px]"
-                numberOfLines={2}
-              >
-                {highlightMatches(result.text)}
-              </Text>
-            </View>
+                <Avatar
+                  username={user?.username ?? `User ${result.senderId}`}
+                  avatarUrl={user?.avatarUrl ?? undefined}
+                  size={38}
+                  userId={Number(result.senderId)}
+                />
+              </View>
 
-            {/* Date */}
-            <View className="items-end">
-              <Text style={{ color: placeholderColor }} className="text-[11px]">
-                {formatSearchDate(result.sentAt).date}
-              </Text>
+              {/* Username + Message */}
+              <View className="mr-3 flex-1">
+                <Text
+                  style={{ color: colors.icon }}
+                  className="text-[12px]"
+                  numberOfLines={2}
+                >
+                  {user?.username ?? `User ${result.senderId}`}
+                </Text>
+                <Text
+                  style={{ color: colors.text }}
+                  className="text-[16px]"
+                  numberOfLines={2}
+                >
+                  {highlightMatches(result.text)}
+                </Text>
+              </View>
 
-              <Text style={{ color: placeholderColor }} className="text-[11px]">
-                {formatSearchDate(result.sentAt).time}
-              </Text>
-            </View>
-          </Pressable>
-        );
-      })}
+              {/* Date */}
+              <View className="items-end">
+                <Text
+                  style={{ color: placeholderColor }}
+                  className="text-[11px]"
+                >
+                  {formatSearchDate(result.sentAt).date}
+                </Text>
+
+                <Text
+                  style={{ color: placeholderColor }}
+                  className="text-[11px]"
+                >
+                  {formatSearchDate(result.sentAt).time}
+                </Text>
+              </View>
+            </Pressable>
+          );
+        })}
     </View>
   );
 }

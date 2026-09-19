@@ -54,7 +54,12 @@ export default function ChatHeader({
       >
         <Feather name="arrow-left" size={24} color={textColor} />
       </Pressable>
-      <Avatar username={username ?? "?"} avatarUrl={avatarUrl} size={34} />
+      <Avatar
+        username={username ?? "?"}
+        avatarUrl={avatarUrl}
+        size={34}
+        userId={Number(userId)}
+      />
       <Pressable
         onPress={() => {
           if (isGroup) {

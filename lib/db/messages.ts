@@ -1,4 +1,4 @@
-import { Message } from "@/hooks/useChatMessages";
+import { Message } from "@/types/message";
 import { getDb } from "./index";
 
 type SaveMsgParams = {

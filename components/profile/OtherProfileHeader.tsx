@@ -59,7 +59,7 @@ export default function OtherProfileHeader({
             <Feather name="users" size={34} color={BRAND_COLOR} />
           </View>
         ) : (
-          <Avatar username={username ?? "?"} avatarUrl={avatar} size={76} />
+          <Avatar username={username ?? "?"} avatarUrl={avatar} size={76}  />
         )}
         <View className="flex-row items-center gap-1 mt-2">
           <Text

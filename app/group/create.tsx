@@ -251,6 +251,7 @@ export default function CreateGroup() {
                           username={member.username}
                           avatarUrl={member.avatar}
                           size={48}
+                          userId={Number(member.id)}
                         />
                         <Text
                           numberOfLines={1}

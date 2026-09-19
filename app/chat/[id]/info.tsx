@@ -89,7 +89,12 @@ function MemberRows({
             borderBottomColor: dividerColor,
           }}
         >
-          <Avatar username={m.name} avatarUrl={m.avatar} size={40} />
+          <Avatar
+            username={m.name}
+            avatarUrl={m.avatar}
+            size={40}
+            userId={Number(m.id)}
+          />
           <Text
             style={{ color: colors.text }}
             className="flex-1 ml-3 text-[15px]"
