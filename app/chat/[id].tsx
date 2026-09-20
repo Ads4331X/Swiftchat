@@ -29,6 +29,7 @@ import {
 } from "@/lib/db";
 import PinnedMessages from "@/components/chat/PinnedMessages";
 import { api } from "@/lib/api";
+import { formatPresence } from "@/lib/utils/formatPresence";
 
 type Position = {
   pageX: number;
@@ -323,6 +324,12 @@ export default function UserChat() {
         dividerColor={dividerColor}
         backgroundColor={colors.background}
         chatId={id}
+        presence={
+          isGroup
+            ? `${memberCount} members`
+            : formatPresence(otherUser?.lastSeen)
+        }
+        isOnline={!isGroup && otherUser?.lastSeen === null}
         memberIds={isGroup ? memberIds : undefined}
       />
       {pinnedMsg && (

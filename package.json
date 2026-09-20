@@ -12,8 +12,10 @@
     "postinstall": "patch-package"
   },
   "dependencies": {
+    "@animatereactnative/marquee": "^0.5.2",
     "@expo/vector-icons": "^15.0.3",
     "@gorhom/bottom-sheet": "^5.2.14",
+    "@homielab/react-native-auto-scroll": "^1.1.2",
     "@react-native-community/netinfo": "11.4.1",
     "@react-navigation/bottom-tabs": "^7.4.0",
     "@react-navigation/elements": "^2.6.3",
@@ -46,6 +48,7 @@
     "react-dom": "19.1.0",
     "react-hook-form": "^7.85.0",
     "react-native": "0.81.5",
+    "react-native-auto-scrolling": "^3.0.2",
     "react-native-gesture-handler": "~2.28.0",
     "react-native-keyboard-controller": "1.18.5",
     "react-native-libsodium": "^1.7.0",

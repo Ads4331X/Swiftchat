@@ -4,6 +4,10 @@ import { getBackendUrl } from "@/lib/api";
 
 let Socket: SocketType | null = null;
 
+const presenceListeners = new Set<
+  (data: { userId: number; lastSeen: string | null }) => void
+>();
+
 export function getSocket(): SocketType | null {
   return Socket;
 }
@@ -27,6 +31,7 @@ export async function connectSocket() {
 
   Socket.on("connect", () => {
     console.log("Socket connected:", Socket?.id);
+    presenceListeners.forEach((callback) => Socket?.on("presence", callback));
   });
 }
 
@@ -43,4 +48,16 @@ export function joinConversations(ids: number[]) {
 export function disconnectSocket() {
   Socket?.disconnect();
   Socket = null;
+}
+
+export function listenForPresence(
+  callback: (data: { userId: number; lastSeen: string | null }) => void,
+) {
+  presenceListeners.add(callback);
+  Socket?.on("presence", callback);
+
+  return () => {
+    presenceListeners.delete(callback);
+    Socket?.off("presence", callback);
+  };
 }

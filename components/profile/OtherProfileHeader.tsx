@@ -8,8 +8,10 @@ type OtherProfileHeaderProps = {
   isGroup?: boolean;
   username?: string;
   avatar?: string;
+  userId?: number;
   subtitle?: string;
   presence: string;
+  isOnline?: boolean;
   textColor: string;
   mutedColor: string;
   onEditName?: () => void;
@@ -22,8 +24,10 @@ export default function OtherProfileHeader({
   isGroup = false,
   username,
   avatar,
+  userId,
   subtitle,
   presence,
+  isOnline = false,
   textColor,
   mutedColor,
   onEditName,
@@ -59,7 +63,13 @@ export default function OtherProfileHeader({
             <Feather name="users" size={34} color={BRAND_COLOR} />
           </View>
         ) : (
-          <Avatar username={username ?? "?"} avatarUrl={avatar} size={76}  />
+          <Avatar
+            username={username ?? "?"}
+            avatarUrl={avatar}
+            size={76}
+            userId={isGroup ? undefined : userId}
+            isOnline={isOnline}
+          />
         )}
         <View className="flex-row items-center gap-1 mt-2">
           <Text

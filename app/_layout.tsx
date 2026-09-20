@@ -19,6 +19,7 @@ import { toastConfig } from "@/lib/utils";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { AppThemeProvider, useTheme } from "@/constants/theme-provider";
+import { PresenceProvider } from "@/constants/presence-provider";
 
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
@@ -106,9 +107,11 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <AppThemeProvider>
-          <KeyboardProvider>
-            <AppNavigator />
-          </KeyboardProvider>
+          <PresenceProvider>
+            <KeyboardProvider>
+              <AppNavigator />
+            </KeyboardProvider>
+          </PresenceProvider>
         </AppThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

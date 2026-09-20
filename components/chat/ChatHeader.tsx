@@ -16,6 +16,8 @@ type ChatHeaderProps = {
   backgroundColor: string;
   memberIds: string | undefined;
   chatId: string;
+  presence: string;
+  isOnline: boolean;
 };
 
 export default function ChatHeader({
@@ -29,6 +31,8 @@ export default function ChatHeader({
   backgroundColor,
   memberIds,
   chatId,
+  presence,
+  isOnline,
 }: ChatHeaderProps) {
   const router = useRouter();
   const { subtleText } = useTheme();
@@ -54,12 +58,15 @@ export default function ChatHeader({
       >
         <Feather name="arrow-left" size={24} color={textColor} />
       </Pressable>
+
       <Avatar
         username={username ?? "?"}
         avatarUrl={avatarUrl}
         size={34}
-        userId={Number(userId)}
+        userId={isGroup ? undefined : userId}
+        isOnline={isOnline}
       />
+
       <Pressable
         onPress={() => {
           if (isGroup) {
@@ -86,7 +93,7 @@ export default function ChatHeader({
             });
           }
         }}
-        className="flex-1"
+        className="flex-1 min-w-0"
       >
         <Text
           numberOfLines={1}
@@ -95,7 +102,16 @@ export default function ChatHeader({
         >
           {username || "Chat"}
         </Text>
-        {isGroup && memberCount ? (
+
+        {!isGroup ? (
+          <Text
+            numberOfLines={1}
+            style={{ color: subtleText }}
+            className="ml-3 text-xs"
+          >
+            {presence}
+          </Text>
+        ) : memberCount ? (
           <Text
             numberOfLines={1}
             style={{ color: subtleText }}
@@ -105,7 +121,8 @@ export default function ChatHeader({
           </Text>
         ) : null}
       </Pressable>
-      <View className="flex-row items-center gap-4">
+
+      <View className="flex-row items-center gap-4 ml-2">
         <Pressable
           onPress={() => {
             router.push({
@@ -119,10 +136,12 @@ export default function ChatHeader({
         >
           <Feather name="search" size={22} color={BRAND_COLOR} />
         </Pressable>
-        <Pressable>
+
+        <Pressable hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
           <Feather name="phone" size={22} color={BRAND_COLOR} />
         </Pressable>
-        <Pressable>
+
+        <Pressable hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
           <Feather name="video" size={24} color={BRAND_COLOR} />
         </Pressable>
       </View>

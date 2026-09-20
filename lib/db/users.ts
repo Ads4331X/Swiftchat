@@ -31,3 +31,16 @@ export async function upsertUser(
     console.warn("upsertUser skipped:", err);
   }
 }
+
+export async function setUserActive(userId: number, lastseen: Date | null) {
+  try {
+    const db = await getDb();
+    if (!db) return;
+    await db.runAsync(`UPDATE User SET lastseen = ? WHERE id = ?`, [
+      String(lastseen),
+      userId,
+    ]);
+  } catch (err) {
+    console.warn("setUserActive skipped:", err);
+  }
+}

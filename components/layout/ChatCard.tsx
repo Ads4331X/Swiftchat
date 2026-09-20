@@ -1,21 +1,22 @@
-import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { memo } from "react";
 import Feather from "@expo/vector-icons/Feather";
 import { useTheme } from "@/constants/theme-provider";
 import { BRAND_COLOR } from "@/constants/theme";
+import Avatar from "@/components/profile/Avatar";
 import ReanimatedSwipeable from "react-native-gesture-handler/ReanimatedSwipeable";
 import Reanimated, {
   SharedValue,
   useAnimatedStyle,
 } from "react-native-reanimated";
 
-const ONLINE_COLOR = "#25D366";
 const CLEAR_ACTION_COLOR = "#E5484D";
 const CLEAR_ACTION_WIDTH = 96;
 
 type ChatCardProps = {
   username: string;
   avatarUrl?: string;
+  userId?: number;
   lastMessage?: string;
   time?: string;
   unreadCount?: number;
@@ -26,47 +27,12 @@ type ChatCardProps = {
   showDivider?: boolean;
 };
 
-function Avatar({
-  username,
-  avatarUrl,
-  online,
-  ringColor,
-}: {
-  username: string;
-  avatarUrl?: string;
-  online?: boolean;
-  ringColor: string;
-}) {
-  const initial = username.charAt(0).toUpperCase();
-
-  return (
-    <View className="relative">
-      {avatarUrl ? (
-        <Image source={{ uri: avatarUrl }} className="w-12 h-12 rounded-full" />
-      ) : (
-        <View
-          className="w-12 h-12 rounded-full items-center justify-center"
-          style={{ backgroundColor: BRAND_COLOR }}
-        >
-          <Text className="text-white text-lg font-bold">{initial}</Text>
-        </View>
-      )}
-
-      {online && (
-        <View
-          className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2"
-          style={{ backgroundColor: ONLINE_COLOR, borderColor: ringColor }}
-        />
-      )}
-    </View>
-  );
-}
-
 const MemoizedAvatar = memo(Avatar);
 
 export default memo(function ChatCard({
   username,
   avatarUrl,
+  userId,
   lastMessage,
   time,
   unreadCount = 0,
@@ -112,7 +78,9 @@ export default memo(function ChatCard({
           <MemoizedAvatar
             username={username}
             avatarUrl={avatarUrl}
-            online={online}
+            userId={userId}
+            isOnline={online}
+            size={48}
             ringColor={colors.background}
           />
 

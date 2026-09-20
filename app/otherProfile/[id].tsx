@@ -11,7 +11,7 @@ import {
   View,
 } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { getCurrentUserId } from "@/lib/auth";
 import { BRAND_COLOR } from "@/constants/theme";
@@ -25,28 +25,15 @@ import GroupMemberList, {
 } from "@/components/profile/GroupMemberList";
 import { deleteConversation } from "@/lib/db";
 import { clearChat } from "@/lib/sync";
+import { formatPresence } from "@/lib/utils/formatPresence";
+import { listenForPresence } from "@/lib/socket";
+import { reportPresence } from "@/constants/presence-provider";
 
 type User = {
   avatar?: string;
   username: string;
-  lastSeen?: string;
+  lastSeen: string | null;
 };
-
-function formatPresence(lastSeen?: string) {
-  if (!lastSeen) return "Offline";
-
-  const lastSeenDate = new Date(lastSeen);
-  if (Number.isNaN(lastSeenDate.getTime())) return "Offline";
-  if (Date.now() - lastSeenDate.getTime() < 2 * 60 * 1000) return "Online";
-
-  return `Last online ${lastSeenDate.toLocaleDateString([], {
-    month: "short",
-    day: "numeric",
-  })} at ${lastSeenDate.toLocaleTimeString([], {
-    hour: "numeric",
-    minute: "2-digit",
-  })}`;
-}
 
 export default function OtherProfile() {
   const { id, username, memberIds, chatId } = useLocalSearchParams<{
@@ -89,6 +76,28 @@ export default function OtherProfile() {
           { id: myId, username: `You (${myName})`, avatar: myAvatar },
         ];
 
+  useEffect(() => {
+    if (!isGroup && id != null) {
+      reportPresence(Number(id), user?.lastSeen);
+    }
+  }, [id, isGroup, user?.lastSeen]);
+
+  useEffect(() => {
+    const cleanup = listenForPresence(({ userId, lastSeen }) => {
+      if (Number(userId) === Number(id)) {
+        setUser((prev) => {
+          if (!prev) return prev;
+
+          return {
+            ...prev,
+            lastSeen,
+          };
+        });
+      }
+    });
+
+    return cleanup;
+  }, [id]);
   const getOtherProfile = useCallback(async () => {
     if (!id) return;
 
@@ -119,6 +128,7 @@ export default function OtherProfile() {
       );
     } else {
       const { data } = await api.get(`/api/user/${id}`);
+
       setUser({
         avatar: data.avatar,
         username: data.username,
@@ -404,10 +414,12 @@ export default function OtherProfile() {
               : (groupName ?? username ?? user?.username ?? "Unknown user")
           }
           avatar={isGroup ? undefined : user?.avatar}
+          userId={isGroup ? undefined : Number(id)}
           subtitle={isGroup || !groupName ? undefined : user?.username}
           presence={
             isGroup ? `${memberCount} members` : formatPresence(user?.lastSeen)
           }
+          isOnline={!isGroup && user?.lastSeen === null}
           textColor={colors.text}
           mutedColor={muted}
           onEditName={

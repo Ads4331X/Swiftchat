@@ -16,11 +16,13 @@ import { getCurrentUserId } from "@/lib/auth";
 import { decryptMessage, getOrCreateConversationKey } from "@/lib/crypto";
 import NetInfo from "@react-native-community/netinfo";
 import Toast from "react-native-toast-message";
+import { reportPresence } from "@/constants/presence-provider";
 
 export type ChatMember = {
   id: number;
   username: string;
   avatar?: string;
+  lastSeen?: string | null;
 };
 
 export type Chat = {
@@ -151,6 +153,20 @@ export default function useChats() {
        * 3. Show server conversations with decrypted preview text
        */
       setChats(decryptedChats);
+
+      /*
+       * 3b. Seed shared presence from the members' lastSeen (already-online
+       *     users don't emit a socket presence event after we connect).
+       *     lastSeen === null -> online; a timestamp -> offline (store
+       *     defaults to offline, so only null needs to seed).
+       */
+      for (const chat of decryptedChats) {
+        for (const member of chat.members) {
+          if (member.lastSeen !== undefined) {
+            reportPresence(member.id, member.lastSeen);
+          }
+        }
+      }
 
       /*
        * 4. Join their socket rooms

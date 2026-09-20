@@ -110,6 +110,9 @@ export default function ChatList({
   const otherAvatar = (chat: Chat) =>
     chat.members.length === 1 ? (chat.members[0]?.avatar ?? "") : "";
 
+  const otherUserId = (chat: Chat) =>
+    chat.members.length === 1 ? Number(chat.members[0]?.id) : undefined;
+
   return (
     <View>
       {visibleChats.map((chat, index) => (
@@ -131,6 +134,7 @@ export default function ChatList({
           }}
           username={displayName(chat)}
           avatarUrl={otherAvatar(chat)}
+          userId={otherUserId(chat)}
           lastMessage={chat.lastMessage?.text}
           onClear={() => clearChat(Number(chat.id))}
           typing={typingMap[chat.id]}

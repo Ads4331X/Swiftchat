@@ -4,11 +4,14 @@ import { getCurrentUserId } from "@/lib/auth";
 import { getConversationOtherUser, upsertUser } from "@/lib/db";
 import { api } from "@/lib/api";
 import { getOrCreateConversationKey } from "@/lib/crypto";
+import { listenForPresence } from "@/lib/socket";
+import { reportPresence } from "@/constants/presence-provider";
 
 type ChatParticipant = {
   userId: number;
   username: string;
   avatarUrl?: string;
+  lastSeen?: string | null;
 };
 
 type ChatMember = {
@@ -73,16 +76,50 @@ export default function useChatParticipant(
     };
   }, [conversationId, memberIds, keyReadyVersion, setUpKeys]);
 
+  useEffect(() => {
+    if (otherUser?.userId != null) {
+      reportPresence(otherUser.userId, otherUser.lastSeen);
+    }
+  }, [otherUser?.userId, otherUser?.lastSeen]);
+
+  useEffect(() => {
+    const cleanUp = listenForPresence(({ userId, lastSeen }) => {
+      if (Number(userId) === Number(otherUser?.userId)) {
+        setOtherUser((prev) => {
+          if (!prev) return prev;
+
+          return {
+            ...prev,
+            lastSeen,
+          };
+        });
+      }
+    });
+
+    return cleanUp;
+  }, [otherUser?.userId]);
+
   const loadParticipant = useCallback(async () => {
     if (!conversationId) return;
 
     const cached = await getConversationOtherUser(Number(conversationId));
     if (cached?.otherUsername) {
-      setOtherUser({
-        userId: cached.otherUserId,
-        username: cached.otherUsername,
-        avatarUrl: cached.otherAvatarUrl ?? undefined,
-      });
+      try {
+        const { data } = await api.get(`/api/user/${cached.otherUserId}`);
+
+        setOtherUser({
+          userId: cached.otherUserId,
+          username: cached.otherUsername,
+          avatarUrl: cached.otherAvatarUrl ?? undefined,
+          lastSeen: data.lastSeen,
+        });
+      } catch {
+        setOtherUser({
+          userId: cached.otherUserId,
+          username: cached.otherUsername,
+          avatarUrl: cached.otherAvatarUrl ?? undefined,
+        });
+      }
     }
 
     try {
@@ -118,15 +155,23 @@ export default function useChatParticipant(
         allMembers.push({ id: myId, username: "You" });
       }
       setMembers(allMembers);
-
       if (member) {
+        const { data: userData } = await api.get(`/api/user/${member.id}`);
+
         const participant = {
           userId: member.id,
           username: member.username,
           avatarUrl: member.avatar ?? member.avatarUrl ?? undefined,
+          lastSeen: userData.lastSeen,
         };
+
         setOtherUser(participant);
-        await upsertUser(member.id, participant.username, participant.avatarUrl);
+
+        await upsertUser(
+          member.id,
+          participant.username,
+          participant.avatarUrl,             
+        );
       }
     } catch {
       // Cached participant data is still usable while offline.

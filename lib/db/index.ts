@@ -51,6 +51,7 @@ const STATEMENTS = [
     id INTEGER PRIMARY KEY,
     username TEXT NOT NULL,
     avatarUrl TEXT
+    lastseen TEXT
   );`,
   `CREATE TABLE IF NOT EXISTS MessageRead (
     id INTEGER PRIMARY KEY,
@@ -107,6 +108,9 @@ async function openDbOnce(): Promise<SQLite.SQLiteDatabase | null> {
           ftsErr,
         );
       }
+      try {
+        await database.execAsync(`ALTER TABLE User ADD COLUMN lastseen TEXT;`);
+      } catch {}
       try {
         await database.execAsync(
           `ALTER TABLE Conversation ADD COLUMN clearedAt TEXT;`,
