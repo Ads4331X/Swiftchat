@@ -17,6 +17,7 @@ type ChatListProps = {
   chats: Chat[];
   loading: boolean;
   clearChat: (conversationId: number) => Promise<void>;
+  onMarkChatAsRead: (chatId: number) => void;
 };
 
 function formatTime(iso: string): string {
@@ -38,6 +39,7 @@ export default function ChatList({
   chats,
   loading,
   clearChat,
+  onMarkChatAsRead,
 }: ChatListProps) {
   const router = useRouter();
   const [typingMap, setTypingMap] = useState<Record<number, boolean>>({});
@@ -119,6 +121,7 @@ export default function ChatList({
         <ChatCard
           key={chat.id}
           onPress={() => {
+            onMarkChatAsRead(chat.id);
             joinConversation({ id: String(chat.id) });
             router.push({
               pathname: "/chat/[id]",
@@ -138,6 +141,7 @@ export default function ChatList({
           lastMessage={chat.lastMessage?.text}
           onClear={() => clearChat(Number(chat.id))}
           typing={typingMap[chat.id]}
+          unreadCount={chat.unread}
           time={
             chat.lastMessage ? formatTime(chat.lastMessage.sentAt) : undefined
           }

@@ -84,33 +84,38 @@ export async function getConversations(): Promise<CachedConversation[]> {
     }>(`SELECT * FROM Conversation ORDER BY lastMessageSentAt DESC`);
 
     return rows
-      .filter(
-        (c) =>
-          c.otherUserId !== null &&
-          c.otherUserId > 0 &&
-          c.otherUsername !== null &&
-          c.otherUsername.trim() !== "",
-      )
-      .map((c) => ({
-        id: c.id,
+      .filter((c) => Boolean(c && c.id))
+      .map((c) => {
+        const username =
+          typeof c.otherUsername === "string" && c.otherUsername.trim() !== ""
+            ? c.otherUsername.trim()
+            : "Unknown";
 
-        members: [
-          {
-            id: c.otherUserId ?? -1,
-            username: c.otherUsername ?? "Unknown",
-            avatar: c.otherAvatarUrl ?? undefined,
-          },
-        ],
+        const hasMember = Boolean(c.otherUserId || c.otherUsername);
 
-        lastMessage: c.lastMessageText
-          ? {
-              id: -1,
-              text: c.lastMessageText,
-              sentAt: c.lastMessageSentAt ?? "",
-              senderId: -1,
-            }
-          : null,
-      }));
+        return {
+          id: c.id,
+
+          members: hasMember
+            ? [
+                {
+                  id: c.otherUserId ?? -1,
+                  username,
+                  avatar: c.otherAvatarUrl ?? undefined,
+                },
+              ]
+            : [],
+
+          lastMessage: c.lastMessageText
+            ? {
+                id: -1,
+                text: c.lastMessageText,
+                sentAt: c.lastMessageSentAt ?? "",
+                senderId: -1,
+              }
+            : null,
+        };
+      });
   } catch (err) {
     console.warn("getConversations skipped:", err);
     return [];

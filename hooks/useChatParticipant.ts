@@ -125,6 +125,7 @@ export default function useChatParticipant(
     try {
       const myId = await getCurrentUserId();
       const response = await api.get("/api/conversations");
+
       const conversations: any[] = response.data;
       const conversation = conversations.find(
         (item) =>
@@ -170,7 +171,7 @@ export default function useChatParticipant(
         await upsertUser(
           member.id,
           participant.username,
-          participant.avatarUrl,             
+          participant.avatarUrl,
         );
       }
     } catch {

@@ -112,22 +112,22 @@ export default memo(function ChatCard({
             ) : null}
           </View>
 
-          <View className="items-end gap-1">
-            {time ? (
-              <Text style={{ color: subtleText }} className="text-xs">
-                {time}
-              </Text>
-            ) : null}
-
+          <View className="items-end justify-around flex-1  gap-1">
             {unreadCount > 0 ? (
               <View
                 className="min-w-5 h-5 px-1.5 rounded-full items-center justify-center"
                 style={{ backgroundColor: BRAND_COLOR }}
               >
                 <Text className="text-white text-xs font-bold">
-                  {unreadCount > 99 ? "99+" : unreadCount}
+                  {unreadCount > 5 ? "4+" : unreadCount}
                 </Text>
               </View>
+            ) : null}
+
+            {time ? (
+              <Text style={{ color: subtleText }} className="text-xs">
+                {time}
+              </Text>
             ) : null}
           </View>
         </View>

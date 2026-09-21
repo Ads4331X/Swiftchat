@@ -18,7 +18,9 @@ export default function Chat() {
     useState<ChatCategory>("All");
   const { colors } = useTheme();
   const bottomSheetRef = useRef<BottomSheet>(null);
-  const { chats, loading, refetch, clearChat } = useChats();
+  const { chats, loading, refetch, clearChat, markChatAsReadLocally } =
+    useChats();
+
   const [refreshing, setRefreshing] = useState(false);
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -72,6 +74,7 @@ export default function Chat() {
           chats={chats}
           loading={loading}
           clearChat={clearChat}
+          onMarkChatAsRead={markChatAsReadLocally}
         />
       </ScrollView>
 

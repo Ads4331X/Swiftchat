@@ -11,7 +11,6 @@ import { api } from "@/lib/api";
 import { listenForMarkRead } from "@/lib/socket";
 import { useEffect } from "react";
 import Avatar from "../profile/Avatar";
-import useChats from "@/hooks/useChats";
 type Position = {
   pageX: number;
   pageY: number;
@@ -97,7 +96,6 @@ export default function MessageList({
     };
   }, [messages]);
 
-  const { refetch } = useChats();
   // Lookup sender display names/avatars for group bubbles & typing indicator.
   const memberById = useMemo(() => {
     const map = new Map<number, { username: string; avatar?: string }>();
@@ -225,7 +223,11 @@ export default function MessageList({
   }, [currentUserId]);
   const handleViewableItemsChanged = useCallback(
     async ({ viewableItems }: any) => {
-      for (let i = viewableItems.length - 1; i >= 0; i--) {
+      // Inverted list: data[0] is the newest message, so forward iteration
+      // marks the newest visible incoming message. The backend marks every
+      // message with id <= this one ({ id: { lte: messageId } }), so the
+      // newest covers all older unread messages in one call.
+      for (let i = 0; i < viewableItems.length; i++) {
         const msg = viewableItems[i].item;
 
         if (msg.senderId !== currentUserId) {

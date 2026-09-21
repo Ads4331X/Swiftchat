@@ -36,22 +36,98 @@ export type Chat = {
     sentAt: string;
     senderId: number;
   } | null;
+  unread?: number;
 };
 
+// this functions dedupes the chats based on the members of the chat. If two chats have the same members, it will keep only one of them.
 function dedupe(chats: Chat[]): Chat[] {
   const seen = new Set<string>();
 
   return chats.filter((chat) => {
-    const key = chat.members
+    const memberKey = chat.members
       .map((m) => m.id)
       .sort((a, b) => a - b)
       .join(",");
+    const key = memberKey || `conversation:${chat.id}`;
 
     if (seen.has(key)) return false;
 
     seen.add(key);
     return true;
   });
+}
+
+export function normalizeChat(value: unknown): Chat | null {
+  if (!value || typeof value !== "object") return null;
+
+  const raw = value as Record<string, unknown>;
+  const id = Number(raw.id ?? raw.conversationId);
+  if (!Number.isFinite(id)) return null;
+
+  const members = Array.isArray(raw.members)
+    ? (raw.members as unknown[])
+        .map((value) => {
+          if (!value || typeof value !== "object") return null;
+          const rawMember = value as Record<string, unknown>;
+          const member =
+            rawMember.user && typeof rawMember.user === "object"
+              ? (rawMember.user as Record<string, unknown>)
+              : rawMember;
+          const memberId = Number(member.id);
+          if (!Number.isFinite(memberId)) return null;
+
+          const normalizedMember: ChatMember = {
+            id: memberId,
+            username:
+              typeof member.username === "string" ? member.username : "Unknown",
+          };
+
+          if (typeof member.avatar === "string") {
+            normalizedMember.avatar = member.avatar;
+          } else if (typeof member.avatarUrl === "string") {
+            normalizedMember.avatar = member.avatarUrl;
+          }
+
+          if (typeof member.lastSeen === "string" || member.lastSeen === null) {
+            normalizedMember.lastSeen = member.lastSeen;
+          }
+
+          return normalizedMember;
+        })
+        .filter((member): member is ChatMember => member !== null)
+    : [];
+
+  const rawLastMessage = raw.lastMessage;
+  let lastMessage: Chat["lastMessage"] = null;
+  if (rawLastMessage && typeof rawLastMessage === "object") {
+    const message = rawLastMessage as Record<string, unknown>;
+    const messageId = Number(message.id);
+    const senderId = Number(message.senderId);
+    if (
+      Number.isFinite(messageId) &&
+      Number.isFinite(senderId) &&
+      typeof message.text === "string" &&
+      typeof message.sentAt === "string"
+    ) {
+      lastMessage = {
+        id: messageId,
+        text: message.text,
+        nonce: typeof message.nonce === "string" ? message.nonce : undefined,
+        sentAt: message.sentAt,
+        senderId,
+      };
+    }
+  }
+
+  return {
+    id,
+    name: typeof raw.name === "string" ? raw.name : undefined,
+    members,
+    lastMessage,
+    unread: Number.isFinite(Number(raw.unread))
+      ? Number(raw.unread)
+      : undefined,
+  };
 }
 
 export default function useChats() {
@@ -70,33 +146,40 @@ export default function useChats() {
     try {
       const currentUserId = await getCurrentUserId();
 
-/*
-     * 1. Load local conversations first (only on the initial load — on
-     *    later refetches we already have the server-ordered list on screen,
-     *    and swapping in the cache order would visibly rearrange the list).
-     */
-    if (!hasLoadedRef.current) {
-      try {
-        const cache = await getConversations();
+      /*
+       * 1. Load local conversations first (only on the initial load — on
+       *    later refetches we already have the server-ordered list on screen,
+       *    and swapping in the cache order would visibly rearrange the list).
+       */
+      if (!hasLoadedRef.current) {
+        try {
+          const cache = await getConversations();
 
-        if (cache.length) {
-          setChats(cache);
-          setLoading(false);
+          if (cache.length) {
+            setChats(cache);
+            setLoading(false);
+          }
+        } catch {
+          // Local cache unavailable.
         }
-      } catch {
-        // Local cache unavailable.
       }
-    }
 
       /*
        * 2. Get conversations from server
        */
       const response = await api.get("/api/conversations");
+
+      const serverConversations: Chat[] = Array.isArray(response.data)
+        ? response.data
+            .map(normalizeChat)
+            .filter((chat): chat is Chat => chat !== null)
+        : [];
+
       await syncConversationsWithServer({
-        serverConversations: response.data,
+        serverConversations,
       });
 
-      const fetched: Chat[] = dedupe(response.data);
+      const fetched: Chat[] = dedupe(serverConversations);
 
       const decryptedChats: Chat[] = await Promise.all(
         fetched.map(async (chat) => {
@@ -217,17 +300,16 @@ export default function useChats() {
       try {
         const currentUserId = await getCurrentUserId();
 
-        setChats((currentChats) => {
-          const chat = currentChats.find(
-            (c) => c.id === Number(message.conversationId),
-          );
-
-          if (!chat) {
-            return currentChats;
-          }
-
-          return currentChats;
-        });
+        setChats((currentChats) =>
+          currentChats.map((chat) =>
+            chat.id === Number(message.conversationId)
+              ? {
+                  ...chat,
+                  unread: (chat.unread ?? 0) + 1,
+                }
+              : chat,
+          ),
+        );
 
         const chat = chatsRef.current.find(
           (c) => c.id === Number(message.conversationId),
@@ -352,10 +434,19 @@ export default function useChats() {
     return unsubscribe;
   }, []);
 
+  const markChatAsReadLocally = useCallback((conversationId: number) => {
+    setChats((currentChats) =>
+      currentChats.map((chat) =>
+        chat.id === conversationId ? { ...chat, unread: 0 } : chat,
+      ),
+    );
+  }, []);
+
   return {
     chats,
     clearChat,
     loading,
+    markChatAsReadLocally,
     refetch,
   };
 }

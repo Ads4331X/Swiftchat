@@ -18,7 +18,7 @@ import EmptyState from "@/components/ui/EmptyState";
 import { BRAND_COLOR } from "@/constants/theme";
 import { useTheme } from "@/constants/theme-provider";
 import { conversationDisplayName } from "@/lib/utils";
-import { type Chat } from "@/hooks/useChats";
+import { normalizeChat, type Chat } from "@/hooks/useChats";
 import { type Message } from "@/hooks/useChatMessages";
 import { api } from "@/lib/api";
 import { getCurrentUserId } from "@/lib/auth";
@@ -139,20 +139,11 @@ export default function ForwardSheet({
     (async () => {
       try {
         const response = await api.get("/api/conversations");
-        const list: Chat[] = (response.data ?? []).map((conv: any) => ({
-          id: conv.id,
-          name: conv.name,
-          members: (conv.members ?? []) as Chat["members"],
-          lastMessage: conv.lastMessage
-            ? {
-                id: conv.lastMessage.id,
-                text: conv.lastMessage.text,
-                nonce: conv.lastMessage.nonce,
-                sentAt: conv.lastMessage.sentAt,
-                senderId: conv.lastMessage.senderId,
-              }
-            : null,
-        }));
+        const list: Chat[] = Array.isArray(response.data)
+          ? response.data
+              .map(normalizeChat)
+              .filter((chat): chat is Chat => chat !== null)
+          : [];
         if (!active) return;
         setChats(
           list.filter((c) => String(c.id) !== String(excludeConversationId)),
