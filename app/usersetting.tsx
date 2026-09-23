@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -22,6 +22,8 @@ import SettingsCard from "@/components/profile/SettingsCard";
 import PinModal from "@/components/security/PinModal";
 import { useKeySetup } from "@/hooks/useKeySetup";
 import { BRAND_COLOR } from "@/constants/theme";
+import { AvatarPreviewModal } from "../components/showAvatarPicker";
+import BottomSheet from "@gorhom/bottom-sheet";
 
 type UserDetails = {
   username: string;
@@ -43,6 +45,17 @@ export default function UserSettings() {
     skip: skipPin,
   } = useKeySetup();
 
+  const bottomSheetRef = useRef<BottomSheet>(null);
+
+  const openSheet = () => {
+    bottomSheetRef.current?.expand();
+  };
+
+  const handleClosePress = () => {
+    if (bottomSheetRef.current) {
+      bottomSheetRef.current.close();
+    }
+  };
   const refetch = useCallback(async () => {
     setLoading(true);
     try {
@@ -84,13 +97,17 @@ export default function UserSettings() {
     }
 
     Alert.alert(
-"Delete account",   
+      "Delete account",
       "This will permanently delete your account, messages and conversations. This can't be undone.",
       [
         { text: "Cancel", style: "cancel" },
         { text: "Delete", style: "destructive", onPress: handleDeleteAccount },
       ],
     );
+  };
+
+  const handleAvatarPress = () => {
+    openSheet();
   };
 
   return (
@@ -129,8 +146,8 @@ export default function UserSettings() {
           <UserProfileCard
             username={user?.username ?? "User"}
             subtitle={user?.email}
+            onPressAvatar={handleAvatarPress}
           />
-
           <View className="px-4 gap-3">
             <SettingsCard
               icon={<Feather name="hard-drive" size={20} color={BRAND_COLOR} />}
@@ -150,7 +167,6 @@ export default function UserSettings() {
               }}
             />
           </View>
-
           <View className="px-4 gap-3 mt-8">
             <SettingsCard
               icon={<Feather name="edit-2" size={20} color={BRAND_COLOR} />}
@@ -188,6 +204,7 @@ export default function UserSettings() {
           </View>
         </ScrollView>
       )}
+      <AvatarPreviewModal ref={bottomSheetRef} closeSheet={handleClosePress} />
 
       <PinModal
         visible={needsPin}

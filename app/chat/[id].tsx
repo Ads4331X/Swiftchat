@@ -22,6 +22,7 @@ import ForwardSheet from "@/components/chat/forward/ForwardSheet";
 import PinModal from "@/components/security/PinModal";
 import { listenForGroupDelete } from "@/lib/socket";
 import { onScrollToMessage } from "@/lib/sync/scrollToMessage";
+import { setActiveConversation } from "@/lib/sync";
 import {
   deletePinnedMessageLocal,
   getPinnedMessageLocal,
@@ -121,6 +122,11 @@ export default function UserChat() {
   const listRef = useRef<FlatList<Message>>(null);
   const scrollToEndRef = useRef<(() => void) | null>(null);
   const forwardSheetRef = useRef<BottomSheet>(null);
+
+  useEffect(() => {
+    setActiveConversation(Number(id));
+    return () => setActiveConversation(null);
+  }, [id]);
 
   useEffect(() => {
     if (!messageId || messages.length === 0) return;

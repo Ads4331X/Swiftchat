@@ -62,9 +62,11 @@ export default function ChatList({
   if (loading) {
     return <SkeletonLoader />;
   }
-  const visibleChats =
-    filteredMode === "Groups"
-      ? chats.filter((chat) => chat.members.length > 1)
+const visibleChats =
+  filteredMode === "Groups"
+    ? chats.filter((chat) => chat.members.length > 1)
+    : filteredMode === "Unread"
+      ? chats.filter((chat) => (chat.unread ?? 0) > 0)
       : chats;
 
   if (visibleChats.length === 0) {

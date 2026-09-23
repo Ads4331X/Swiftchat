@@ -11,7 +11,11 @@ import {
   saveConversation,
   syncConversationsWithServer,
 } from "@/lib/db";
-import { clearChat as clearChatOnServer, onChatCleared } from "@/lib/sync";
+import {
+  clearChat as clearChatOnServer,
+  getActiveConversation,
+  onChatCleared,
+} from "@/lib/sync";
 import { getCurrentUserId } from "@/lib/auth";
 import { decryptMessage, getOrCreateConversationKey } from "@/lib/crypto";
 import NetInfo from "@react-native-community/netinfo";
@@ -300,16 +304,20 @@ export default function useChats() {
       try {
         const currentUserId = await getCurrentUserId();
 
-        setChats((currentChats) =>
-          currentChats.map((chat) =>
-            chat.id === Number(message.conversationId)
-              ? {
-                  ...chat,
-                  unread: (chat.unread ?? 0) + 1,
-                }
-              : chat,
-          ),
-        );
+        // Only bump the badge for chats the user is NOT currently viewing —
+        // the open chat's read state is handled by MessageList's mark-read.
+        if (getActiveConversation() !== Number(message.conversationId)) {
+          setChats((currentChats) =>
+            currentChats.map((chat) =>
+              chat.id === Number(message.conversationId)
+                ? {
+                    ...chat,
+                    unread: (chat.unread ?? 0) + 1,
+                  }
+                : chat,
+            ),
+          );
+        }
 
         const chat = chatsRef.current.find(
           (c) => c.id === Number(message.conversationId),
