@@ -22,12 +22,14 @@ type SearchUser = {
   id: number;
   username: string;
   avatar?: string;
+  localAvatarPath: string | null;
 };
 
 type SelectedMember = {
   id: number;
   username: string;
   avatar?: string;
+  localAvatarPath: string | null;
 };
 
 export default function CreateGroup() {
@@ -252,6 +254,7 @@ export default function CreateGroup() {
                           avatarUrl={member.avatar}
                           size={48}
                           userId={Number(member.id)}
+                          localAvatarUrlPath={member.localAvatarPath}
                         />
                         <Text
                           numberOfLines={1}

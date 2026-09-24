@@ -1,9 +1,10 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { memo } from "react";
+import { memo, useEffect, useState } from "react";
 import Feather from "@expo/vector-icons/Feather";
 import { useTheme } from "@/constants/theme-provider";
 import { BRAND_COLOR } from "@/constants/theme";
 import Avatar from "@/components/profile/Avatar";
+import { getUser } from "@/lib/db";
 import ReanimatedSwipeable from "react-native-gesture-handler/ReanimatedSwipeable";
 import Reanimated, {
   SharedValue,
@@ -43,6 +44,23 @@ export default memo(function ChatCard({
   showDivider = true,
 }: ChatCardProps) {
   const { colors, subtleText, dividerColor } = useTheme();
+  const [localAvatarUrlPath, setLocalAvatarUrlPath] = useState<string | null>(
+    null,
+  );
+
+  useEffect(() => {
+    let mounted = true;
+    if (userId == null) {
+      setLocalAvatarUrlPath(null);
+      return;
+    }
+    getUser(userId).then((user) => {
+      if (mounted) setLocalAvatarUrlPath(user?.localAvatarUrlPath ?? null);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [userId]);
 
   function RightAction(prog: SharedValue<number>) {
     const opacity = useAnimatedStyle(() => ({ opacity: prog.value }));
@@ -82,6 +100,7 @@ export default memo(function ChatCard({
             isOnline={online}
             size={48}
             ringColor={colors.background}
+            localAvatarUrlPath={localAvatarUrlPath}
           />
 
           <View className="flex-1">

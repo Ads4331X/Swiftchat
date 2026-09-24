@@ -13,6 +13,7 @@ type OtherProfileHeaderProps = {
   presence: string;
   isOnline?: boolean;
   textColor: string;
+  localAvatarUrlPath: string | null;
   mutedColor: string;
   onEditName?: () => void;
   onVideoCall: () => void;
@@ -29,6 +30,7 @@ export default function OtherProfileHeader({
   presence,
   isOnline = false,
   textColor,
+  localAvatarUrlPath,
   mutedColor,
   onEditName,
   onVideoCall,
@@ -69,6 +71,7 @@ export default function OtherProfileHeader({
             size={76}
             userId={isGroup ? undefined : userId}
             isOnline={isOnline}
+            localAvatarUrlPath={localAvatarUrlPath}
           />
         )}
         <View className="flex-row items-center gap-1 mt-2">

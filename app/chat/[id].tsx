@@ -330,6 +330,7 @@ export default function UserChat() {
         dividerColor={dividerColor}
         backgroundColor={colors.background}
         chatId={id}
+        localAvatarUrlPath={otherUser ? otherUser.localAvatarUrlPath : null}
         presence={
           isGroup
             ? `${memberCount} members`

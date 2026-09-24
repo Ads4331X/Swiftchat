@@ -171,9 +171,7 @@ export default function EditAccount() {
             </Text>
 
             <SettingsCard
-              icon={
-                <Feather name="lock" size={20} color={BRAND_COLOR} />
-              }
+              icon={<Feather name="lock" size={20} color={BRAND_COLOR} />}
               title="Change password"
               subtitle="Update your account password"
               onPress={() => router.push("/accountpassword")}

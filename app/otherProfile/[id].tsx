@@ -23,7 +23,7 @@ import ProfileSettingsSection, {
 import GroupMemberList, {
   type GroupMember,
 } from "@/components/profile/GroupMemberList";
-import { deleteConversation } from "@/lib/db";
+import { deleteConversation, getUser } from "@/lib/db";
 import { clearChat } from "@/lib/sync";
 import { formatPresence } from "@/lib/utils/formatPresence";
 import { listenForPresence } from "@/lib/socket";
@@ -49,6 +49,8 @@ export default function OtherProfile() {
   const [myId, setMyId] = useState<number>();
   const [myName, setMyName] = useState("");
   const [myAvatar, setMyAvatar] = useState("");
+  const [myLocalAvatar, setMyLocalAvatar] = useState<string | null>(null);
+  const [otherLocalAvatar, setOtherLocalAvatar] = useState<string | null>(null);
   const [showAllMembers, setShowAllMembers] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminId, setAdminId] = useState<number | null>(null);
@@ -73,7 +75,12 @@ export default function OtherProfile() {
       ? members
       : [
           ...members.filter((m) => m.id !== myId),
-          { id: myId, username: `You (${myName})`, avatar: myAvatar },
+          {
+            id: myId,
+            username: `You (${myName})`,
+            avatar: myAvatar,
+            localAvatarUrlPath: myLocalAvatar,
+          },
         ];
 
   useEffect(() => {
@@ -108,6 +115,8 @@ export default function OtherProfile() {
         const meData = await api.get(`/api/user/${me}`).catch(() => null);
         setMyName(meData?.data?.username ?? "");
         setMyAvatar(meData?.data?.avatar ?? "");
+        const local = await getUser(me);
+        setMyLocalAvatar(local?.localAvatarUrlPath ?? null);
       }
 
       const { data } = await api.get("/api/conversations");
@@ -119,13 +128,16 @@ export default function OtherProfile() {
       );
       setAdminId(chat?.createdById ? Number(chat.createdById) : null);
       setGroupName(chat?.name?.trim() || null);
-      setMembers(
-        (chat?.members ?? []).map((m: any) => ({
+      const apiMembers = (chat?.members ?? []).map(async (m: any) => {
+        const local = await getUser(Number(m.id));
+        return {
           id: Number(m.id),
           username: m.username,
           avatar: m.avatar ?? m.avatarUrl ?? undefined,
-        })),
-      );
+          localAvatarUrlPath: local?.localAvatarUrlPath ?? null,
+        };
+      });
+      setMembers(await Promise.all(apiMembers));
     } else {
       const { data } = await api.get(`/api/user/${id}`);
 
@@ -134,6 +146,8 @@ export default function OtherProfile() {
         username: data.username,
         lastSeen: data.lastSeen,
       });
+      const local = await getUser(Number(id));
+      setOtherLocalAvatar(local?.localAvatarUrlPath ?? null);
       if (chatId) {
         try {
           const { data: convs } = await api.get("/api/conversations");
@@ -422,6 +436,7 @@ export default function OtherProfile() {
           isOnline={!isGroup && user?.lastSeen === null}
           textColor={colors.text}
           mutedColor={muted}
+          localAvatarUrlPath={isGroup ? null : otherLocalAvatar}
           onEditName={
             isGroup
               ? isAdmin

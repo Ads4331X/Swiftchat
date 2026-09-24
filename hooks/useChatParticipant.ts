@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useFocusEffect } from "expo-router";
 import { getCurrentUserId } from "@/lib/auth";
-import { getConversationOtherUser, upsertUser } from "@/lib/db";
+import { getConversationOtherUser, getUser, upsertUser } from "@/lib/db";
 import { api } from "@/lib/api";
 import { getOrCreateConversationKey } from "@/lib/crypto";
 import { listenForPresence } from "@/lib/socket";
@@ -12,12 +12,14 @@ type ChatParticipant = {
   username: string;
   avatarUrl?: string;
   lastSeen?: string | null;
+  localAvatarUrlPath: string | null;
 };
 
 type ChatMember = {
   id: number;
   username: string;
   avatar?: string;
+  localAvatarUrlPath: string | null;
 };
 
 export default function useChatParticipant(
@@ -42,17 +44,17 @@ export default function useChatParticipant(
 
     async function loadKey() {
       if (!conversationId || !memberIds) return;
-      // Let key setup run (may show PIN modal) but don't let it block
-      // loading the conversation key. The PIN is a backup feature and
-      // never gates chatting.
+
       setUpKeys();
 
       try {
         const userId = await getCurrentUserId();
+
         const members = memberIds
           .split(",")
           .map(Number)
           .filter(Number.isFinite);
+
         const allMembers = Array.from(
           new Set(
             [userId, ...members].filter(
@@ -60,17 +62,22 @@ export default function useChatParticipant(
             ),
           ),
         );
+
         const key = await getOrCreateConversationKey(
           conversationId,
           allMembers,
         );
-        if (mounted) setConversationKey(key ?? undefined);
+
+        if (mounted) {
+          setConversationKey(key ?? undefined);
+        }
       } catch (error) {
         console.error("Failed to load conversation key:", error);
       }
     }
 
     loadKey();
+
     return () => {
       mounted = false;
     };
@@ -102,60 +109,98 @@ export default function useChatParticipant(
   const loadParticipant = useCallback(async () => {
     if (!conversationId) return;
 
-    const cached = await getConversationOtherUser(Number(conversationId));
-    if (cached?.otherUsername) {
-      try {
-        const { data } = await api.get(`/api/user/${cached.otherUserId}`);
-
-        setOtherUser({
-          userId: cached.otherUserId,
-          username: cached.otherUsername,
-          avatarUrl: cached.otherAvatarUrl ?? undefined,
-          lastSeen: data.lastSeen,
-        });
-      } catch {
-        setOtherUser({
-          userId: cached.otherUserId,
-          username: cached.otherUsername,
-          avatarUrl: cached.otherAvatarUrl ?? undefined,
-        });
-      }
-    }
-
     try {
+      // Load the cached 1-to-1 participant
+
+      const cached = await getConversationOtherUser(Number(conversationId));
+
+      const otherUser = cached?.otherUserId
+        ? await getUser(Number(cached.otherUserId))
+        : null;
+
+      if (cached?.otherUsername) {
+        try {
+          const { data } = await api.get(`/api/user/${cached.otherUserId}`);
+
+          setOtherUser({
+            userId: cached.otherUserId,
+            username: cached.otherUsername,
+            avatarUrl: cached.otherAvatarUrl ?? undefined,
+            lastSeen: data.lastSeen,
+            localAvatarUrlPath: otherUser?.localAvatarUrlPath ?? null,
+          });
+        } catch {
+          setOtherUser({
+            userId: cached.otherUserId,
+            username: cached.otherUsername,
+            avatarUrl: cached.otherAvatarUrl ?? undefined,
+            localAvatarUrlPath: otherUser?.localAvatarUrlPath ?? null,
+          });
+        }
+      }
+
+      // Load conversation
+
       const myId = await getCurrentUserId();
+
       const response = await api.get("/api/conversations");
 
       const conversations: any[] = response.data;
+
       const conversation = conversations.find(
         (item) =>
           String(item.conversationId ?? item.id) === String(conversationId),
       );
+
       const conversationMembers: any[] = conversation?.members ?? [];
+
       const member = conversationMembers.find((item: any) => item.id !== myId);
+
       setConversationName(
         typeof conversation?.name === "string" ? conversation.name : null,
       );
-      // Group admins are the conversation creator (matches the server's
-      // checkAdmin). Everyone else may not pin messages.
+
+      // Group admins are the conversation creator.
       setIsAdmin(
         myId != null && conversation?.createdById != null
           ? Number(conversation.createdById) === myId
           : false,
       );
+
       if (!conversationMembers.length) {
         return;
       }
 
-      const allMembers: ChatMember[] = conversationMembers.map((m: any) => ({
-        id: m.id,
-        username: m.username,
-        avatar: m.avatar ?? m.avatarUrl ?? undefined,
-      }));
-      if (myId != null) {
-        allMembers.push({ id: myId, username: "You" });
+      // Load local avatar path for every member
+
+      const allMembers: ChatMember[] = [];
+
+      for (const m of conversationMembers) {
+        const user = await getUser(Number(m.id));
+
+        allMembers.push({
+          id: Number(m.id),
+          username: m.username,
+          avatar: m.avatar ?? m.avatarUrl ?? undefined,
+          localAvatarUrlPath: user?.localAvatarUrlPath ?? null,
+        });
       }
+
+      // Add current user
+      if (myId != null) {
+        const myUser = await getUser(myId);
+
+        allMembers.push({
+          id: myId,
+          username: "You",
+          avatar: myUser?.avatarUrl ?? undefined,
+          localAvatarUrlPath: myUser?.localAvatarUrlPath ?? null,
+        });
+      }
+
       setMembers(allMembers);
+
+      // Update 1-to-1 participant from API
       if (member) {
         const { data: userData } = await api.get(`/api/user/${member.id}`);
 
@@ -164,6 +209,7 @@ export default function useChatParticipant(
           username: member.username,
           avatarUrl: member.avatar ?? member.avatarUrl ?? undefined,
           lastSeen: userData.lastSeen,
+          localAvatarUrlPath: null,
         };
 
         setOtherUser(participant);

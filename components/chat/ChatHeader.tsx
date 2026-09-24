@@ -13,6 +13,7 @@ type ChatHeaderProps = {
   memberCount?: number;
   textColor: string;
   dividerColor: string;
+  localAvatarUrlPath: string | null;
   backgroundColor: string;
   memberIds: string | undefined;
   chatId: string;
@@ -32,6 +33,7 @@ export default function ChatHeader({
   memberIds,
   chatId,
   presence,
+  localAvatarUrlPath,
   isOnline,
 }: ChatHeaderProps) {
   const router = useRouter();
@@ -65,6 +67,7 @@ export default function ChatHeader({
         size={34}
         userId={isGroup ? undefined : userId}
         isOnline={isOnline}
+        localAvatarUrlPath={localAvatarUrlPath}
       />
 
       <Pressable

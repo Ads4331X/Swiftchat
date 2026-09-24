@@ -9,6 +9,7 @@ export type GroupMember = {
   id: number;
   username: string;
   avatar?: string;
+  localAvatarUrlPath: string | null;
 };
 
 type GroupMemberListProps = {
@@ -67,6 +68,7 @@ export default function GroupMemberList({
               avatarUrl={member.avatar}
               size={40}
               userId={Number(member.id)}
+              localAvatarUrlPath={member.localAvatarUrlPath}
             />
             <Text
               style={{ color: colors.text }}

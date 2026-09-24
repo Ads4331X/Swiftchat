@@ -7,12 +7,14 @@ type UserProfileCardProps = {
   username: string;
   subtitle?: string;
   avatarUrl?: string;
+  localAvatarUrlPath: string | null;
   onPressAvatar?: () => void;
 };
 
 export default function UserProfileCard({
   username,
   subtitle,
+  localAvatarUrlPath,
   avatarUrl,
   onPressAvatar,
 }: UserProfileCardProps) {
@@ -21,7 +23,12 @@ export default function UserProfileCard({
   return (
     <View className="items-center px-4 py-8">
       <Pressable className="relative" onPress={onPressAvatar}>
-        <Avatar username={username} avatarUrl={avatarUrl} size={80} />
+        <Avatar
+          username={username}
+          avatarUrl={avatarUrl}
+          size={80}
+          localAvatarUrlPath={localAvatarUrlPath}
+        />
 
         <View
           className="absolute bottom-0 right-0 items-center justify-center rounded-full"

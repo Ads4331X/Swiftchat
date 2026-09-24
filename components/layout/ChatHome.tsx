@@ -5,11 +5,14 @@ import { useRouter, useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
 import Avatar from "@/components/profile/Avatar";
 import { api } from "@/lib/api";
+import { getCurrentUserId } from "@/lib/auth";
+import { getUser } from "@/lib/db";
 
 type UserDetails = {
   username: string;
-  avatarUrl?: string;
+  avatar?: string | null;
   id: number;
+  localAvatarUrlPath: string | null;
 };
 
 export default function ChatHome() {
@@ -19,22 +22,41 @@ export default function ChatHome() {
 
   useFocusEffect(
     useCallback(() => {
-      api
-        .get(`/api/user/user-details`)
-        .then((res) => setUser(res.data))
-        .catch(() => {});
+      const loadUser = async () => {
+        try {
+          const res = await api.get(`/api/user/user-details`);
+
+          const uid = await getCurrentUserId();
+
+          let localAvatarUrlPath: string | null = null;
+
+          if (uid != null) {
+            const local = await getUser(uid);
+            localAvatarUrlPath = local?.localAvatarUrlPath ?? null;
+          }
+
+          setUser({
+            ...res.data,
+            localAvatarUrlPath,
+          });
+        } catch {
+          // Keep existing user data if refresh fails
+        }
+      };
+
+      loadUser();
     }, []),
   );
-
   return (
     <View className="w-full">
       <View className="w-full px-4 flex-row items-center justify-between">
         <Pressable onPress={() => router.push("/usersetting")}>
           <Avatar
             username={user?.username ?? "?"}
-            avatarUrl={user?.avatarUrl}
+            avatarUrl={user?.avatar ?? undefined}
             size={40}
             userId={Number(user?.id)}
+            localAvatarUrlPath={user ? user.localAvatarUrlPath : null}
           />
         </Pressable>
 

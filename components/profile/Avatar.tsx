@@ -9,10 +9,10 @@ type AvatarProps = {
   userId?: number;
   isOnline?: boolean;
   ringColor?: string;
+  localAvatarUrlPath: string | null;
 };
 
 const DOT_SIZE = 11;
-const DOT_GAP = 2;
 
 export default function Avatar({
   username,
@@ -21,14 +21,25 @@ export default function Avatar({
   userId,
   isOnline = false,
   ringColor = "#fff",
+  localAvatarUrlPath = null,
 }: AvatarProps) {
   const onlineFromStore = usePresence(userId);
   const initial = username.charAt(0).toUpperCase() || "?";
   const online = userId != null ? onlineFromStore || isOnline : isOnline;
+  console.log(avatarUrl);
 
   return (
     <View style={{ width: size, height: size, position: "relative" }}>
-      {avatarUrl ? (
+      {localAvatarUrlPath ? (
+        <Image
+          source={{ uri: localAvatarUrlPath }}
+          style={{
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+          }}
+        />
+      ) : avatarUrl ? (
         <Image
           source={{ uri: avatarUrl }}
           style={{

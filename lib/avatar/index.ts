@@ -22,8 +22,7 @@ export async function launchCamera() {
     quality: 1,
   });
   if (!result.canceled) {
-    console.log(result.assets[0].uri); // URI of the taken photo
-    return result.assets[0].uri;
+    return result;
   }
   return null;
 }
@@ -46,12 +45,12 @@ export async function launchGallery() {
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ["images"],
     allowsEditing: true,
-    aspect: [4, 3],
+    aspect: [1, 1],
     quality: 1,
   });
 
   if (!result.canceled) {
-    return result.assets[0].uri;
+    return result;
   }
   return null;
 }

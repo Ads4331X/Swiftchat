@@ -7,6 +7,7 @@ import { useTheme } from "@/constants/theme-provider";
 import { api } from "@/lib/api";
 import { MessageBubbleContent } from "@/components/chat/MessageBubble";
 import Avatar from "@/components/profile/Avatar";
+import { getUser } from "@/lib/db";
 
 type Member = {
   id: number;
@@ -69,6 +70,26 @@ function MemberRows({
 }) {
   const { colors, subtleText, dividerColor } = useTheme();
 
+  const [localAvatarPaths, setLocalAvatarPaths] = useState<
+    Record<number, string | null>
+  >({});
+
+  useEffect(() => {
+    async function loadAvatarPaths() {
+      const paths: Record<number, string | null> = {};
+
+      for (const m of members) {
+        const user = await getUser(Number(m.id));
+
+        paths[Number(m.id)] = user?.localAvatarUrlPath ?? null;
+      }
+
+      setLocalAvatarPaths(paths);
+    }
+
+    loadAvatarPaths();
+  }, [members]);
+
   if (members.length === 0) {
     return (
       <Text style={{ color: subtleText }} className="text-[14px] pb-1">
@@ -94,13 +115,16 @@ function MemberRows({
             avatarUrl={m.avatar}
             size={40}
             userId={Number(m.id)}
+            localAvatarUrlPath={localAvatarPaths[Number(m.id)] ?? null}
           />
+
           <Text
             style={{ color: colors.text }}
             className="flex-1 ml-3 text-[15px]"
           >
             {m.name}
           </Text>
+
           {m.time && (
             <Text style={{ color: subtleText }} className="text-[13px]">
               {m.time}

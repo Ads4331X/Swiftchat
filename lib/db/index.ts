@@ -50,7 +50,8 @@ const STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS User (
     id INTEGER PRIMARY KEY,
     username TEXT NOT NULL,
-    avatarUrl TEXT
+    avatarUrl TEXT,
+    localAvatarUrlPath TEXT,
     lastseen TEXT
   );`,
   `CREATE TABLE IF NOT EXISTS MessageRead (
@@ -108,6 +109,11 @@ async function openDbOnce(): Promise<SQLite.SQLiteDatabase | null> {
           ftsErr,
         );
       }
+      try {
+        await database.execAsync(
+          `ALTER TABLE User ADD COLUMN localAvatarUrlPath TEXT;`,
+        );
+      } catch {}
       try {
         await database.execAsync(`ALTER TABLE User ADD COLUMN lastseen TEXT;`);
       } catch {}

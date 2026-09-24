@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  FlatList,
   Pressable,
   Text,
   TextInput,
@@ -23,7 +22,6 @@ export default function Search() {
   const { conversationId } = useLocalSearchParams<{
     conversationId: string;
   }>();
-  const flatListRef = useRef<FlatList>(null);
   const { colors, inputBg, inputBorderColor, placeholderColor } = useTheme();
   const router = useRouter();
   const [query, setQuery] = useState("");
@@ -32,7 +30,15 @@ export default function Search() {
   const [searching, setSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<Message[]>([]);
   const [userMap, setUserMap] = useState<
-    Record<number, { id: number; username: string; avatarUrl: string | null }>
+    Record<
+      number,
+      {
+        id: number;
+        username: string;
+        avatarUrl: string | null;
+        localAvatarUrlPath: string | null;
+      }
+    >
   >({});
   const hasQuery = query.trim().length > 0;
 
@@ -374,6 +380,7 @@ export default function Search() {
                   avatarUrl={user?.avatarUrl ?? undefined}
                   size={38}
                   userId={Number(result.senderId)}
+                  localAvatarUrlPath={user.localAvatarUrlPath}
                 />
               </View>
 

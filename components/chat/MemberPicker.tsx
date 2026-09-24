@@ -17,12 +17,14 @@ export type MemberSearchUser = {
   id: number;
   username: string;
   avatar?: string;
+  localAvatarPath: string | null;
 };
 
 export type PickedMember = {
   id: number;
   username: string;
   avatar?: string;
+  localAvatarPath: string | null;
 };
 
 type MemberPickerProps = {
@@ -63,7 +65,12 @@ export default function MemberPicker({
       ? selected.filter((m) => m.id !== user.id)
       : [
           ...selected,
-          { id: user.id, username: user.username, avatar: user.avatar },
+          {
+            id: user.id,
+            username: user.username,
+            avatar: user.avatar,
+            localAvatarPath: user.localAvatarPath,
+          },
         ];
 
     setSelected(next);
@@ -155,6 +162,7 @@ export default function MemberPicker({
                   avatarUrl={member.avatar}
                   size={48}
                   userId={Number(member.id)}
+                  localAvatarUrlPath={member.localAvatarPath}
                 />
                 <Pressable
                   onPress={() => removeMember(member.id)}
@@ -221,6 +229,7 @@ export default function MemberPicker({
                     avatarUrl={user.avatar}
                     size={44}
                     userId={Number(user.id)}
+                    localAvatarUrlPath={user.localAvatarPath}
                   />
                   <View className="flex-1">
                     <Text

@@ -6,7 +6,7 @@ import MessageBubble from "./MessageBubble";
 import { TypingIndicator } from "./TypingIndicator";
 import MessageSkeleton from "./MessageSkeleton";
 import EmptyState from "@/components/ui/EmptyState";
-import { markRead } from "@/lib/db";
+import { getUser, markRead } from "@/lib/db";
 import { api } from "@/lib/api";
 import { listenForMarkRead } from "@/lib/socket";
 import { useEffect } from "react";
@@ -149,7 +149,16 @@ export default function MessageList({
     const ids = isOtherUserTyping ?? [];
     return ids
       .map((id) => memberById.get(id))
-      .filter((m): m is { username: string; avatar?: string } => Boolean(m));
+      .filter(
+        (
+          m,
+        ): m is {
+          id: number;
+          username: string;
+          avatar?: string;
+          localAvatarUrlPath: string | null;
+        } => Boolean(m),
+      );
   }, [isOtherUserTyping, memberById]);
 
   // Format "who is typing" into a readable sentence from the typing members.
@@ -412,23 +421,29 @@ export default function MessageList({
                 }}
               >
                 <View className="flex-row">
-                  {typingMembers.map((member, index) => (
-                    <View
-                      key={index}
-                      className="rounded-full"
-                      style={{
-                        borderWidth: 2,
-                        borderColor: bubbleColor,
-                        marginLeft: index === 0 ? 0 : -8,
-                      }}
-                    >
-                      <Avatar
-                        username={member.username}
-                        avatarUrl={member.avatar}
-                        size={24}
-                      />
-                    </View>
-                  ))}
+                  {typingMembers.map(async (member, index) => {
+                    const user = await getUser(member.id);
+                    return (
+                      <View
+                        key={index}
+                        className="rounded-full"
+                        style={{
+                          borderWidth: 2,
+                          borderColor: bubbleColor,
+                          marginLeft: index === 0 ? 0 : -8,
+                        }}
+                      >
+                        <Avatar
+                          username={member.username}
+                          avatarUrl={member.avatar}
+                          size={24}
+                          localAvatarUrlPath={
+                            user ? user.localAvatarUrlPath : null
+                          }
+                        />
+                      </View>
+                    );
+                  })}
                 </View>
                 <Text style={{ color: subtleText }} className="text-sm">
                   {typingText}

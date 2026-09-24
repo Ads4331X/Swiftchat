@@ -1,4 +1,4 @@
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useState, useRef } from "react";
 import {
   ActivityIndicator,
@@ -14,7 +14,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import Feather from "@expo/vector-icons/Feather";
 import { useTheme } from "@/constants/theme-provider";
 import { api } from "@/lib/api";
-import { removeToken } from "@/lib/auth";
+import { removeToken, getCurrentUserId } from "@/lib/auth";
+import { getUser } from "@/lib/db";
 import { disconnectSocket } from "@/lib/socket";
 import Toast from "react-native-toast-message";
 import UserProfileCard from "@/components/profile/UserProfileCard";
@@ -24,10 +25,13 @@ import { useKeySetup } from "@/hooks/useKeySetup";
 import { BRAND_COLOR } from "@/constants/theme";
 import { AvatarPreviewModal } from "../components/showAvatarPicker";
 import BottomSheet from "@gorhom/bottom-sheet";
+import { ImagePickerSuccessResult } from "expo-image-picker";
+import { compressAvatarImage } from "@/lib/utils";
 
 type UserDetails = {
   username: string;
   email: string;
+  avatar?: string | null;
 };
 
 export default function UserSettings() {
@@ -35,7 +39,11 @@ export default function UserSettings() {
   const { colors, dividerColor } = useTheme();
   const [user, setUser] = useState<UserDetails | null>(null);
   const [loading, setLoading] = useState(true);
+  const [localAvatarUrlPath, setLocalAvatarUrlPath] = useState<string | null>(
+    null,
+  );
   const [pinError, setPinError] = useState<string | null>(null);
+  const [avatarSheetMounted, setAvatarSheetMounted] = useState(false);
   const {
     needsPin,
     pinMode,
@@ -46,30 +54,69 @@ export default function UserSettings() {
   } = useKeySetup();
 
   const bottomSheetRef = useRef<BottomSheet>(null);
+  const [image, setImage] = useState<ImagePickerSuccessResult | null>(null);
+
+  const handleSelectImage = async (img: ImagePickerSuccessResult | null) => {
+    setImage(img);
+
+    setAvatarSheetMounted(false);
+  };
+
+  useEffect(() => {
+    if (!image) return;
+
+    const compressAndNavigate = async () => {
+      const result = await compressAvatarImage({
+        uri: image.assets[0].uri,
+        width: image.assets[0].width,
+        height: image.assets[0].height,
+      });
+
+      router.push({
+        pathname: "/DisplayPickedAvatar",
+        params: {
+          uri: result,
+        },
+      });
+    };
+
+    compressAndNavigate();
+  }, [image]);
 
   const openSheet = () => {
-    bottomSheetRef.current?.expand();
+    setAvatarSheetMounted(true);
   };
-
-  const handleClosePress = () => {
-    if (bottomSheetRef.current) {
-      bottomSheetRef.current.close();
+  const refetch = useCallback(async (showLoading = false) => {
+    if (showLoading) {
+      setLoading(true);
     }
-  };
-  const refetch = useCallback(async () => {
-    setLoading(true);
+
     try {
       const res = await api.get(`/api/user/user-details`);
       setUser(res.data);
+
+      const uid = await getCurrentUserId();
+
+      if (uid != null) {
+        const local = await getUser(uid);
+        setLocalAvatarUrlPath(local?.localAvatarUrlPath ?? null);
+      }
     } finally {
-      setLoading(false);
+      if (showLoading) {
+        setLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    refetch();
+    refetch(true);
   }, [refetch]);
 
+  useFocusEffect(
+    useCallback(() => {
+      refetch(false);
+    }, [refetch]),
+  );
   const handleDeleteAccount = async () => {
     try {
       await api.delete(`/api/user/account`);
@@ -146,6 +193,8 @@ export default function UserSettings() {
           <UserProfileCard
             username={user?.username ?? "User"}
             subtitle={user?.email}
+            avatarUrl={user?.avatar ?? undefined}
+            localAvatarUrlPath={localAvatarUrlPath}
             onPressAvatar={handleAvatarPress}
           />
           <View className="px-4 gap-3">
@@ -204,7 +253,13 @@ export default function UserSettings() {
           </View>
         </ScrollView>
       )}
-      <AvatarPreviewModal ref={bottomSheetRef} closeSheet={handleClosePress} />
+      {avatarSheetMounted ? (
+        <AvatarPreviewModal
+          ref={bottomSheetRef}
+          closeSheet={() => setAvatarSheetMounted(false)}
+          onSelectImage={handleSelectImage}
+        />
+      ) : null}
 
       <PinModal
         visible={needsPin}
