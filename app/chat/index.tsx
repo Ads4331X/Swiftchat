@@ -42,8 +42,8 @@ export default function Chat() {
 
   useFocusEffect(
     useCallback(() => {
-      refetch();
-      setUpKeys();
+      refetch().catch(() => {});
+      setUpKeys().catch(() => {});
     }, [refetch, setUpKeys]),
   );
 
@@ -96,7 +96,7 @@ export default function Chat() {
             return;
           }
           setPinError(null);
-          refetch();
+          refetch().catch(() => {});
         }}
         onCancel={skipPin}
       />

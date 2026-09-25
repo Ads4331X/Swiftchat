@@ -5,11 +5,12 @@ import { router } from "expo-router";
 import { getToken, removeToken } from "@/lib/auth";
 
 export function getBackendUrl(): string {
-  let envUrl = process.env.EXPO_PUBLIC_BACKEND_URL;
+  const envUrl = process.env.EXPO_PUBLIC_BACKEND_URL;
   if (envUrl && envUrl.trim() !== "") {
-    if (Platform.OS === "android" && (envUrl.includes("localhost") || envUrl.includes("127.0.0.1"))) {
-      return envUrl.replace("localhost", "192.168.1.72").replace("127.0.0.1", "192.168.1.72");
-    }
+    // Use the override as-is. On a USB-connected Android device,
+    // `localhost:3000` is tunneled to this machine via `adb reverse`
+    // (scripts/adb-reverse.sh) — far more reliable than a flaky LAN/Wi-Fi
+    // path. Do NOT rewrite localhost here: that would defeat the tunnel.
     return envUrl;
   }
 
@@ -24,7 +25,11 @@ export function getBackendUrl(): string {
     }
   }
 
-  return "http://192.168.1.72:3000";
+  // Last-resort dev default. Android reaches this machine's backend through
+  // the USB `adb reverse` tunnel; everything else hits the LAN IP.
+  return Platform.OS === "android"
+    ? "http://localhost:3000"
+    : "http://192.168.1.72:3000";
 }
 
 const backendUrl = getBackendUrl();

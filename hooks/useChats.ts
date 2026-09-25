@@ -171,13 +171,23 @@ export default function useChats() {
       /*
        * 2. Get conversations from server
        */
-      const response = await api.get("/api/conversations");
+      let serverConversations: Chat[] = [];
+      try {
+        const response = await api.get("/api/conversations");
 
-      const serverConversations: Chat[] = Array.isArray(response.data)
-        ? response.data
-            .map(normalizeChat)
-            .filter((chat): chat is Chat => chat !== null)
-        : [];
+        serverConversations = Array.isArray(response.data)
+          ? response.data
+              .map(normalizeChat)
+              .filter((chat): chat is Chat => chat !== null)
+          : [];
+      } catch (err) {
+        // Backend unreachable (bad LAN, phone asleep, tunnel down…). Keep
+        // whatever is on screen (server list from a previous fetch or the
+        // local cache) instead of wiping it. Retries happen on the next focus
+        // or connectivity event.
+        console.warn("useChats: server fetch failed — keeping current list:", err);
+        return;
+      }
 
       await syncConversationsWithServer({
         serverConversations,

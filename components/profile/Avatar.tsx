@@ -26,7 +26,6 @@ export default function Avatar({
   const onlineFromStore = usePresence(userId);
   const initial = username.charAt(0).toUpperCase() || "?";
   const online = userId != null ? onlineFromStore || isOnline : isOnline;
-  console.log(avatarUrl);
 
   return (
     <View style={{ width: size, height: size, position: "relative" }}>

@@ -101,7 +101,7 @@ function groupReactions(
   return order.map((emoji) => ({ emoji, count: counts.get(emoji) ?? 0 }));
 }
 
-function ReactionChips({
+export function ReactionChips({
   reactions,
   isMine,
 }: {

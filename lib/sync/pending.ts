@@ -154,15 +154,15 @@ export function startPendingSync(): void {
   NetInfo.addEventListener((state) => {
     const online = !!state.isConnected && state.isInternetReachable !== false;
     if (online) {
-      flushPendingMessages();
+      flushPendingMessages().catch(() => {});
     }
   });
 
   AppState.addEventListener("change", (status) => {
     if (status === "active") {
-      flushPendingMessages();
+      flushPendingMessages().catch(() => {});
     }
   });
 
-  flushPendingMessages();
+  flushPendingMessages().catch(() => {});
 }

@@ -2,6 +2,7 @@ import {
   Alert,
   Dimensions,
   Pressable,
+  ScrollView,
   Text,
   View,
   StyleSheet,
@@ -23,7 +24,8 @@ import { BlurView } from "expo-blur";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import Feather from "@expo/vector-icons/Feather";
-import { MessageBubbleContent } from "./MessageBubble";
+import { MessageBubbleContent, ReactionChips } from "./MessageBubble";
+import type { Message } from "@/types/message";
 
 const SCREEN = Dimensions.get("window");
 
@@ -37,7 +39,7 @@ type Position = {
 type MessageActionSheetProps = {
   visible: boolean;
   isMine: boolean;
-  message: string;
+  message: Message | null;
   messageId: number;
   position: Position | null;
   textColor: string;
@@ -61,95 +63,147 @@ const REACTION_SIZE = 44;
 const REACTION_GAP = 4;
 const REACTION_BAR_PADDING_H = 12;
 const REACTION_BAR_HEIGHT = REACTION_SIZE + REACTION_BAR_PADDING_H * 2;
+const REACTION_BAR_WIDTH =
+  REACTIONS.length * REACTION_SIZE +
+  (REACTIONS.length - 1) * REACTION_GAP +
+  REACTION_BAR_PADDING_H * 2;
 const MENU_WIDTH = 200;
 const MENU_ROW_HEIGHT = 44;
 const MENU_PADDING_V = 6;
-const FLOAT_GAP = 14;
+const FLOAT_GAP = 10;
 const SCREEN_PAD = 12;
 
-const SPRING_MSG = { damping: 28, stiffness: 380, mass: 0.8 };
-const SPRING_MENU = { damping: 26, stiffness: 350, mass: 0.7 };
-const SPRING_REACT = { damping: 18, stiffness: 360, mass: 0.6 };
-const EXIT_DURATION = 150;
+const EXIT_DURATION = 120;
 const EXIT_EASING = REasing.out(REasing.cubic);
+const ENTER_DURATION = 120;
+const ENTER_EASING = REasing.out(REasing.quad);
 
 type Layout = {
-  rowTop: number;
-  reactionTop: number;
+  groupTop: number;
+  groupHeight: number;
+  menuHeight: number;
+  copyHeight: number;
   reactionLeft: number;
-  menuTop: number;
   menuLeft: number;
 };
 
+function clamp(v: number, min: number, max: number) {
+  return Math.max(min, Math.min(v, max));
+}
+
+function menuRowsFor(isGroup: boolean, isMine: boolean): string[] {
+  if (isGroup) {
+    return isMine
+      ? ["reply", "edit", "copy", "forward", "pin", "info", "delete"]
+      : ["reply", "copy", "forward", "pin", "info"];
+  }
+  return isMine
+    ? ["reply", "edit", "copy", "forward", "pin", "delete"]
+    : ["reply", "copy", "forward", "pin"];
+}
+
 function computeLayout(p: Position, isMine: boolean, isGroup: boolean): Layout {
-  const menuRows = (
-    isGroup
-      ? isMine
-        ? ["reply", "edit", "copy", "forward", "pin", "info", "delete"]
-        : ["reply", "copy", "forward", "pin", "info"]
-      : isMine
-        ? ["reply", "edit", "copy", "forward", "pin", "delete"]
-        : ["reply", "copy", "forward", "pin"]
-  ).length;
+  const menuHeight =
+    menuRowsFor(isGroup, isMine).length * MENU_ROW_HEIGHT +
+    MENU_PADDING_V * 2;
 
-  const menuHeight = menuRows * MENU_ROW_HEIGHT + MENU_PADDING_V * 2;
-  const reactionBarWidth =
-    REACTIONS.length * REACTION_SIZE +
-    (REACTIONS.length - 1) * REACTION_GAP +
-    REACTION_BAR_PADDING_H * 2;
+  // Cap how tall the floating bubble copy may be so the menu stays visible
+  // even for very long messages: what's left of the screen after the reaction
+  // bar, menu, gaps and padding are reserved.
+  const availableCopy = Math.max(
+    0,
+    SCREEN.height -
+      2 * SCREEN_PAD -
+      REACTION_BAR_HEIGHT -
+      FLOAT_GAP * 2 -
+      menuHeight,
+  );
+  const copyHeight = Math.min(p.height, availableCopy);
 
-  // Position the menu relative to the message's NATURAL height so the
-  // bubble keeps its exact size/padding and never gets clamped or shrunk.
-  const effectiveHeight = Math.max(80, p.height);
-
+  // Real measured bubble height — no phantom min-height, so the spacing
+  // between the reaction bar / bubble / menu is always consistent.
   const groupHeight =
-    REACTION_BAR_HEIGHT + FLOAT_GAP + effectiveHeight + FLOAT_GAP + menuHeight;
+    REACTION_BAR_HEIGHT + FLOAT_GAP + copyHeight + FLOAT_GAP + menuHeight;
 
-  const originalGroupTop = p.pageY - REACTION_BAR_HEIGHT - FLOAT_GAP;
+  // Anchor so the floating bubble lands exactly where the original message
+  // sits; only shift the whole group when it wouldn't fit on screen.
+  const unclampedGroupTop = p.pageY - REACTION_BAR_HEIGHT - FLOAT_GAP;
   const maxGroupTop = Math.max(
     SCREEN_PAD,
     SCREEN.height - groupHeight - SCREEN_PAD,
   );
-  const groupTop = Math.max(
+  const groupTop = clamp(
+    unclampedGroupTop,
     SCREEN_PAD,
-    Math.min(originalGroupTop, maxGroupTop),
+    maxGroupTop,
   );
 
-  const reactionTop = groupTop;
-  const rowTop = reactionTop + REACTION_BAR_HEIGHT + FLOAT_GAP;
-  const menuTop = rowTop + effectiveHeight + FLOAT_GAP;
-
-  let reactionLeft = p.pageX + p.width / 2 - reactionBarWidth / 2;
-  reactionLeft = Math.max(
+  // Anchor the reaction bar to the bubble's OUTER edge — for incoming messages
+  // (left side) hug the bubble's left edge, for mine (right side) hug the
+  // right edge. Centering under the bubble would push the emojis far away
+  // from a short bubble that sits at a screen edge.
+  const reactionLeft = clamp(
+    isMine
+      ? p.pageX + p.width - REACTION_BAR_WIDTH
+      : p.pageX,
     SCREEN_PAD,
-    Math.min(reactionLeft, SCREEN.width - reactionBarWidth - SCREEN_PAD),
+    SCREEN.width - REACTION_BAR_WIDTH - SCREEN_PAD,
   );
 
-  let menuLeft =
+  const menuLeft = clamp(
     p.pageX + p.width / 2 > SCREEN.width / 2
       ? p.pageX + p.width - MENU_WIDTH
-      : p.pageX;
-
-  menuLeft = Math.max(
+      : p.pageX,
     SCREEN_PAD,
-    Math.min(menuLeft, SCREEN.width - MENU_WIDTH - SCREEN_PAD),
+    SCREEN.width - MENU_WIDTH - SCREEN_PAD,
   );
 
   return {
-    rowTop,
-    reactionTop,
+    groupTop,
+    groupHeight,
+    menuHeight,
+    copyHeight,
     reactionLeft,
-    menuTop,
     menuLeft,
   };
 }
+
+const reactionBarStyle = {
+  width: REACTION_BAR_WIDTH,
+  height: REACTION_BAR_HEIGHT,
+  flexDirection: "row" as const,
+  alignItems: "center" as const,
+  justifyContent: "center" as const,
+  paddingHorizontal: REACTION_BAR_PADDING_H,
+  gap: REACTION_GAP,
+  backgroundColor: "rgba(40,40,40,0.55)",
+  borderRadius: 28,
+  overflow: "hidden" as const,
+  shadowColor: "#000",
+  shadowOpacity: 0.35,
+  shadowRadius: 20,
+  shadowOffset: { width: 0, height: 8 },
+  elevation: 12,
+};
+
+const menuStyle = {
+  width: MENU_WIDTH,
+  backgroundColor: "rgba(40,40,40,0.6)",
+  borderRadius: 16,
+  overflow: "hidden" as const,
+  shadowColor: "#000",
+  shadowOpacity: 0.4,
+  shadowRadius: 24,
+  shadowOffset: { width: 0, height: 10 },
+  elevation: 14,
+  paddingVertical: MENU_PADDING_V,
+};
 
 export function MessageActionSheet({
   visible,
   isMine,
   message,
   isGroup,
-  messageId,
   position,
   textColor,
   bubbleColor,
@@ -168,12 +222,14 @@ export function MessageActionSheet({
   const isDismissingRef = useRef(false);
 
   const overlayOpacity = useSharedValue(0);
-  const msgScale = useSharedValue(1);
-  const rowTranslateY = useSharedValue(0);
+  const groupTranslateY = useSharedValue(0);
   const reactionOpacity = useSharedValue(0);
   const reactionTranslateY = useSharedValue(8);
   const menuOpacity = useSharedValue(0);
   const menuTranslateY = useSharedValue(8);
+  const copyScrollY = useSharedValue(0);
+  const copyScrollContentH = useSharedValue(0);
+  const copyScrollRef = useRef<ScrollView>(null);
 
   const reactScale0 = useSharedValue(1);
   const reactScale1 = useSharedValue(1);
@@ -195,6 +251,14 @@ export function MessageActionSheet({
     [position, isMine, isGroup],
   );
 
+  // Where the group sits so the floating bubble overlaps the original spot.
+  const pinnedGroupTop = position
+    ? position.pageY - REACTION_BAR_HEIGHT - FLOAT_GAP
+    : 0;
+
+  const truncated =
+    layout !== null && position !== null && layout.copyHeight < position.height;
+
   const finishClose = useCallback(() => {
     isDismissingRef.current = false;
     setMounted(false);
@@ -208,16 +272,18 @@ export function MessageActionSheet({
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     onDismissStart?.();
 
-    msgScale.value = withSpring(1, SPRING_MSG);
-    rowTranslateY.value = withSpring(position.pageY, SPRING_MSG);
-
-    reactionOpacity.value = withTiming(0, {
-      duration: 100,
+    groupTranslateY.value = withTiming(pinnedGroupTop, {
+      duration: EXIT_DURATION,
       easing: EXIT_EASING,
     });
-    reactionTranslateY.value = withTiming(8, { duration: 100 });
-    menuOpacity.value = withTiming(0, { duration: 100, easing: EXIT_EASING });
-    menuTranslateY.value = withTiming(8, { duration: 100 });
+
+    reactionOpacity.value = withTiming(0, {
+      duration: 90,
+      easing: EXIT_EASING,
+    });
+    reactionTranslateY.value = withTiming(8, { duration: 90 });
+    menuOpacity.value = withTiming(0, { duration: 90, easing: EXIT_EASING });
+    menuTranslateY.value = withTiming(8, { duration: 90 });
 
     overlayOpacity.value = withTiming(
       0,
@@ -228,11 +294,11 @@ export function MessageActionSheet({
     );
   }, [
     position,
+    pinnedGroupTop,
     finishClose,
     onDismissStart,
     overlayOpacity,
-    msgScale,
-    rowTranslateY,
+    groupTranslateY,
     reactionOpacity,
     reactionTranslateY,
     menuOpacity,
@@ -244,8 +310,7 @@ export function MessageActionSheet({
     setMounted(true);
     isDismissingRef.current = false;
 
-    rowTranslateY.value = position.pageY;
-    msgScale.value = 1;
+    groupTranslateY.value = pinnedGroupTop;
     overlayOpacity.value = 0;
     reactionOpacity.value = 0;
     reactionTranslateY.value = 8;
@@ -254,26 +319,37 @@ export function MessageActionSheet({
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-    overlayOpacity.value = withSpring(1, { damping: 30, stiffness: 280 });
-    rowTranslateY.value = withSpring(layout.rowTop, SPRING_MSG);
-    msgScale.value = 1;
-    reactionOpacity.value = withDelay(
-      30,
-      withSpring(1, { damping: 24, stiffness: 280 }),
-    );
-    reactionTranslateY.value = withDelay(30, withSpring(0, SPRING_REACT));
+    overlayOpacity.value = withTiming(1, {
+      duration: 150,
+      easing: ENTER_EASING,
+    });
+    groupTranslateY.value = withTiming(layout.groupTop, {
+      duration: ENTER_DURATION,
+      easing: ENTER_EASING,
+    });
+    reactionOpacity.value = withTiming(1, {
+      duration: ENTER_DURATION,
+      easing: ENTER_EASING,
+    });
+    reactionTranslateY.value = withTiming(0, {
+      duration: ENTER_DURATION,
+      easing: ENTER_EASING,
+    });
     menuOpacity.value = withDelay(
-      60,
-      withSpring(1, { damping: 24, stiffness: 280 }),
+      12,
+      withTiming(1, { duration: ENTER_DURATION, easing: ENTER_EASING }),
     );
-    menuTranslateY.value = withDelay(60, withSpring(0, SPRING_MENU));
+    menuTranslateY.value = withDelay(
+      12,
+      withTiming(0, { duration: ENTER_DURATION, easing: ENTER_EASING }),
+    );
   }, [
     visible,
     position,
     layout,
+    pinnedGroupTop,
     overlayOpacity,
-    msgScale,
-    rowTranslateY,
+    groupTranslateY,
     reactionOpacity,
     reactionTranslateY,
     menuOpacity,
@@ -284,13 +360,17 @@ export function MessageActionSheet({
     opacity: overlayOpacity.value,
   }));
 
-  const rowAnimStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: rowTranslateY.value }],
+  const groupAnimStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: groupTranslateY.value }],
   }));
 
-  const bubbleScaleStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: msgScale.value }],
-  }));
+  const moreHintStyle = useAnimatedStyle(() => {
+    const viewportH = layout?.copyHeight ?? 0;
+    const maxOffset = Math.max(copyScrollContentH.value - viewportH, 0);
+    const nearEnd =
+      copyScrollContentH.value <= 0 || copyScrollY.value >= maxOffset - 20;
+    return { opacity: nearEnd ? 0 : 1 };
+  });
 
   const reactionAnimStyle = useAnimatedStyle(() => ({
     opacity: reactionOpacity.value,
@@ -306,8 +386,8 @@ export function MessageActionSheet({
 
   const handleReaction = async (emoji: string, index: number) => {
     reactScales[index].value = withSequence(
-      withSpring(1.35, { damping: 10, stiffness: 400 }),
-      withSpring(1, { damping: 14, stiffness: 300 }),
+      withTiming(1.3, { duration: 90 }),
+      withTiming(1, { duration: 130 }),
     );
     Haptics.selectionAsync();
     onReact?.(emoji);
@@ -316,7 +396,7 @@ export function MessageActionSheet({
   };
 
   const handleCopy = async () => {
-    await Clipboard.setStringAsync(message);
+    await Clipboard.setStringAsync(message?.text ?? "");
     dismiss();
   };
 
@@ -345,11 +425,6 @@ export function MessageActionSheet({
       />
     </Animated.View>
   );
-
-  const reactionBarWidth =
-    REACTIONS.length * REACTION_SIZE +
-    (REACTIONS.length - 1) * REACTION_GAP +
-    REACTION_BAR_PADDING_H * 2;
 
   const menuItems = [
     {
@@ -425,6 +500,8 @@ export function MessageActionSheet({
       : []),
   ];
 
+  const hasReactions = (message?.reactions?.length ?? 0) > 0;
+
   return (
     <Modal
       visible={mounted}
@@ -436,7 +513,7 @@ export function MessageActionSheet({
       <View style={{ flex: 1 }}>
         <Pressable style={StyleSheet.absoluteFill} onPress={dismiss} />
 
-        {renderBlur(overlayAnimStyle, 50)}
+        {renderBlur(overlayAnimStyle, 38)}
 
         <Animated.View
           pointerEvents="box-none"
@@ -448,111 +525,165 @@ export function MessageActionSheet({
               {
                 position: "absolute",
                 left: 0,
+                top: 0,
                 width: SCREEN.width,
               },
-              rowAnimStyle,
+              groupAnimStyle,
             ]}
           >
+            {/* Reaction bar — anchored horizontally, in vertical flow so the
+                gap to the bubble is always exact. */}
             <View
-              className={`flex-row px-1 ${isMine ? "justify-end" : "justify-start"}`}
+              pointerEvents="box-none"
+              style={{
+                height: REACTION_BAR_HEIGHT,
+                paddingLeft: layout.reactionLeft,
+                marginBottom: FLOAT_GAP,
+                zIndex: 20,
+              }}
+            >
+              <Animated.View style={[reactionBarStyle, reactionAnimStyle]}>
+                {REACTIONS.map((emoji, i) => (
+                  <ReactionEmoji
+                    key={i}
+                    emoji={emoji}
+                    scaleValue={reactScales[i]}
+                    onPress={() => handleReaction(emoji, i)}
+                  />
+                ))}
+              </Animated.View>
+            </View>
+
+            {/* Faithful floating copy of the original message — pinned to the
+                exact measured position, so its padding and margins match the
+                real bubble exactly. */}
+            <View
+              pointerEvents="none"
+              style={{
+                width: "100%",
+                alignItems: isMine ? "flex-end" : "flex-start",
+                marginBottom: FLOAT_GAP,
+              }}
             >
               <Animated.View
                 style={[
                   {
                     maxWidth: "80%",
-                    alignSelf: isMine ? "flex-end" : "flex-start",
+                    marginLeft: isMine ? undefined : position.pageX,
+                    marginRight: isMine
+                      ? SCREEN.width - position.pageX - position.width
+                      : undefined,
+                    marginBottom: hasReactions ? 14 : 0,
                     shadowColor: "#000",
                     shadowOpacity: 0.3,
                     shadowRadius: 16,
                     shadowOffset: { width: 0, height: 8 },
                     elevation: 16,
+                    ...(truncated ? { height: layout.copyHeight } : {}),
                   },
-                  bubbleScaleStyle,
                 ]}
               >
-                <MessageBubbleContent
-                  text={message}
-                  isMine={isMine}
-                  textColor={textColor}
-                  bubbleColor={bubbleColor}
-                />
+                {truncated ? (
+                  <ScrollView
+                    ref={copyScrollRef}
+                    style={{ flex: 1 }}
+                    nestedScrollEnabled
+                    showsVerticalScrollIndicator={false}
+                    scrollEventThrottle={16}
+                    onScroll={(e) => {
+                      copyScrollY.value = e.nativeEvent.contentOffset.y;
+                      copyScrollContentH.value = e.nativeEvent.contentSize.height;
+                    }}
+                    onContentSizeChange={(_w, h) => {
+                      copyScrollContentH.value = h;
+                    }}
+                  >
+                    <MessageBubbleContent
+                      text={message?.text ?? ""}
+                      isMine={isMine}
+                      textColor={textColor}
+                      bubbleColor={bubbleColor}
+                      editedAt={message?.editedAt ?? undefined}
+                      sentAt={message?.sentAt}
+                      isPending={(message?.id ?? 0) < 0}
+                      isGroup={isGroup}
+                      repliedTo={message?.repliedTo}
+                      replyToId={message?.replyToId}
+                      forwardedFromMsgId={message?.forwardedFromMsgId}
+                    />
+                  </ScrollView>
+                ) : (
+                  <MessageBubbleContent
+                    text={message?.text ?? ""}
+                    isMine={isMine}
+                    textColor={textColor}
+                    bubbleColor={bubbleColor}
+                    editedAt={message?.editedAt ?? undefined}
+                    sentAt={message?.sentAt}
+                    isPending={(message?.id ?? 0) < 0}
+                    isGroup={isGroup}
+                    repliedTo={message?.repliedTo}
+                    replyToId={message?.replyToId}
+                    forwardedFromMsgId={message?.forwardedFromMsgId}
+                  />
+                )}
+                {truncated ? (
+                  <Animated.View
+                    pointerEvents="box-none"
+                    style={[
+                      {
+                        position: "absolute",
+                        alignSelf: "center",
+                        bottom: hasReactions ? 48 : 8,
+                      },
+                      moreHintStyle,
+                    ]}
+                  >
+                    <Pressable
+                      onPress={() =>
+                        copyScrollRef.current?.scrollToEnd({ animated: true })
+                      }
+                      style={{
+                        paddingHorizontal: 12,
+                        paddingVertical: 4,
+                        borderRadius: 14,
+                        backgroundColor: "rgba(20,20,20,0.5)",
+                      }}
+                    >
+                      <Text style={{ color: "#fff", fontSize: 13, fontWeight: "600" }}>
+                        … More
+                      </Text>
+                    </Pressable>
+                  </Animated.View>
+                ) : null}
+                <ReactionChips reactions={message?.reactions} isMine={isMine} />
               </Animated.View>
             </View>
-          </Animated.View>
 
-          <Animated.View
-            pointerEvents="box-none"
-            style={[
-              {
-                position: "absolute",
-                top: layout.reactionTop,
-                left: layout.reactionLeft,
-                width: reactionBarWidth,
-                height: REACTION_BAR_HEIGHT,
-                flexDirection: "row",
-                alignItems: "center",
-                justifyContent: "center",
-                paddingHorizontal: REACTION_BAR_PADDING_H,
-                gap: REACTION_GAP,
-                backgroundColor: "rgba(40,40,40,0.55)",
-                borderRadius: 28,
-                overflow: "hidden",
-                shadowColor: "#000",
-                shadowOpacity: 0.35,
-                shadowRadius: 20,
-                shadowOffset: { width: 0, height: 8 },
-                elevation: 12,
+            {/* Action menu — anchored horizontally, in vertical flow below the
+                bubble with the exact same gap as the reaction bar above. */}
+            <View
+              pointerEvents="box-none"
+              style={{
+                height: layout.menuHeight,
+                paddingLeft: layout.menuLeft,
                 zIndex: 20,
-              },
-              reactionAnimStyle,
-            ]}
-          >
-            {renderBlur({}, 30)}
-            {REACTIONS.map((emoji, i) => (
-              <ReactionEmoji
-                key={i}
-                emoji={emoji}
-                scaleValue={reactScales[i]}
-                onPress={() => handleReaction(emoji, i)}
-              />
-            ))}
-          </Animated.View>
-
-          <Animated.View
-            pointerEvents="box-none"
-            style={[
-              {
-                position: "absolute",
-                top: layout.menuTop,
-                left: layout.menuLeft,
-                width: MENU_WIDTH,
-                backgroundColor: "rgba(40,40,40,0.6)",
-                borderRadius: 16,
-                overflow: "hidden",
-                shadowColor: "#000",
-                shadowOpacity: 0.4,
-                shadowRadius: 24,
-                shadowOffset: { width: 0, height: 10 },
-                elevation: 14,
-                zIndex: 20,
-                paddingVertical: MENU_PADDING_V,
-              },
-              menuAnimStyle,
-            ]}
-          >
-            {renderBlur({}, 35)}
-
-            <View style={{ zIndex: 30 }}>
-              {menuItems.map((item) => (
-                <MenuItem
-                  key={item.key}
-                  icon={item.icon}
-                  label={item.label}
-                  color={item.color}
-                  disabled={item.disabled}
-                  onPress={item.onPress}
-                />
-              ))}
+              }}
+            >
+              <Animated.View style={[menuStyle, menuAnimStyle]}>
+                <View style={{ zIndex: 30 }}>
+                  {menuItems.map((item) => (
+                    <MenuItem
+                      key={item.key}
+                      icon={item.icon}
+                      label={item.label}
+                      color={item.color}
+                      disabled={item.disabled}
+                      onPress={item.onPress}
+                    />
+                  ))}
+                </View>
+              </Animated.View>
             </View>
           </Animated.View>
         </Animated.View>

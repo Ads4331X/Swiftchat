@@ -1,7 +1,6 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { FlatList } from "react-native";
-import { useSharedValue, withSpring } from "react-native-reanimated";
 import {
   SafeAreaView,
   useSafeAreaInsets,
@@ -31,6 +30,7 @@ import {
 import PinnedMessages from "@/components/chat/PinnedMessages";
 import { api } from "@/lib/api";
 import { formatPresence } from "@/lib/utils/formatPresence";
+import Toast from "react-native-toast-message";
 
 type Position = {
   pageX: number;
@@ -64,7 +64,6 @@ export default function UserChat() {
     placeholderColor,
   } = useTheme();
   const insets = useSafeAreaInsets();
-  const pressProgress = useSharedValue(0);
   const {
     needsPin,
     pinMode,
@@ -191,6 +190,14 @@ export default function UserChat() {
   }, [messages, id]);
   const handleSend = async () => {
     if (!draft.trim() || sending) return;
+    if (!conversationKey) {
+      Toast.show({
+        type: "error",
+        text1: "Encryption key not ready",
+        text2: "Please wait a moment and try again.",
+      });
+      return;
+    }
     const text = draft;
     setDraft("");
     setSending(true);
@@ -214,7 +221,6 @@ export default function UserChat() {
   const handleLongPress = (message: Message, position: Position) => {
     setSelectedMessage(message);
     setMenuPosition(position);
-    pressProgress.value = withSpring(1, { damping: 28, stiffness: 300 });
   };
 
   const handleMessageInfo = () => {
@@ -423,9 +429,6 @@ export default function UserChat() {
         onReact={(emoji) =>
           selectedMessage && reactToMessage(selectedMessage.id, emoji)
         }
-        onDismissStart={() => {
-          pressProgress.value = withSpring(0, { damping: 28, stiffness: 300 });
-        }}
         onClose={closeActions}
       />
       <ForwardSheet

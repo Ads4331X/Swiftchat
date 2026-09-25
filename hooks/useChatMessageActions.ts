@@ -121,6 +121,7 @@ export default function useChatMessageActions({
     setMessages((prev) => [...prev, optimisticMessage]);
 
     const held = await acquireFlushLock();
+    let queued = false;
     try {
       const { encryptedMessage, nonce: replyNonce } = await encryptMessage({
         message: trimmed,
@@ -144,6 +145,7 @@ export default function useChatMessageActions({
           ? JSON.stringify(repliedToSnapshot)
           : undefined,
       });
+      queued = true;
 
       const response = await api.post(`/api/conversations/messages`, {
         messageText: encryptedMessage,
@@ -179,6 +181,13 @@ export default function useChatMessageActions({
       replaceOptimisticWithConfirmed(tempId, optimisticMessage.key, confirmedMessage);
     } catch (err) {
       console.error("replyMessage failed:", err);
+      Toast.show({
+        type: "error",
+        text1: "Message not sent",
+        text2: queued
+          ? "Backend unreachable — queued and will retry automatically."
+          : "Could not send right now. Please try again.",
+      });
     } finally {
       if (held) releaseFlushLock();
     }
@@ -203,6 +212,7 @@ export default function useChatMessageActions({
     setMessages((prev) => [...prev, optimisticMessage]);
 
     const held = await acquireFlushLock();
+    let queued = false;
     try {
       const { encryptedMessage, nonce: encryptedNonce } = await encryptMessage({
         message: trimmed,
@@ -224,6 +234,7 @@ export default function useChatMessageActions({
         conversationId: optimisticMessage.conversationId,
         sentAt: optimisticMessage.sentAt,
       });
+      queued = true;
 
       const response = await api.post(`/api/conversations/messages`, {
         messageText: encryptedMessage,
@@ -254,6 +265,13 @@ export default function useChatMessageActions({
       replaceOptimisticWithConfirmed(tempId, optimisticMessage.key, confirmedMessage);
     } catch (err) {
       console.error("sendMessage failed:", err);
+      Toast.show({
+        type: "error",
+        text1: "Message not sent",
+        text2: queued
+          ? "Backend unreachable — queued and will retry automatically."
+          : "Could not send right now. Please try again.",
+      });
     } finally {
       if (held) releaseFlushLock();
     }

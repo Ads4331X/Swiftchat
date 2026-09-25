@@ -45,7 +45,7 @@ export default function useChatParticipant(
     async function loadKey() {
       if (!conversationId || !memberIds) return;
 
-      setUpKeys();
+      setUpKeys().catch(() => {});
 
       try {
         const userId = await getCurrentUserId();

@@ -49,6 +49,7 @@ export default function DisplayPickedAvatar() {
         "/api/user/update-profile-picture",
         formdata,
       );
+      console.log(result);
 
       const userId = Number(result.data.message.id);
       const avatarUrl = result.data.message.avatar;
@@ -78,7 +79,7 @@ export default function DisplayPickedAvatar() {
       }
 
       setLoading(false);
-      router.navigate("/usersetting");
+      router.dismissTo("/usersetting");
     } catch (error) {
       console.log("UPLOAD ERROR:", error);
       setLoading(false);

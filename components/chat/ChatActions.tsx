@@ -19,7 +19,7 @@ type ChatActionsProps = {
   onForward?: () => void;
   onPin?: () => void;
   onInfo?: () => void;
-  onDismissStart: () => void;
+  onDismissStart?: () => void;
   onClose: () => void;
   isGroup: boolean;
   /** Whether pinning is allowed (group admins only; always true in 1:1). */
@@ -48,7 +48,7 @@ export default function ChatActions({
     <MessageActionSheet
       visible={!!message}
       isMine={message?.senderId === currentUserId}
-      message={message?.text ?? ""}
+      message={message}
       messageId={message?.id ?? 0}
       position={position}
       textColor={textColor}
