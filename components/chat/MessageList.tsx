@@ -40,6 +40,7 @@ type MessageListProps = {
   members?: { id: number; username: string; avatar?: string }[];
   onQuotePress?: (messageId: number) => void;
   showSkeleton?: boolean;
+  serverLoaded?: boolean;
 };
 
 // How far (px) from the bottom counts as "still at the bottom" for the
@@ -68,6 +69,7 @@ export default function MessageList({
   members = [],
   onQuotePress,
   showSkeleton = false,
+  serverLoaded = false,
 }: MessageListProps) {
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [highlightedId, setHighlightedId] = useState<number | null>(null);
@@ -506,6 +508,12 @@ export default function MessageList({
   if (!initialized) {
     // Brief window before the cache read resolves on a REOPEN (already seen
     // this session) — render nothing so no misleading empty state appears.
+    return <View className="flex-1" />;
+  }
+
+  // Still waiting on the server page: render nothing rather than flashing the
+  // "Say hi" empty state over a chat that may well have messages.
+  if (!serverLoaded) {
     return <View className="flex-1" />;
   }
 

@@ -73,6 +73,9 @@ const STATEMENTS = [
     conversationId INTEGER PRIMARY KEY,
     keyBase64 TEXT NOT NULL
   );`,
+  `CREATE TABLE IF NOT EXISTS BlockedUser (
+  userId INTEGER PRIMARY KEY
+);`,
 ];
 
 let fts5Available = false;

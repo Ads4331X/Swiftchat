@@ -21,6 +21,7 @@ import { decryptMessage, getOrCreateConversationKey } from "@/lib/crypto";
 import NetInfo from "@react-native-community/netinfo";
 import Toast from "react-native-toast-message";
 import { reportPresence } from "@/constants/presence-provider";
+import { syncBlockedUsers } from "@/lib/db/blockedUsers";
 
 export type ChatMember = {
   id: number;
@@ -185,13 +186,28 @@ export default function useChats() {
         // whatever is on screen (server list from a previous fetch or the
         // local cache) instead of wiping it. Retries happen on the next focus
         // or connectivity event.
-        console.warn("useChats: server fetch failed — keeping current list:", err);
+        console.warn(
+          "useChats: server fetch failed — keeping current list:",
+          err,
+        );
         return;
       }
 
       await syncConversationsWithServer({
         serverConversations,
       });
+
+      try {
+        const response = await api.get("/api/user/blocks");
+
+        const blockedUserIdsServer = Array.isArray(response.data)
+          ? response.data.map((block) => block.blockedId)
+          : [];
+
+        await syncBlockedUsers(blockedUserIdsServer);
+      } catch (err) {
+        console.warn("useChats: failed to sync blocked users:", err);
+      }
 
       const fetched: Chat[] = dedupe(serverConversations);
 

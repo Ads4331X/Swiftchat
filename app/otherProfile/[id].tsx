@@ -28,8 +28,10 @@ import { clearChat } from "@/lib/sync";
 import { formatPresence } from "@/lib/utils/formatPresence";
 import { listenForPresence } from "@/lib/socket";
 import { reportPresence } from "@/constants/presence-provider";
+import { useBlockedUsers } from "@/hooks/useBlockedUsers";
 
 type User = {
+  id: number;
   avatar?: string;
   username: string;
   lastSeen: string | null;
@@ -42,6 +44,7 @@ export default function OtherProfile() {
     memberIds?: string;
     chatId?: string;
   }>();
+
   const router = useRouter();
   const { colors } = useTheme();
   const [user, setUser] = useState<User>();
@@ -58,6 +61,8 @@ export default function OtherProfile() {
   const [groupName, setGroupName] = useState<string | null>(null);
   const [renameVisible, setRenameVisible] = useState(false);
   const [renameText, setRenameText] = useState("");
+  const { blockedIds, addBlockUserId, removeBlockUserId } = useBlockedUsers();
+  const isBlocked = user ? blockedIds.includes(user.id) : false;
 
   const otherMemberIds = (memberIds ?? "")
     .split(",")
@@ -142,6 +147,7 @@ export default function OtherProfile() {
       const { data } = await api.get(`/api/user/${id}`);
 
       setUser({
+        id: data.id,
         avatar: data.avatar,
         username: data.username,
         lastSeen: data.lastSeen,
@@ -401,15 +407,41 @@ export default function OtherProfile() {
         {
           key: "block",
           icon: "slash",
-          label: `Block ${user?.username ?? "contact"}`,
-          destructive: true,
+          label: isBlocked
+            ? `Unblock ${user?.username ?? "contact"}`
+            : `Block ${user?.username ?? "contact"}`,
+          destructive: !isBlocked,
           onPress: () =>
             confirm(
-              "Block contact",
-              `You won't receive messages or calls from ${
-                user?.username ?? "this contact"
-              } anymore.`,
-              () => console.log("Contact blocked"),
+              isBlocked ? "Unblock contact" : "Block contact",
+              isBlocked
+                ? `You will be able to receive messages from ${
+                    user?.username ?? "this contact"
+                  } again.`
+                : `You won't receive messages or calls from ${
+                    user?.username ?? "this contact"
+                  } anymore.`,
+              async () => {
+                try {
+                  if (isBlocked) {
+                    await api.delete("/api/user/block", {
+                      data: {
+                        userId: user!.id,
+                      },
+                    });
+
+                    await removeBlockUserId(user!.id);
+                  } else {
+                    await api.post("/api/user/block", {
+                      userId: user!.id,
+                    });
+
+                    await addBlockUserId(user!.id);
+                  }
+                } catch (err) {
+                  console.warn("Failed to update block:", err);
+                }
+              },
             ),
         },
       ];

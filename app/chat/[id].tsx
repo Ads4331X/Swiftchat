@@ -14,6 +14,7 @@ import { conversationDisplayName } from "@/lib/utils";
 import useChatTyping from "@/hooks/useChatTyping";
 import { useKeySetup } from "@/hooks/useKeySetup";
 import ChatActions from "@/components/chat/ChatActions";
+import BlockedNotice from "@/components/chat/BlockedNotice";
 import ChatComposer from "@/components/chat/ChatComposer";
 import ChatHeader from "@/components/chat/ChatHeader";
 import MessageList from "@/components/chat/MessageList";
@@ -28,9 +29,10 @@ import {
   savePinnedMessage,
 } from "@/lib/db";
 import PinnedMessages from "@/components/chat/PinnedMessages";
-import { api } from "@/lib/api";
+import { api, unblockUser } from "@/lib/api";
 import { formatPresence } from "@/lib/utils/formatPresence";
 import Toast from "react-native-toast-message";
+import { useBlockedUsers } from "@/hooks/useBlockedUsers";
 
 type Position = {
   pageX: number;
@@ -55,6 +57,8 @@ export default function UserChat() {
     .map(Number);
   const memberCount = otherMemberIds.length + 1;
   const isGroup = otherMemberIds.length > 1;
+  const { blockedIds, removeBlockUserId, ready: blockedReady } =
+    useBlockedUsers();
   const {
     colors,
     subtleText,
@@ -90,6 +94,7 @@ export default function UserChat() {
     messages,
     showSkeleton,
     initialized,
+    serverLoaded,
     loadingMore,
     hasMore,
     sendMessage,
@@ -102,6 +107,7 @@ export default function UserChat() {
 
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [unblocking, setUnblocking] = useState(false);
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
   const [pinnedMessageId, setPinnedMessageId] = useState<number | null>(null);
   const pinnedFetchedRef = useRef(false);
@@ -121,6 +127,18 @@ export default function UserChat() {
   const listRef = useRef<FlatList<Message>>(null);
   const scrollToEndRef = useRef<(() => void) | null>(null);
   const forwardSheetRef = useRef<BottomSheet>(null);
+
+  const isBlocked =
+    blockedReady &&
+    !isGroup &&
+    otherUser?.userId != null &&
+    blockedIds.includes(otherUser.userId);
+
+  // Groups never use the blocked UI. Until the blocked list has been read we
+  // render neither the composer nor the bar, so the composer can't flash in
+  // before the blocked state is known.
+  const showComposer = isGroup || (blockedReady && !isBlocked);
+  const showBlockedBar = isBlocked;
 
   useEffect(() => {
     setActiveConversation(Number(id));
@@ -215,6 +233,31 @@ export default function UserChat() {
       scrollToEndRef.current?.();
     } finally {
       setSending(false);
+    }
+  };
+
+  const handleUnblock = async () => {
+    const blockedUserId = otherUser?.userId;
+    if (blockedUserId == null || unblocking) return;
+    setUnblocking(true);
+    try {
+      await unblockUser(blockedUserId);
+      await removeBlockUserId(blockedUserId);
+      Toast.show({
+        type: "success",
+        text1: "Contact unblocked",
+        text2: "You can message each other again.",
+      });
+    } catch (err: any) {
+      Toast.show({
+        type: "error",
+        text1: "Couldn't unblock",
+        text2:
+          (err?.response?.data?.error as string) ??
+          "Something went wrong. Please try again.",
+      });
+    } finally {
+      setUnblocking(false);
     }
   };
 
@@ -359,6 +402,7 @@ export default function UserChat() {
         messages={messages}
         showSkeleton={showSkeleton}
         initialized={initialized}
+        serverLoaded={serverLoaded}
         loadingMore={loadingMore}
         hasMore={hasMore}
         currentUserId={currentUserId}
@@ -377,34 +421,43 @@ export default function UserChat() {
         isGroup={isGroup}
         members={members}
       />
-      <ChatComposer
-        draft={draft}
-        editing={editingMessageId != null}
-        replying={replyingMessageId != null}
-        replyPreview={replyPreview}
-        replySenderName={replyPreviewName}
-        onDraftChange={(text) => {
-          setDraft(text);
-          notifyDraftChange();
-        }}
-        onSend={handleSend}
-        onCancelReply={() => {
-          setReplyingMessageId(null);
-        }}
-        onCancelEdit={() => {
-          setEditingMessageId(null);
-          setDraft("");
-        }}
-        sending={sending}
-        insets={insets}
-        inputBg={inputBg}
-        inputBorderColor={inputBorderColor}
-        placeholderColor={placeholderColor}
-        textColor={colors.text}
-        subtleText={subtleText}
-        dividerColor={dividerColor}
-        backgroundColor={colors.background}
-      />
+
+      {showBlockedBar ? (
+        <BlockedNotice
+          onUnblock={handleUnblock}
+          busy={unblocking}
+          insets={insets}
+        />
+      ) : showComposer ? (
+        <ChatComposer
+          draft={draft}
+          editing={editingMessageId != null}
+          replying={replyingMessageId != null}
+          replyPreview={replyPreview}
+          replySenderName={replyPreviewName}
+          onDraftChange={(text) => {
+            setDraft(text);
+            notifyDraftChange();
+          }}
+          onSend={handleSend}
+          onCancelReply={() => {
+            setReplyingMessageId(null);
+          }}
+          onCancelEdit={() => {
+            setEditingMessageId(null);
+            setDraft("");
+          }}
+          sending={sending}
+          insets={insets}
+          inputBg={inputBg}
+          inputBorderColor={inputBorderColor}
+          placeholderColor={placeholderColor}
+          textColor={colors.text}
+          subtleText={subtleText}
+          dividerColor={dividerColor}
+          backgroundColor={colors.background}
+        />
+      ) : null}
       <ChatActions
         isGroup={isGroup}
         message={selectedMessage}

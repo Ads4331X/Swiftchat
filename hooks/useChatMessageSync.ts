@@ -24,6 +24,7 @@ type Props = {
   setMessages: Dispatch<SetStateAction<Message[]>>;
   setInitialized: Dispatch<SetStateAction<boolean>>;
   setHasMore: Dispatch<SetStateAction<boolean>>;
+  setServerLoaded: Dispatch<SetStateAction<boolean>>;
 };
 
 /**
@@ -37,6 +38,7 @@ export default function useChatMessageSync({
   setMessages,
   setInitialized,
   setHasMore,
+  setServerLoaded,
 }: Props) {
   const { isConnected, isInternetReachable } = useNetInfo();
 
@@ -155,8 +157,11 @@ export default function useChatMessageSync({
       return;
     }
 
-    // Reset state when the conversation changes.
+    // Reset state when the conversation changes. Keep any already-loaded
+    // messages visible while the fresh server page is in flight — only the
+    // empty state is gated on the server having answered.
     setHasMore(true);
+    setServerLoaded(false);
 
     const getMessages = async () => {
       try {
@@ -232,6 +237,7 @@ export default function useChatMessageSync({
       } finally {
         if (active) {
           setInitialized(true);
+          setServerLoaded(true);
         }
       }
     };
@@ -241,5 +247,12 @@ export default function useChatMessageSync({
     return () => {
       active = false;
     };
-  }, [id, decryptedConversationKey, setMessages, setInitialized, setHasMore]);
+  }, [
+    id,
+    decryptedConversationKey,
+    setMessages,
+    setInitialized,
+    setHasMore,
+    setServerLoaded,
+  ]);
 }

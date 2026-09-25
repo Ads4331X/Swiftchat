@@ -9,10 +9,7 @@ import {
   setPrivateKey,
   setPublicKey,
 } from "@/lib/auth";
-import {
-  getConversationKeyCache,
-  setConversationKeyCache,
-} from "@/lib/db";
+import { getConversationKeyCache, setConversationKeyCache } from "@/lib/db";
 import { recoverPrivateKey } from "./recovery";
 const sodium = (sodiumModule as any).default ?? sodiumModule;
 
@@ -34,9 +31,7 @@ async function userKeyName(base: string): Promise<string> {
 
 export async function generateKeyPair() {
   await sodium.ready;
-  console.log("sodium keys after ready:", Object.keys(sodium).slice(0, 20));
-  console.log("TextEncoder:", typeof TextEncoder);
-  console.log("TextDecoder:", typeof TextDecoder);
+
   if (typeof sodium.crypto_box_keypair !== "function") {
     throw new Error(
       "libsodium crypto_box_keypair is unavailable in this runtime",
@@ -249,7 +244,8 @@ export async function getEncryptedConversationKey(conversationId: string) {
     // are sealed with THIS member's private key, so every device must open its
     // copy using this member's public key.
     keyCreatedById: response.data.keyCreatedById ?? null,
-    senderUserId: response.data.senderUserId ?? response.data.createdById ?? null,
+    senderUserId:
+      response.data.senderUserId ?? response.data.createdById ?? null,
   };
 }
 
@@ -433,10 +429,14 @@ async function openConversationKey({
     if (!senderPublicKeyResponse.data?.publicKey) return null;
 
     const { conversationKey } = await decryptConversationKey({
-      encryptedConversationKey: Base64.toUint8Array(row.encryptedConversationKey),
+      encryptedConversationKey: Base64.toUint8Array(
+        row.encryptedConversationKey,
+      ),
       nonce: Base64.toUint8Array(row.nonce),
       receiverPrivateKey: Base64.toUint8Array(receiverPrivateKey),
-      senderPublicKey: Base64.toUint8Array(senderPublicKeyResponse.data.publicKey),
+      senderPublicKey: Base64.toUint8Array(
+        senderPublicKeyResponse.data.publicKey,
+      ),
     });
 
     conversationKeyCache.set(conversationId, conversationKey);

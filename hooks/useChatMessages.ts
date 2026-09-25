@@ -23,6 +23,7 @@ export default function useChatMessages(
 ) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [initialized, setInitialized] = useState(false);
+  const [serverLoaded, setServerLoaded] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [firstLoad, setFirstLoad] = useState(
     () => !hasSeenConversation(Number(id)),
@@ -63,6 +64,7 @@ export default function useChatMessages(
     setMessages,
     setInitialized,
     setHasMore,
+    setServerLoaded,
   });
 
   useChatSocketEvents({
@@ -100,6 +102,7 @@ export default function useChatMessages(
     messages,
     showSkeleton,
     initialized,
+    serverLoaded,
     loadingMore,
     hasMore,
     sendMessage,
