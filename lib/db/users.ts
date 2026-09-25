@@ -1,5 +1,6 @@
 import { getDb } from "./index";
 
+// gets the detail of user from its id
 export async function getUser(userId: number) {
   try {
     const db = await getDb();
@@ -16,6 +17,7 @@ export async function getUser(userId: number) {
   }
 }
 
+// upsert user details
 export async function upsertUser(
   userId: number,
   username: string,
@@ -37,6 +39,7 @@ export async function upsertUser(
   }
 }
 
+// changes the lastseen col of table to null
 export async function setUserActive(userId: number, lastseen: Date | null) {
   try {
     const db = await getDb();
@@ -50,6 +53,7 @@ export async function setUserActive(userId: number, lastseen: Date | null) {
   }
 }
 
+// sets up the avatar url
 export async function setAvatarUrl({
   url,
   userId,
@@ -69,6 +73,7 @@ export async function setAvatarUrl({
   }
 }
 
+// sets up the local path of the avatar
 export async function setLocalAvatarUrlPath({
   url,
   userId,
@@ -87,5 +92,3 @@ export async function setLocalAvatarUrlPath({
     console.warn("setLocalAvatarUrlPath skipped:", err);
   }
 }
-
-

@@ -1,5 +1,6 @@
 import { getDb } from "./index";
 
+// set the setting datas
 export async function setSetting(key: string, val: string) {
   const db = await getDb();
   if (!db) return null;
@@ -12,6 +13,7 @@ export async function setSetting(key: string, val: string) {
   );
 }
 
+// get the setting data
 export async function getSetting(key: string) {
   const db = await getDb();
   if (!db) return null;

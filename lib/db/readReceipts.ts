@@ -1,5 +1,6 @@
 import { getDb } from "./index";
 
+
 export async function markRead({
   messageId,
   userId,
