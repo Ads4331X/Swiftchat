@@ -41,6 +41,7 @@ type MessageListProps = {
   onQuotePress?: (messageId: number) => void;
   showSkeleton?: boolean;
   serverLoaded?: boolean;
+  hideAttachmentOptions: () => void;
 };
 
 // How far (px) from the bottom counts as "still at the bottom" for the
@@ -69,6 +70,7 @@ export default function MessageList({
   members = [],
   onQuotePress,
   showSkeleton = false,
+  hideAttachmentOptions,
   serverLoaded = false,
 }: MessageListProps) {
   const [showScrollButton, setShowScrollButton] = useState(false);
@@ -405,6 +407,7 @@ export default function MessageList({
         keyExtractor={(message) => message.key ?? String(message.id)}
         renderItem={renderItem}
         onViewableItemsChanged={handleViewableItemsChanged}
+        onTouchStart={hideAttachmentOptions}
         // NOTE: with `inverted`, header/footer are visually swapped —
         // ListHeaderComponent renders at the BOTTOM, ListFooterComponent
         // renders at the TOP.

@@ -15,6 +15,7 @@ import { type EdgeInsets } from "react-native-safe-area-context";
 import Feather from "@expo/vector-icons/Feather";
 
 import { BRAND_COLOR } from "@/constants/theme";
+import { AttachmentOptions } from "./AttachmentOptions";
 
 type ChatInputBarProps = {
   draft: string;
@@ -31,6 +32,8 @@ type ChatInputBarProps = {
   backgroundColor: string;
   isTyping?: boolean;
   onFocus?: () => void;
+  showAttachmentOptions: boolean;
+  setShowAttachmentOptions: React.Dispatch<React.SetStateAction<boolean>>;
 };
 
 export default function ChatInputBar({
@@ -47,6 +50,8 @@ export default function ChatInputBar({
   dividerColor,
   backgroundColor,
   isTyping,
+  showAttachmentOptions,
+  setShowAttachmentOptions,
   onFocus,
 }: ChatInputBarProps) {
   const [keyboardUp, setKeyboardUp] = useState(false);
@@ -76,9 +81,17 @@ export default function ChatInputBar({
         paddingBottom: keyboardUp ? 8 : (insets?.bottom ?? 0) || 8,
       }}
     >
-      {/* Camera */}
-      <Pressable className="p-1 mb-2">
-        <Feather name="camera" size={22} color={subtleText} />
+      {showAttachmentOptions && (
+        <AttachmentOptions onClose={() => setShowAttachmentOptions(false)} />
+      )}
+      {/* plus more options */}
+      <Pressable
+        className="p-1 mb-2"
+        onPress={() => {
+          setShowAttachmentOptions(true);
+        }}
+      >
+        <Feather name="plus" size={22} color={subtleText} />
       </Pressable>
 
       {/* Text input */}
@@ -86,6 +99,7 @@ export default function ChatInputBar({
         value={draft}
         onChangeText={onDraftChange}
         onFocus={onFocus}
+        onTouchStart={() => setShowAttachmentOptions(false)}
         placeholder="Message"
         placeholderTextColor={placeholderColor}
         multiline
@@ -103,13 +117,21 @@ export default function ChatInputBar({
       />
 
       {/* Microphone */}
-      <Pressable className="p-1 mb-2">
+      <Pressable
+        className="p-1 mb-2"
+        onPress={() => {
+          setShowAttachmentOptions(false);
+        }}
+      >
         <Feather name="mic" size={22} color={subtleText} />
       </Pressable>
 
       {/* Send */}
       <Pressable
-        onPress={onSend}
+        onPress={() => {
+          setShowAttachmentOptions(false);
+          onSend();
+        }}
         disabled={sending || !draft.trim()}
         className="w-10 h-10 mb-2 rounded-full items-center justify-center"
         style={{

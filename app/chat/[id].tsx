@@ -1,5 +1,5 @@
-import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FlatList } from "react-native";
 import {
   SafeAreaView,
@@ -57,8 +57,11 @@ export default function UserChat() {
     .map(Number);
   const memberCount = otherMemberIds.length + 1;
   const isGroup = otherMemberIds.length > 1;
-  const { blockedIds, removeBlockUserId, ready: blockedReady } =
-    useBlockedUsers();
+  const {
+    blockedIds,
+    removeBlockUserId,
+    ready: blockedReady,
+  } = useBlockedUsers();
   const {
     colors,
     subtleText,
@@ -108,6 +111,7 @@ export default function UserChat() {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [unblocking, setUnblocking] = useState(false);
+  const [showAttachmentOptions, setShowAttachmentOptions] = useState(false);
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
   const [pinnedMessageId, setPinnedMessageId] = useState<number | null>(null);
   const pinnedFetchedRef = useRef(false);
@@ -139,6 +143,14 @@ export default function UserChat() {
   // before the blocked state is known.
   const showComposer = isGroup || (blockedReady && !isBlocked);
   const showBlockedBar = isBlocked;
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        setShowAttachmentOptions(false);
+      };
+    }, []),
+  );
 
   useEffect(() => {
     setActiveConversation(Number(id));
@@ -420,6 +432,7 @@ export default function UserChat() {
         otherUsername={otherUser?.username ?? username ?? ""}
         isGroup={isGroup}
         members={members}
+        hideAttachmentOptions={() => setShowAttachmentOptions(false)}
       />
 
       {showBlockedBar ? (
@@ -456,6 +469,8 @@ export default function UserChat() {
           subtleText={subtleText}
           dividerColor={dividerColor}
           backgroundColor={colors.background}
+          showAttachmentOptions={showAttachmentOptions}
+          setShowAttachmentOptions={setShowAttachmentOptions}
         />
       ) : null}
       <ChatActions

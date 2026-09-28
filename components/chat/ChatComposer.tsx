@@ -25,6 +25,8 @@ type ChatComposerProps = {
   subtleText: string;
   dividerColor: string;
   backgroundColor: string;
+  showAttachmentOptions: boolean;
+  setShowAttachmentOptions: React.Dispatch<React.SetStateAction<boolean>>;
 };
 
 export default function ChatComposer({
@@ -46,6 +48,8 @@ export default function ChatComposer({
   subtleText,
   dividerColor,
   backgroundColor,
+  showAttachmentOptions,
+  setShowAttachmentOptions,
 }: ChatComposerProps) {
   const replyText = replyPreview?.text ?? "";
 
@@ -77,14 +81,16 @@ export default function ChatComposer({
               }}
             />
             <View style={{ flex: 1, minWidth: 0, paddingLeft: 8 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                <Feather
-                  name="corner-up-left"
-                  size={10}
-                  color={subtleText}
-                />
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
+              >
+                <Feather name="corner-up-left" size={10} color={subtleText} />
                 <Text
-                  style={{ color: BRAND_COLOR, fontWeight: "600", fontSize: 12 }}
+                  style={{
+                    color: BRAND_COLOR,
+                    fontWeight: "600",
+                    fontSize: 12,
+                  }}
                   numberOfLines={1}
                 >
                   {replySenderName ?? "Reply"}
@@ -135,6 +141,8 @@ export default function ChatComposer({
           subtleText={subtleText}
           dividerColor={dividerColor}
           backgroundColor={backgroundColor}
+          showAttachmentOptions={showAttachmentOptions}
+          setShowAttachmentOptions={setShowAttachmentOptions}
         />
       </KeyboardAvoidingView>
     </>
