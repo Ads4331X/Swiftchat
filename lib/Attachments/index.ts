@@ -44,6 +44,8 @@ export async function launchGallery() {
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ["images", "videos"],
     quality: 1,
+    allowsMultipleSelection: true,
+    selectionLimit: 30,
   });
   if (!result.canceled) {
     return result;

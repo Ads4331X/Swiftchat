@@ -1,4 +1,4 @@
-import { getDb } from "./index";
+import { getDb } from "./connection";
 
 // set the setting datas
 export async function setSetting(key: string, val: string) {

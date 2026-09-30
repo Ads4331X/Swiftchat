@@ -6,7 +6,7 @@ import MessageBubble from "./MessageBubble";
 import { TypingIndicator } from "./TypingIndicator";
 import MessageSkeleton from "./MessageSkeleton";
 import EmptyState from "@/components/ui/EmptyState";
-import { getUser, markRead } from "@/lib/db";
+import { markRead } from "@/lib/db";
 import { api } from "@/lib/api";
 import { listenForMarkRead } from "@/lib/socket";
 import { useEffect } from "react";
@@ -102,14 +102,24 @@ export default function MessageList({
 
   // Lookup sender display names/avatars for group bubbles & typing indicator.
   const memberById = useMemo(() => {
-    const map = new Map<number, { username: string; avatar?: string }>();
+    const map = new Map<
+      number,
+      { id: number; username: string; avatar?: string }
+    >();
     for (const m of members) {
       if (m.username && m.username !== "You") {
-        map.set(m.id, { username: m.username, avatar: m.avatar });
+        map.set(m.id, { id: m.id, username: m.username, avatar: m.avatar });
       }
     }
     return map;
   }, [members]);
+
+  // Ids of everyone except the current user — drives "seen by everyone" on
+  // read receipts. Precomputed so renderItem doesn't filter per row.
+  const otherMemberIds = useMemo(
+    () => members.map((m) => m.id).filter((id) => id !== currentUserId),
+    [members, currentUserId],
+  );
 
   // Lookup original messages by id — used to render reply quotes client-side.
   const messageById = useMemo(() => {
@@ -153,16 +163,7 @@ export default function MessageList({
     const ids = isOtherUserTyping ?? [];
     return ids
       .map((id) => memberById.get(id))
-      .filter(
-        (
-          m,
-        ): m is {
-          id: number;
-          username: string;
-          avatar?: string;
-          localAvatarUrlPath: string | null;
-        } => Boolean(m),
-      );
+      .filter((m): m is NonNullable<typeof m> => Boolean(m));
   }, [isOtherUserTyping, memberById]);
 
   // Format "who is typing" into a readable sentence from the typing members.
@@ -326,17 +327,13 @@ export default function MessageList({
   // their own message actually changed — not on every array rebuild.
   const renderItem = useCallback(
     ({ item }: { item: Message }) => {
-      const readers = readersByMessage[item.id] ?? new Set<number>();
+      const readers = readersByMessage[item.id];
 
-      const otherMembers = members.filter(
-        (member) => member.id !== currentUserId,
-      );
-
-      const hasAnyoneRead = readers.size > 0;
+      const hasAnyoneRead = Boolean(readers?.size);
 
       const hasEveryoneRead =
-        otherMembers.length > 0 &&
-        otherMembers.every((member) => readers.has(member.id));
+        otherMemberIds.length > 0 &&
+        otherMemberIds.every((id) => readers?.has(id));
 
       const resolved = resolveRepliedTo(item);
       return (
@@ -379,7 +376,7 @@ export default function MessageList({
       otherUsername,
       isGroup,
       memberById,
-      members,
+      otherMemberIds,
       readersByMessage,
       highlightedId,
       scrollToMessage,
@@ -426,29 +423,24 @@ export default function MessageList({
                 }}
               >
                 <View className="flex-row">
-                  {typingMembers.map(async (member, index) => {
-                    const user = await getUser(member.id);
-                    return (
-                      <View
-                        key={index}
-                        className="rounded-full"
-                        style={{
-                          borderWidth: 2,
-                          borderColor: bubbleColor,
-                          marginLeft: index === 0 ? 0 : -8,
-                        }}
-                      >
-                        <Avatar
-                          username={member.username}
-                          avatarUrl={member.avatar}
-                          size={24}
-                          localAvatarUrlPath={
-                            user ? user.localAvatarUrlPath : null
-                          }
-                        />
-                      </View>
-                    );
-                  })}
+                  {typingMembers.map((member, index) => (
+                    <View
+                      key={member.id}
+                      className="rounded-full"
+                      style={{
+                        borderWidth: 2,
+                        borderColor: bubbleColor,
+                        marginLeft: index === 0 ? 0 : -8,
+                      }}
+                    >
+                      <Avatar
+                        username={member.username}
+                        avatarUrl={member.avatar}
+                        size={24}
+                        localAvatarUrlPath={null}
+                      />
+                    </View>
+                  ))}
                 </View>
                 <Text style={{ color: subtleText }} className="text-sm">
                   {typingText}
@@ -461,6 +453,13 @@ export default function MessageList({
         ListFooterComponent={null}
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingVertical: 12 }}
+        // Keep the rendered window small — bubbles are expensive (avatar,
+        // read receipts, quote preview), so rendering far more than the
+        // screen needs just burns frames while scrolling.
+        initialNumToRender={12}
+        maxToRenderPerBatch={10}
+        windowSize={7}
+        removeClippedSubviews
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         onScroll={handleScroll}

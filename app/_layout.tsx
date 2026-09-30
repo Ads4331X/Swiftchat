@@ -14,7 +14,7 @@ import * as SystemUI from "expo-system-ui";
 import "react-native-reanimated";
 
 import Toast from "react-native-toast-message";
-import { toastConfig } from "@/lib/utils";
+import { toastConfig } from "@/lib/utils/toastConfig";
 
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -47,8 +47,16 @@ function ToastProvider() {
         keyboardOffset={16}
         visibilityTime={4000}
         animationConfig={{
-          enter: { type: "timing", duration: 200, easing: Easing.out(Easing.ease) },
-          exit: { type: "timing", duration: 150, easing: Easing.in(Easing.ease) },
+          enter: {
+            type: "timing",
+            duration: 200,
+            easing: Easing.out(Easing.ease),
+          },
+          exit: {
+            type: "timing",
+            duration: 150,
+            easing: Easing.in(Easing.ease),
+          },
         }}
       />
     </View>

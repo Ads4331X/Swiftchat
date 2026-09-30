@@ -1,4 +1,4 @@
-import { getDb } from ".";
+import { getDb } from "./connection";
 
 export async function getBlockedUserIds(): Promise<number[]> {
   try {

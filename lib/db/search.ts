@@ -1,4 +1,4 @@
-import { getDb, isFts5Available } from ".";
+import { getDb, isFts5Available } from "./connection";
 
 export async function indexMessage({
   messageId,

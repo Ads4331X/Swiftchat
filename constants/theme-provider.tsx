@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { Colors, getFormColors } from "@/constants/theme";
 import { getSetting, setSetting } from "@/lib/db";
@@ -22,15 +22,7 @@ export function AppThemeProvider({ children }: { children: React.ReactNode }) {
   const systemColorScheme = useColorScheme();
   const [colorScheme, setColorScheme] = useState<"light" | "dark">("light");
 
-  useEffect(() => {
-    async function load() {
-      const savedColorScheme = await loadAppearance();
-      setColorScheme(savedColorScheme);
-    }
-
-    load();
-  }, [systemColorScheme]);
-  const loadAppearance = async () => {
+  const loadAppearance = useCallback(async () => {
     const savedAppearance = await getSetting("appearance");
     const appearance = savedAppearance ?? "system";
 
@@ -43,28 +35,49 @@ export function AppThemeProvider({ children }: { children: React.ReactNode }) {
     }
 
     return systemColorScheme === "dark" ? "dark" : "light";
-  };
-  const setAppearance = async (appearance: Appearance) => {
-    await setSetting("appearance", appearance);
+  }, [systemColorScheme]);
 
-    if (appearance === "light") {
-      setColorScheme("light");
-    } else if (appearance === "dark") {
-      setColorScheme("dark");
-    } else {
-      setColorScheme(systemColorScheme === "dark" ? "dark" : "light");
-    }
-  };
+  const setAppearance = useCallback(
+    async (appearance: Appearance) => {
+      await setSetting("appearance", appearance);
+
+      if (appearance === "light") {
+        setColorScheme("light");
+      } else if (appearance === "dark") {
+        setColorScheme("dark");
+      } else {
+        setColorScheme(systemColorScheme === "dark" ? "dark" : "light");
+      }
+    },
+    [systemColorScheme],
+  );
+
+  useEffect(() => {
+    let active = true;
+
+    loadAppearance().then((saved) => {
+      if (active) setColorScheme(saved);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [loadAppearance]);
 
   const isDark = colorScheme === "dark";
 
-  const theme: AppTheme = {
-    colorScheme,
-    isDark,
-    colors: Colors[colorScheme],
-    ...getFormColors(colorScheme),
-    setAppearance,
-  };
+  // Memoized so the context value keeps a stable identity — a fresh object
+  // every render would re-render all ~50 useTheme() consumers on each change.
+  const theme: AppTheme = useMemo(
+    () => ({
+      colorScheme,
+      isDark,
+      colors: Colors[colorScheme],
+      ...getFormColors(colorScheme),
+      setAppearance,
+    }),
+    [colorScheme, setAppearance],
+  );
 
   return (
     <ThemeContext.Provider value={theme}>{children}</ThemeContext.Provider>

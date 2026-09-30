@@ -110,7 +110,7 @@ export default function EditAccount() {
       >
         {loading ? (
           <View className="flex-1 items-center justify-center">
-            <Text style={{ color: colors.text }}>Loading...</Text>
+            <Text style={{ color: colors.text }}>1...</Text>
           </View>
         ) : (
           <ScrollView

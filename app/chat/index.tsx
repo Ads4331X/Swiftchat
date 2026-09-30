@@ -3,7 +3,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useTheme } from "@/constants/theme-provider";
 import PillsNav, { ChatCategory } from "@/components/layout/PillsNav";
 import { useCallback, useRef, useState } from "react";
-import { ScrollView, RefreshControl, View } from "react-native";
+import { View } from "react-native";
 import ChatList from "@/components/layout/ChatList";
 import NewChatFab from "@/components/chat/new-chat/NewChatFab";
 import NewChatSheet from "@/components/chat/new-chat/NewChatSheet";
@@ -59,24 +59,16 @@ export default function Chat() {
         onSelectCategory={setActiveChatCategory}
       />
 
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{
-          paddingBottom: 120,
-          flexGrow: 1,
-        }}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-      >
-        <ChatList
-          filteredMode={activeChatCategory}
-          chats={chats}
-          loading={loading}
-          clearChat={clearChat}
-          onMarkChatAsRead={markChatAsReadLocally}
-        />
-      </ScrollView>
+      {/* ChatList is a FlatList and owns its own scrolling + refresh. */}
+      <ChatList
+        filteredMode={activeChatCategory}
+        chats={chats}
+        loading={loading}
+        clearChat={clearChat}
+        onMarkChatAsRead={markChatAsReadLocally}
+        refreshing={refreshing}
+        onRefresh={onRefresh}
+      />
 
       <View className="absolute right-2 bottom-16">
         <NewChatFab onPress={() => bottomSheetRef.current?.expand()} />

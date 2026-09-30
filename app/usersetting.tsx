@@ -26,7 +26,8 @@ import { BRAND_COLOR } from "@/constants/theme";
 import { AvatarPreviewModal } from "../components/showAvatarPicker";
 import BottomSheet from "@gorhom/bottom-sheet";
 import { ImagePickerSuccessResult } from "expo-image-picker";
-import { compressAvatarImage } from "@/lib/utils";
+import { compressImage } from "@/lib/utils";
+import { File } from "expo-file-system";
 
 type UserDetails = {
   username: string;
@@ -66,16 +67,17 @@ export default function UserSettings() {
     if (!image) return;
 
     const compressAndNavigate = async () => {
-      const result = await compressAvatarImage({
+      const result = await compressImage({
         uri: image.assets[0].uri,
         width: image.assets[0].width,
         height: image.assets[0].height,
+        size: new File(image.assets[0].uri).size,
       });
 
       router.push({
         pathname: "/DisplayPickedAvatar",
         params: {
-          uri: result,
+          uri: result.uri,
         },
       });
     };

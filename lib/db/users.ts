@@ -1,4 +1,4 @@
-import { getDb } from "./index";
+import { getDb } from "./connection";
 
 // gets the detail of user from its id
 export async function getUser(userId: number) {

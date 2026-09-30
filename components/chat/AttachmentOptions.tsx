@@ -9,6 +9,10 @@ import {
 } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { Feather } from "@expo/vector-icons";
+import { launchCamera, launchFile, launchGallery } from "@/lib/Attachments";
+import { compressImage } from "@/lib/utils";
+import { File } from "expo-file-system";
+import { router } from "expo-router";
 
 type AttachmentOptionsProps = {
   onClose: () => void;
@@ -18,9 +22,32 @@ export function AttachmentOptions({ onClose }: AttachmentOptionsProps) {
   const theme = useTheme();
   const colors = theme.colors;
 
-  const handleCameraPress = async () => {};
-  const handleGalleryPress = async () => {};
-  const handleFilePress = async () => {};
+  const handleCameraPress = async () => {
+    const result = await launchCamera();
+    const asset = result?.assets?.[0];
+    if (!asset?.uri) return;
+
+    const compressResult = await compressImage({
+      uri: asset.uri,
+      width: asset.width,
+      height: asset.height,
+      size: new File(asset.uri).size,
+    });
+
+    router.push({
+      pathname: "/AttachmentReview",
+      params: {
+        uri: asset.uri,
+      },
+    });
+  };
+  const handleGalleryPress = async () => {
+    const result = await launchGallery();
+    console.log(result);
+  };
+  const handleFilePress = async () => {
+    const result = await launchFile();
+  };
   const options = [
     {
       label: "Camera",

@@ -1,52 +1,57 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { memo, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useState } from "react";
 import Feather from "@expo/vector-icons/Feather";
 import { useTheme } from "@/constants/theme-provider";
 import { BRAND_COLOR } from "@/constants/theme";
 import Avatar from "@/components/profile/Avatar";
 import { getUser } from "@/lib/db";
+import { conversationDisplayName } from "@/lib/utils";
+import type { Chat } from "@/hooks/useChats";
 import ReanimatedSwipeable from "react-native-gesture-handler/ReanimatedSwipeable";
-import Reanimated, {
-  SharedValue,
-  useAnimatedStyle,
-} from "react-native-reanimated";
+import Reanimated, { SharedValue, useAnimatedStyle } from "react-native-reanimated";
 
 const CLEAR_ACTION_COLOR = "#E5484D";
 const CLEAR_ACTION_WIDTH = 96;
 
 type ChatCardProps = {
-  username: string;
-  avatarUrl?: string;
-  userId?: number;
-  lastMessage?: string;
-  time?: string;
-  unreadCount?: number;
-  online?: boolean;
+  chat: Chat;
+  onPress: (chat: Chat) => void;
+  onClear: (conversationId: number) => Promise<void>;
   typing?: boolean;
-  onPress?: () => void;
-  onClear?: () => void;
   showDivider?: boolean;
 };
 
 const MemoizedAvatar = memo(Avatar);
 
+function formatTime(iso: string): string {
+  const date = new Date(iso);
+  const now = new Date();
+
+  if (date.toDateString() === now.toDateString()) {
+    return date.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+
+  return date.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
 export default memo(function ChatCard({
-  username,
-  avatarUrl,
-  userId,
-  lastMessage,
-  time,
-  unreadCount = 0,
-  online,
-  typing,
+  chat,
   onPress,
   onClear,
+  typing = false,
   showDivider = true,
 }: ChatCardProps) {
   const { colors, subtleText, dividerColor } = useTheme();
   const [localAvatarUrlPath, setLocalAvatarUrlPath] = useState<string | null>(
     null,
   );
+
+  // A direct chat has exactly one other member; groups show no avatar here.
+  const counterpart = chat.members.length === 1 ? chat.members[0] : undefined;
+  const userId = counterpart?.id;
 
   useEffect(() => {
     let mounted = true;
@@ -62,42 +67,39 @@ export default memo(function ChatCard({
     };
   }, [userId]);
 
-  function RightAction(prog: SharedValue<number>) {
-    const opacity = useAnimatedStyle(() => ({ opacity: prog.value }));
+  const handlePress = useCallback(() => onPress(chat), [onPress, chat]);
+  const handleClear = useCallback(
+    () => onClear(chat.id),
+    [onClear, chat.id],
+  );
 
-    return (
-      <Reanimated.View style={[styles.clearActionWrap, opacity]}>
-        <Pressable
-          onPress={onClear}
-          style={({ pressed }) => [
-            styles.clearAction,
-            { opacity: pressed ? 0.7 : 1 },
-          ]}
-        >
-          <Feather name="trash-2" size={20} color="#fff" />
-          <Text style={styles.clearActionText}>Clear</Text>
-        </Pressable>
-      </Reanimated.View>
-    );
-  }
+  // Memoized so the swipeable sees a stable renderRightActions and doesn't
+  // rebuild its action row on every parent render.
+  const renderRightAction = useCallback(
+    (progress: SharedValue<number>) => (
+      <ClearAction progress={progress} onPress={handleClear} />
+    ),
+    [handleClear],
+  );
+
+  const username = conversationDisplayName(chat.name, chat.members);
 
   return (
     <ReanimatedSwipeable
       enableTrackpadTwoFingerGesture
       friction={2}
       rightThreshold={40}
-      renderRightActions={RightAction}
+      renderRightActions={renderRightAction}
     >
       <Pressable
-        onPress={onPress}
+        onPress={handlePress}
         className="w-full px-4 py-3 active:opacity-60"
       >
         <View className="flex-row items-center gap-3">
           <MemoizedAvatar
             username={username}
-            avatarUrl={avatarUrl}
+            avatarUrl={counterpart?.avatar}
             userId={userId}
-            isOnline={online}
             size={48}
             ringColor={colors.background}
             localAvatarUrlPath={localAvatarUrlPath}
@@ -120,32 +122,32 @@ export default memo(function ChatCard({
               >
                 typing...
               </Text>
-            ) : lastMessage ? (
+            ) : chat.lastMessage ? (
               <Text
                 numberOfLines={1}
                 style={{ color: subtleText }}
                 className="text-sm mt-0.5"
               >
-                {lastMessage}
+                {chat.lastMessage.text}
               </Text>
             ) : null}
           </View>
 
-          <View className="items-end justify-around flex-1  gap-1">
-            {unreadCount > 0 ? (
+          <View className="items-end justify-around flex-1 gap-1">
+            {(chat.unread ?? 0) > 0 ? (
               <View
                 className="min-w-5 h-5 px-1.5 rounded-full items-center justify-center"
                 style={{ backgroundColor: BRAND_COLOR }}
               >
                 <Text className="text-white text-xs font-bold">
-                  {unreadCount > 5 ? "4+" : unreadCount}
+                  {(chat.unread ?? 0) > 5 ? "4+" : chat.unread}
                 </Text>
               </View>
             ) : null}
 
-            {time ? (
+            {chat.lastMessage ? (
               <Text style={{ color: subtleText }} className="text-xs">
-                {time}
+                {formatTime(chat.lastMessage.sentAt)}
               </Text>
             ) : null}
           </View>
@@ -164,6 +166,31 @@ export default memo(function ChatCard({
     </ReanimatedSwipeable>
   );
 });
+
+function ClearAction({
+  progress,
+  onPress,
+}: {
+  progress: SharedValue<number>;
+  onPress: () => void;
+}) {
+  const opacity = useAnimatedStyle(() => ({ opacity: progress.value }));
+
+  return (
+    <Reanimated.View style={[styles.clearActionWrap, opacity]}>
+      <Pressable
+        onPress={onPress}
+        style={({ pressed }) => [
+          styles.clearAction,
+          { opacity: pressed ? 0.7 : 1 },
+        ]}
+      >
+        <Feather name="trash-2" size={20} color="#fff" />
+        <Text style={styles.clearActionText}>Clear</Text>
+      </Pressable>
+    </Reanimated.View>
+  );
+}
 
 const styles = StyleSheet.create({
   clearActionWrap: {

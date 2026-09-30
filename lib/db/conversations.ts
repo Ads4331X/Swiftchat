@@ -1,4 +1,4 @@
-import { getDb } from "./index";
+import { getDb } from "./connection";
 
 type SaveConversationParams = {
   id: number;

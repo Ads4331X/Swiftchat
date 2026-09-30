@@ -1,5 +1,5 @@
 import { View, Text, Pressable, StyleSheet } from "react-native";
-import { AppearanceCard } from "./AppearanceCard";
+import { AppearanceCard } from "@/components/profile/AppearanceCard";
 import { useEffect, useState } from "react";
 import { router } from "expo-router";
 import Feather from "@expo/vector-icons/Feather";

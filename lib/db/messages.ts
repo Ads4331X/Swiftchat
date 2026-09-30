@@ -1,5 +1,5 @@
 import { Message } from "@/types/message";
-import { getDb } from "./index";
+import { getDb } from "./connection";
 
 type SaveMsgParams = {
   messageId: number;
