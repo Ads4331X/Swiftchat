@@ -3,9 +3,10 @@ import NetInfo from "@react-native-community/netinfo";
 import { api } from "@/lib/api";
 import { getToken } from "@/lib/auth";
 import {
+  confirmPendingMessage,
   deletePendingMessage,
+  getMessageByNonce,
   getPendingMessages,
-  saveMessage,
   updateConversationPreview,
 } from "@/lib/db";
 
@@ -77,6 +78,19 @@ export async function flushPendingMessages(): Promise<void> {
 
     for (const pendingMessage of pending) {
       try {
+        // An earlier attempt may have reached the server before the app died,
+        // leaving the row queued but already cached. Posting again would
+        // create a second copy server-side, so reconcile from the cache first.
+        const alreadyDelivered = await getMessageByNonce({
+          nonce: pendingMessage.nonce,
+        });
+
+        if (alreadyDelivered) {
+          await deletePendingMessage({ messageId: pendingMessage.id });
+          remaining.shift();
+          continue;
+        }
+
         const result = await api.post("/api/conversations/messages", {
           messageText: pendingMessage.text,
           conversationId: pendingMessage.conversationId,
@@ -89,19 +103,21 @@ export async function flushPendingMessages(): Promise<void> {
           throw new Error("No message id returned");
         }
 
-        await saveMessage({
+        // Keep the locally generated nonce rather than the server's echo: the
+        // optimistic row in the chat list is matched to its confirmed
+        // counterpart by nonce, and it only knows the local one.
+        await confirmPendingMessage({
+          pendingId: pendingMessage.id,
           messageId: result.data.id,
           message: result.data.text,
           sentAt: result.data.sentAt,
           SenderId: result.data.senderId,
           ConversationId: result.data.conversationId,
-          nonce: result.data.nonce,
+          nonce: pendingMessage.nonce,
           replyToId: pendingMessage.replyToId ?? undefined,
           repliedTo: pendingMessage.repliedTo ?? undefined,
           forwardedFromMsgId: pendingMessage.forwardedFromMsgId ?? undefined,
         });
-
-        await deletePendingMessage({ messageId: pendingMessage.id });
 
         notifyFlushed(Number(pendingMessage.conversationId));
 
@@ -139,7 +155,9 @@ function scheduleRetry() {
   if (retryTimer) clearTimeout(retryTimer);
   retryTimer = setTimeout(() => {
     retryTimer = null;
-    flushPendingMessages();
+    flushPendingMessages().catch((err) => {
+      console.warn("Pending message flush retry failed:", err);
+    });
   }, 5000);
 }
 

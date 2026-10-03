@@ -13,33 +13,45 @@ import { launchCamera, launchFile, launchGallery } from "@/lib/Attachments";
 import { compressImage } from "@/lib/utils";
 import { File } from "expo-file-system";
 import { router } from "expo-router";
+import { useCameraPermissions } from "expo-camera";
 
 type AttachmentOptionsProps = {
   onClose: () => void;
 };
 
 export function AttachmentOptions({ onClose }: AttachmentOptionsProps) {
+  const [permission, requestPermission] = useCameraPermissions();
   const theme = useTheme();
   const colors = theme.colors;
 
   const handleCameraPress = async () => {
-    const result = await launchCamera();
-    const asset = result?.assets?.[0];
-    if (!asset?.uri) return;
+    if (!permission?.granted) {
+      const result = await requestPermission();
 
-    const compressResult = await compressImage({
-      uri: asset.uri,
-      width: asset.width,
-      height: asset.height,
-      size: new File(asset.uri).size,
-    });
+      if (!result.granted) {
+        return;
+      }
+    }
 
-    router.push({
-      pathname: "/AttachmentReview",
-      params: {
-        uri: asset.uri,
-      },
-    });
+    router.push({ pathname: "/CameraScreen" });
+
+    // const result = await launchCamera();
+    // const asset = result?.assets?.[0];
+    // if (!asset?.uri) return;
+
+    // const compressResult = await compressImage({
+    //   uri: asset.uri,
+    //   width: asset.width,
+    //   height: asset.height,
+    //   size: new File(asset.uri).size,
+    // });
+
+    // router.push({
+    //   pathname: "/AttachmentReview",
+    //   params: {
+    //     uri: asset.uri,
+    //   },
+    // });
   };
   const handleGalleryPress = async () => {
     const result = await launchGallery();

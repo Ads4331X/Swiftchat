@@ -14,7 +14,23 @@ type SaveMsgParams = {
   forwardedFromMsgId?: number;
 };
 
-export async function saveMessage({
+// Shared by `saveMessage` and `confirmPendingMessage`. Upsert rather than
+// INSERT OR REPLACE: `readAt`/`read` are only meaningful on first insert, and a
+// blind REPLACE wiped them every time a message was re-cached (edits, socket
+// refreshes, background flushes), making already-read messages look unread.
+const MESSAGE_UPSERT_SQL = `INSERT INTO Message (id, text, sentAt, senderId, conversationId, nonce, reactions, readAt, read, replyToId, repliedTo, forwardedFromMsgId) VALUES (?, ?, ?, ?, ?, ?, ?, '', 0, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         text = excluded.text,
+         sentAt = excluded.sentAt,
+         senderId = excluded.senderId,
+         conversationId = excluded.conversationId,
+         nonce = excluded.nonce,
+         reactions = excluded.reactions,
+         replyToId = excluded.replyToId,
+         repliedTo = excluded.repliedTo,
+         forwardedFromMsgId = excluded.forwardedFromMsgId`;
+
+const MESSAGE_UPSERT_PARAMS = ({
   message,
   sentAt,
   SenderId,
@@ -25,27 +41,64 @@ export async function saveMessage({
   replyToId,
   repliedTo,
   forwardedFromMsgId,
-}: SaveMsgParams) {
+}: SaveMsgParams) => [
+  messageId,
+  message,
+  sentAt,
+  SenderId,
+  ConversationId,
+  nonce,
+  reactions ?? null,
+  replyToId ?? null,
+  repliedTo ?? null,
+  forwardedFromMsgId ?? null,
+];
+
+export async function saveMessage(params: SaveMsgParams) {
   try {
     const db = await getDb();
     if (!db) return;
-    await db.runAsync(
-      `INSERT OR REPLACE INTO Message (id, text, sentAt, senderId, conversationId, nonce, reactions, readAt, read, replyToId, repliedTo, forwardedFromMsgId) VALUES (?, ?, ?, ?, ?, ?, ?, '', 0, ?, ?, ?)`,
-      [
-        messageId,
-        message,
-        sentAt,
-        SenderId,
-        ConversationId,
-        nonce,
-        reactions ?? null,
-        replyToId ?? null,
-        repliedTo ?? null,
-        forwardedFromMsgId ?? null,
-      ],
-    );
+    await db.runAsync(MESSAGE_UPSERT_SQL, MESSAGE_UPSERT_PARAMS(params));
   } catch (err) {
     console.warn("saveMessage skipped:", err);
+  }
+}
+
+/**
+ * Promote a queued row to its server-confirmed counterpart and drop the queue
+ * entry in one transaction. These used to be two independent awaits, so a
+ * crash between them left the same message present in BOTH `Message` and
+ * `PendingMessage` — which the UI then rendered twice.
+ */
+export async function confirmPendingMessage({
+  pendingId,
+  ...message
+}: SaveMsgParams & { pendingId: number }) {
+  const db = await getDb();
+  if (!db) return;
+
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(MESSAGE_UPSERT_SQL, MESSAGE_UPSERT_PARAMS(message));
+    await db.runAsync(`DELETE FROM PendingMessage WHERE id = ?`, [pendingId]);
+  });
+}
+
+/**
+ * Look up an already-delivered message by the client-generated nonce. Lets the
+ * flusher detect "this was posted before the app died" and skip re-POSTing it.
+ */
+export async function getMessageByNonce({ nonce }: { nonce: string }) {
+  try {
+    const db = await getDb();
+    if (!db || !nonce) return null;
+
+    return await db.getFirstAsync<Message>(
+      `SELECT * FROM Message WHERE nonce = ? LIMIT 1`,
+      [nonce],
+    );
+  } catch (err) {
+    console.warn("getMessageByNonce skipped:", err);
+    return null;
   }
 }
 

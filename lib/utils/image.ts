@@ -120,6 +120,8 @@ export async function compressVideo({
   mimeType: string;
 }) {
   let result: string;
+  let quality: number;
+
   // if video is alr fulfilling the requirments
   if (
     size <= VideoSizeLimit &&
@@ -127,7 +129,13 @@ export async function compressVideo({
     height <= VIDEO_MAX_HEIGHT &&
     mimeType === "video/mp4"
   )
-    return uri;
+    return {
+      uri,
+      width,
+      height,
+      compressedSize: size,
+      quality: 1,
+    };
 
   // compress the vid to HEVC
   const result1080 = await tryCompressVideo(uri, 1080);
@@ -140,12 +148,23 @@ export async function compressVideo({
   // if compression makes the video within the max limit 100mb
   if (size1080 <= VideoSizeLimit) {
     result = result1080; // final result
+    quality = 1080;
   } else {
     // deleting the old compressed video
     const oldFile = new File(result1080);
     oldFile.delete();
     const result720 = await tryCompressVideo(uri, 720);
     result = result720; // final result
+    quality = 720;
   }
-  return result;
+
+  const compressedSize = new File(result).size;
+
+  return {
+    uri: result,
+    width,
+    height,
+    compressedSize,
+    quality,
+  };
 }

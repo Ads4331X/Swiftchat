@@ -65,6 +65,22 @@ export default function useChatMessageSync({
       decryptedConversationKey,
     });
 
+    // Queued-but-unsent messages exist only in `PendingMessage`. They used to
+    // be read purely to decide whether an in-memory optimistic row had been
+    // confirmed, never re-added to the list — so on a cold start (`prev`
+    // empty) anything still waiting to be delivered simply disappeared.
+    const queued = await decryptMessages({
+      serverMessages: pending
+        .filter((row) => row.conversationId === Number(id))
+        .map((row) =>
+          parseLocalMessage({
+            ...row,
+            key: `m-local-${row.id}`,
+          } as LocalMessageRow),
+        ),
+      decryptedConversationKey,
+    });
+
     setMessages((prev) => {
       const confirmedById = new Map(confirmed.map((m) => [m.id, m]));
       const confirmedByNonce = new Map<string, Message>();
@@ -76,6 +92,7 @@ export default function useChatMessageSync({
 
       const next: Message[] = [];
       const representedIds = new Set<number>();
+      const representedQueuedIds = new Set<number>();
 
       for (const m of prev) {
         if (m.id < 0 && !pendingIds.has(m.id)) {
@@ -95,6 +112,7 @@ export default function useChatMessageSync({
         }
         next.push(m);
         if (m.id >= 0) representedIds.add(m.id);
+        else representedQueuedIds.add(m.id);
       }
 
       // Append confirmed rows not already represented (e.g. messages that
@@ -104,6 +122,16 @@ export default function useChatMessageSync({
           next.push({ ...m, key: keyFor(m) });
           representedIds.add(m.id);
         }
+      }
+
+      // Then any still-queued messages. Skip ones already on screen (the
+      // in-memory optimistic row) and any whose nonce a confirmed row now
+      // covers, so a message is never rendered from both tables at once.
+      for (const m of queued) {
+        if (representedQueuedIds.has(m.id)) continue;
+        if (m.nonce && confirmedByNonce.has(m.nonce)) continue;
+        next.push({ ...m, key: m.key ?? keyFor(m) });
+        representedQueuedIds.add(m.id);
       }
 
       return next;

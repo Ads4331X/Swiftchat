@@ -1,16 +1,15 @@
 import axios from "axios";
 import Constants from "expo-constants";
-import { Platform } from "react-native";
 import { router } from "expo-router";
 import { getToken, removeToken } from "@/lib/auth";
 
 export function getBackendUrl(): string {
-  const envUrl = process.env.EXPO_PUBLIC_BACKEND_URL;
+  const envUrl = process.env.EXPO_PUBLIC_API_URL;
   if (envUrl && envUrl.trim() !== "") {
-    // Use the override as-is. On a USB-connected Android device,
-    // `localhost:3000` is tunneled to this machine via `adb reverse`
-    // (scripts/adb-reverse.sh) — far more reliable than a flaky LAN/Wi-Fi
-    // path. Do NOT rewrite localhost here: that would defeat the tunnel.
+    // Use the override as-is. It must be reachable *from the device*: the LAN
+    // IP for Wi-Fi/Expo Go, or `localhost` only when an `adb reverse tcp:3000
+    // tcp:3000` tunnel is genuinely active (confirm with `adb reverse --list`).
+    // There is no such tunnel by default, so `localhost` usually means dead.
     return envUrl;
   }
 
@@ -25,11 +24,9 @@ export function getBackendUrl(): string {
     }
   }
 
-  // Last-resort dev default. Android reaches this machine's backend through
-  // the USB `adb reverse` tunnel; everything else hits the LAN IP.
-  return Platform.OS === "android"
-    ? "http://localhost:3000"
-    : "http://192.168.1.72:3000";
+  // Last-resort dev default. No tunnel is assumed, so the LAN IP is the only
+  // value that works from a physical device on any platform.
+  return "http://192.168.1.72:3000";
 }
 
 const backendUrl = getBackendUrl();

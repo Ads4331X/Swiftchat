@@ -171,6 +171,35 @@ async function openDbOnce(): Promise<SQLite.SQLiteDatabase | null> {
           `ALTER TABLE PendingMessage ADD COLUMN repliedTo TEXT;`,
         );
       } catch {}
+      // `MessageRead` was written by an INSERT that never supplied the `id`
+      // primary key. Since `id INTEGER PRIMARY KEY` is a rowid alias, SQLite
+      // auto-assigned a fresh rowid every time, so `INSERT OR REPLACE` never
+      // saw a conflict and each mark-read event appended a duplicate for the
+      // same (messageId, userId). Collapse the existing pile (keeping the
+      // newest row per pair) and enforce the constraint so later writes
+      // replace instead of accumulate.
+      try {
+        await database.execAsync(
+          `DELETE FROM MessageRead WHERE id NOT IN (
+             SELECT MAX(id) FROM MessageRead GROUP BY messageId, userId
+           );`,
+        );
+        await database.execAsync(
+          `CREATE UNIQUE INDEX IF NOT EXISTS MessageRead_messageId_userId
+             ON MessageRead (messageId, userId);`,
+        );
+      } catch (err) {
+        console.warn("MessageRead dedupe migration skipped:", err);
+      }
+      // The flusher matches queued rows to delivered ones by nonce, and the
+      // reconcile pass matches optimistic rows by nonce too.
+      try {
+        await database.execAsync(
+          `CREATE INDEX IF NOT EXISTS Message_nonce ON Message (nonce);`,
+        );
+      } catch (err) {
+        console.warn("Message.nonce index creation skipped:", err);
+      }
       console.log("SQLite database initialized");
       return database;
     } catch (error) {

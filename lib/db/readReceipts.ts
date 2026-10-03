@@ -24,7 +24,7 @@ export async function markRead({
   );
 }
 
-export async function getMessageRead(conversationId: number) {
+export async function getMessageRead(messageId: number) {
   const db = await getDb();
 
   if (!db) return null;
@@ -39,6 +39,6 @@ export async function getMessageRead(conversationId: number) {
      FROM MessageRead
      WHERE messageId = ?
      LIMIT 1`,
-    [conversationId],
+    [messageId],
   );
 }

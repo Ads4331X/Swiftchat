@@ -9,6 +9,7 @@ import useChatMessagePagination from "@/hooks/useChatMessagePagination";
 import useChatMessageSync from "@/hooks/useChatMessageSync";
 import useChatSocketEvents from "@/hooks/useChatSocketEvents";
 import { Message } from "@/types/message";
+import { getPendingMessages } from "@/lib/db";
 
 export type { Message, MessageReaction, RepliedTo } from "@/types/message";
 
@@ -44,6 +45,30 @@ export default function useChatMessages(
   }, [id]);
   const showSkeleton = firstLoad && !initialized;
   const tempIdRef = useRef(-1);
+
+  // Optimistic sends claim descending negative ids, and that number becomes the
+  // queued row's `PendingMessage.id`. The counter used to restart at -1 on every
+  // mount, so a new session re-issued ids that still belonged to unsent rows
+  // from the previous one and `INSERT OR REPLACE` overwrote them. Resume below
+  // the lowest id actually persisted.
+  useEffect(() => {
+    let active = true;
+    getPendingMessages()
+      .then((rows) => {
+        if (!active || rows.length === 0) return;
+        const lowest = rows.reduce(
+          (min, row) => Math.min(min, Number(row.id)),
+          -1,
+        );
+        if (lowest < tempIdRef.current) {
+          tempIdRef.current = lowest - 1;
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Once this conversation has actually loaded, remember it so later opens
   // (even after an app restart/reload) skip the skeleton.

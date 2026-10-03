@@ -67,7 +67,11 @@ function AppNavigator() {
   const { isDark, colors } = useTheme();
 
   useEffect(() => {
-    startPendingSync();
+    try {
+      startPendingSync();
+    } catch (err) {
+      console.warn("Pending sync failed to start; continuing offline:", err);
+    }
   }, []);
 
   useEffect(() => {
