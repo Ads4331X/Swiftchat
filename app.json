@@ -11,7 +11,11 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.anonymous.swiftchat",
-      "buildNumber": "1"
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSCameraUsageDescription": "$(PRODUCT_NAME) needs access to your Camera to capture photos and videos.",
+        "NSMicrophoneUsageDescription": "$(PRODUCT_NAME) needs access to your Microphone to record audio for video recordings."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -22,7 +26,8 @@
       "predictiveBackGestureEnabled": false,
       "package": "com.anonymous.swiftchat",
       "versionCode": 1,
-      "usesCleartextTraffic": true
+      "usesCleartextTraffic": true,
+      "permissions": ["android.permission.CAMERA", "android.permission.RECORD_AUDIO"]
     },
     "web": {
       "bundler": "metro",
@@ -59,6 +64,18 @@
               "-DSQLITE_ENABLE_DBSTAT_VTAB=1 -DSQLITE_ENABLE_SNAPSHOT=1"
             ]
           }
+        }
+      ],
+      [
+        "react-native-video",
+        {
+          "enableAndroidPictureInPicture": true
+        }
+      ],
+      [
+        "./plugins/withMedia3Version",
+        {
+          "version": "1.9.0"
         }
       ]
     ],

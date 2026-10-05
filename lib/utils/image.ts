@@ -2,9 +2,11 @@ import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { File } from "expo-file-system";
 
 const ImageSizeLimit = 10 * 1024 * 1024;
-const VideoSizeLimit = 100 * 1024 * 1024;
+const IMAGE_MAX_DIMENSION = 1600;
+const VideoSizeLimit = 200 * 1024 * 1024;
 const VIDEO_MAX_WIDTH = 1920;
 const VIDEO_MAX_HEIGHT = 1080;
+const IMAGE_QUALITIES = [0.95, 0.9, 0.85, 0.8, 0.7];
 
 type CompressResult = {
   uri: string;
@@ -14,12 +16,10 @@ type CompressResult = {
   quality: number;
 };
 
-async function tryCompressImage(manipulated: any) {
-  const qualities = [0.9, 0.8, 0.7, 0.6];
-
+async function tryCompressImage(manipulated: any, maxSize: number) {
   let lastResult: CompressResult | undefined;
 
-  for (const quality of qualities) {
+  for (const quality of IMAGE_QUALITIES) {
     const result = await manipulated.saveAsync({
       format: SaveFormat.JPEG,
       compress: quality,
@@ -40,7 +40,7 @@ async function tryCompressImage(manipulated: any) {
       quality,
     };
 
-    if (compressedSize <= ImageSizeLimit) {
+    if (compressedSize <= maxSize) {
       return { success: true, ...lastResult };
     }
     file.delete();
@@ -53,28 +53,33 @@ export async function compressImage({
   width,
   height,
   size,
+  maxSize = ImageSizeLimit,
+  maxDimension = IMAGE_MAX_DIMENSION,
 }: {
   uri: string;
   width: number;
   height: number;
   size: number;
+  maxSize?: number;
+  maxDimension?: number;
 }) {
-  if (size <= ImageSizeLimit && width <= 1024 && height <= 1024) {
+  if (size <= maxSize && Math.max(width, height) <= maxDimension) {
     return { uri, compressedSize: size, width, height, quality: 1 };
-  } // resizes the longest side to 1024
-  let resizeAction = width >= height ? { width: 1024 } : { height: 1024 };
+  } // resizes the longest side
+  let resizeAction =
+    width >= height ? { width: maxDimension } : { height: maxDimension };
   const manipulated = await ImageManipulator.manipulate(uri)
     .resize(resizeAction)
     .renderAsync();
 
-  let result = await tryCompressImage(manipulated);
-  // if image is still greater then 10MB and alr compressed to max good qualtiy
+  let result = await tryCompressImage(manipulated, maxSize);
+  // if image is still greater then the size limit and alr compressed to max good qualtiy
   // shrinking the dimensions
   let rounds = 0;
   while (!result.success && rounds < 5) {
     const prevUri = result.uri;
-    // scale factor formula =  square root of (Image Size Limit  / current Image size (compressed size) ) approx size
-    const scaleFactor = Math.sqrt(ImageSizeLimit / result.compressedSize) * 0.9; // 0.9 is safety limit to make size with in limit
+    // scale factor formula =  square root of (size limit / current size (compressed size) ) approx size
+    const scaleFactor = Math.sqrt(maxSize / result.compressedSize) * 0.9; // 0.9 is safety limit to make size with in limit
 
     resizeAction =
       result.width >= result.height
@@ -84,7 +89,7 @@ export async function compressImage({
     const manipulated = await ImageManipulator.manipulate(uri)
       .resize(resizeAction)
       .renderAsync();
-    result = await tryCompressImage(manipulated);
+    result = await tryCompressImage(manipulated, maxSize);
     rounds++;
 
     // deletes the old (prev) image that is returned
@@ -99,10 +104,10 @@ async function tryCompressVideo(uri: string, maxSize: number) {
   // compress the vid to HEVC
   const { compress } = await import("expo-image-and-video-compressor");
   const result = await compress(uri, {
-    codec: "hevc",
+    codec: "h264",
+    speed: "fast",
     bitrate: 2_000_000, // 2 Mbps
     maxSize: maxSize,
-    speed: "balanced",
   });
   return result;
 }

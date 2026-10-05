@@ -1,6 +1,14 @@
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import { Alert, Platform } from "react-native";
+
+export const MAX_VIDEO_SIZE = 200 * 1024 * 1024;
+export const MAX_VIDEO_DURATION_SECONDS = 120;
+
+export function needsVideoCompression(size: number) {
+  return size > MAX_VIDEO_SIZE;
+}
+
 export async function launchCamera() {
   const permission = await ImagePicker.getCameraPermissionsAsync(); // gets the permission from the user
 

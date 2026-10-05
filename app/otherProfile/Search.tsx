@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Keyboard,
   Pressable,
+  ScrollView,
   Text,
   TextInput,
   View,
@@ -17,18 +19,23 @@ import { decryptMessage, getOrCreateConversationKey } from "@/lib/crypto";
 import { getCurrentUserId } from "@/lib/auth";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import Avatar from "@/components/profile/Avatar";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function Search() {
   const { conversationId } = useLocalSearchParams<{
     conversationId: string;
   }>();
+
   const { colors, inputBg, inputBorderColor, placeholderColor } = useTheme();
+
   const router = useRouter();
+
   const [query, setQuery] = useState("");
   const [isFocused, setIsFocused] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [searching, setSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<Message[]>([]);
+
   const [userMap, setUserMap] = useState<
     Record<
       number,
@@ -40,6 +47,7 @@ export default function Search() {
       }
     >
   >({});
+
   const hasQuery = query.trim().length > 0;
 
   const clearSearch = () => {
@@ -51,15 +59,22 @@ export default function Search() {
 
   useEffect(() => {
     if (searchResults.length === 0) return;
+
     (async () => {
       const senderIds = Array.from(
         new Set(searchResults.map((m) => m.senderId)),
       );
+
       const loaded = await Promise.all(senderIds.map((id) => getUser(id)));
+
       const next: typeof userMap = {};
+
       senderIds.forEach((id, index) => {
-        if (loaded[index]) next[id] = loaded[index]!;
+        if (loaded[index]) {
+          next[id] = loaded[index]!;
+        }
       });
+
       setUserMap(next);
     })();
   }, [searchResults]);
@@ -71,6 +86,8 @@ export default function Search() {
       setSearching(false);
       return;
     }
+
+    Keyboard.dismiss();
 
     setHasSearched(true);
     setSearching(true);
@@ -87,6 +104,7 @@ export default function Search() {
         setSearchResults([]);
         return;
       }
+
       // 2. Get actual messages
       const messages: Message[] = await getMessagesByIds({
         messageIds,
@@ -159,21 +177,18 @@ export default function Search() {
   };
 
   const navToMsg = async (messageId: number) => {
-    // Tell any already-mounted chat screen for this conversation to jump to
-    // the message before we pop back into it — avoids remounting the chat,
-    // re-fetching from the server, and flashing the skeleton.
     emitScrollToMessage(Number(conversationId), Number(messageId));
 
     const userId = await getCurrentUserId();
+
     let memberIds = "";
+
     if (userId) {
       memberIds = (
         await getConversationMemberIds(Number(conversationId), userId)
       ).join(",");
     }
-    // dismissTo pops back to the existing chat if it's below in the stack;
-    // otherwise it replaces this screen with a fresh chat (which scrolls via
-    // its messageId param). Either way there's no double chat screen.
+
     router.dismissTo({
       pathname: "/chat/[id]",
       params: {
@@ -183,6 +198,7 @@ export default function Search() {
       },
     });
   };
+
   const formatSearchDate = (date: string) => {
     const d = new Date(date);
 
@@ -199,19 +215,26 @@ export default function Search() {
     };
   };
 
-  // Highlight every occurrence of the search term (case-insensitive) in the
-  // message preview, using the theme's accent color.
   const highlightMatches = (text: string) => {
     const term = query.trim();
+
     if (!term || !text) return text;
 
     const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
     const parts = text.split(new RegExp(`(${escaped})`, "i"));
+
     if (parts.length <= 1) return text;
 
     return parts.map((part, i) =>
       part.toLowerCase() === term.toLowerCase() ? (
-        <Text key={i} style={{ color: BRAND_COLOR, fontWeight: "600" }}>
+        <Text
+          key={i}
+          style={{
+            color: BRAND_COLOR,
+            fontWeight: "600",
+          }}
+        >
           {part}
         </Text>
       ) : (
@@ -221,10 +244,16 @@ export default function Search() {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      {/* Header: back arrow + search bar inline, WhatsApp-style */}
+    <SafeAreaView
+      edges={["top", "bottom"]}
+      style={{
+        flex: 1,
+        backgroundColor: colors.background,
+      }}
+    >
+      {/* Header */}
       <View
-        className="flex-row items-center gap-2 px-3 pt-14 pb-3"
+        className="flex-row items-center gap-2 px-3 pb-3"
         style={{
           borderBottomWidth: 1,
           borderBottomColor: inputBorderColor,
@@ -233,14 +262,16 @@ export default function Search() {
         <Pressable
           onPress={() => router.back()}
           hitSlop={10}
-          className="p-1.5 rounded-full"
-          style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
+          className="rounded-full p-1.5"
+          style={({ pressed }) => ({
+            opacity: pressed ? 0.5 : 1,
+          })}
         >
           <Feather name="arrow-left" size={22} color={colors.text} />
         </Pressable>
 
         <View
-          className="flex-1 flex-row items-center rounded-full px-3.5 gap-2"
+          className="flex-1 flex-row items-center gap-2 rounded-full px-3.5"
           style={{
             backgroundColor: inputBg,
             borderWidth: 1.5,
@@ -253,6 +284,7 @@ export default function Search() {
             size={17}
             color={isFocused ? BRAND_COLOR : placeholderColor}
           />
+
           <TextInput
             value={query}
             onChangeText={setQuery}
@@ -264,13 +296,20 @@ export default function Search() {
             returnKeyType="search"
             blurOnSubmit={false}
             onSubmitEditing={handleSearch}
-            style={{ flex: 1, color: colors.text, fontSize: 15.5 }}
+            style={{
+              flex: 1,
+              color: colors.text,
+              fontSize: 15.5,
+            }}
           />
+
           {hasQuery && (
             <Pressable
               onPress={clearSearch}
               hitSlop={10}
-              style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
+              style={({ pressed }) => ({
+                opacity: pressed ? 0.5 : 1,
+              })}
             >
               <Feather name="x" size={17} color={placeholderColor} />
             </Pressable>
@@ -295,132 +334,157 @@ export default function Search() {
         </Pressable>
       </View>
 
-      {/* Initial state — before any search is run */}
-      {!hasSearched && (
-        <View className="flex-1 items-center justify-center px-12 gap-4 -mt-16">
-          <View
-            className="items-center justify-center rounded-full"
-            style={{
-              width: 88,
-              height: 88,
-              backgroundColor: `${BRAND_COLOR}15`,
-            }}
-          >
-            <Feather name="message-circle" size={34} color={BRAND_COLOR} />
-          </View>
-          <Text
-            style={{ color: colors.text }}
-            className="font-semibold text-[16px] text-center"
-          >
-            Search this conversation
-          </Text>
-          <Text
-            style={{ color: placeholderColor }}
-            className="text-[13px] text-center leading-5"
-          >
-            Find messages, links, and media shared here
-          </Text>
-        </View>
-      )}
-
-      {/* Searching — show a spinner instead of flashing "No results" */}
-      {hasSearched && searching && (
-        <View className="flex-1 items-center justify-center">
-          <ActivityIndicator size="large" color={BRAND_COLOR} />
-        </View>
-      )}
-
-      {/* No results — only after an actual search, nothing matched */}
-      {hasSearched && !searching && searchResults.length === 0 && (
-        <View className="flex-1 items-center justify-center px-12 gap-3 -mt-16">
-          <Feather
-            name="search"
-            size={40}
-            color={placeholderColor}
-            style={{ opacity: 0.4 }}
-          />
-          <Text
-            style={{ color: colors.text }}
-            className="font-medium text-[15px] text-center"
-          >
-            No results found
-          </Text>
-          <Text
-            style={{ color: placeholderColor }}
-            className="text-[13px] text-center leading-5"
-          >
-            No messages matching &quot;{query}&quot;
-          </Text>
-        </View>
-      )}
-      {hasSearched &&
-        !searching &&
-        searchResults.length > 0 &&
-        searchResults.map((result) => {
-          const user = userMap[result.senderId];
-
-          return (
-            <Pressable
-              onPress={() => navToMsg(result.id)}
-              key={result.id}
-              className="mx-4 mt-2 flex-row items-center rounded-xl px-3 py-3"
+      {/* Content */}
+      <ScrollView
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{
+          flexGrow: 1,
+          paddingBottom: 16,
+        }}
+      >
+        {/* Initial state */}
+        {!hasSearched && (
+          <View className="flex-1 items-center justify-center gap-4 px-12">
+            <View
+              className="items-center justify-center rounded-full"
               style={{
-                backgroundColor: inputBg,
-                borderWidth: 1,
-                borderColor: inputBorderColor,
+                width: 88,
+                height: 88,
+                backgroundColor: `${BRAND_COLOR}15`,
               }}
             >
-              {/* Profile picture */}
-              <View
-                className="mr-3 h-11 w-11 items-center justify-center rounded-full"
-                style={{ backgroundColor: BRAND_COLOR }}
+              <Feather name="message-circle" size={34} color={BRAND_COLOR} />
+            </View>
+
+            <Text
+              style={{ color: colors.text }}
+              className="text-center text-[16px] font-semibold"
+            >
+              Search this conversation
+            </Text>
+
+            <Text
+              style={{ color: placeholderColor }}
+              className="text-center text-[13px] leading-5"
+            >
+              Find messages, links, and media shared here
+            </Text>
+          </View>
+        )}
+
+        {/* Searching */}
+        {hasSearched && searching && (
+          <View className="flex-1 items-center justify-center">
+            <ActivityIndicator size="large" color={BRAND_COLOR} />
+          </View>
+        )}
+
+        {/* No results */}
+        {hasSearched && !searching && searchResults.length === 0 && (
+          <View className="flex-1 items-center justify-center gap-3 px-12">
+            <Feather
+              name="search"
+              size={40}
+              color={placeholderColor}
+              style={{ opacity: 0.4 }}
+            />
+
+            <Text
+              style={{ color: colors.text }}
+              className="text-center text-[15px] font-medium"
+            >
+              No results found
+            </Text>
+
+            <Text
+              style={{ color: placeholderColor }}
+              className="text-center text-[13px] leading-5"
+            >
+              No messages matching &quot;
+              {query}
+              &quot;
+            </Text>
+          </View>
+        )}
+
+        {/* Results */}
+        {hasSearched &&
+          !searching &&
+          searchResults.length > 0 &&
+          searchResults.map((result) => {
+            const user = userMap[result.senderId];
+
+            return (
+              <Pressable
+                onPress={() => navToMsg(result.id)}
+                key={result.id}
+                className="mx-4 mt-2 flex-row items-center rounded-xl px-3 py-3"
+                style={{
+                  backgroundColor: inputBg,
+                  borderWidth: 1,
+                  borderColor: inputBorderColor,
+                }}
               >
-                <Avatar
-                  username={user?.username ?? `User ${result.senderId}`}
-                  avatarUrl={user?.avatarUrl ?? undefined}
-                  size={38}
-                  userId={Number(result.senderId)}
-                  localAvatarUrlPath={user.localAvatarUrlPath}
-                />
-              </View>
+                {/* Profile picture */}
+                <View
+                  className="mr-3 h-11 w-11 items-center justify-center rounded-full"
+                  style={{
+                    backgroundColor: BRAND_COLOR,
+                  }}
+                >
+                  <Avatar
+                    username={user?.username ?? `User ${result.senderId}`}
+                    avatarUrl={user?.avatarUrl ?? undefined}
+                    size={38}
+                    userId={Number(result.senderId)}
+                    localAvatarUrlPath={user?.localAvatarUrlPath}
+                  />
+                </View>
 
-              {/* Username + Message */}
-              <View className="mr-3 flex-1">
-                <Text
-                  style={{ color: colors.icon }}
-                  className="text-[12px]"
-                  numberOfLines={2}
-                >
-                  {user?.username ?? `User ${result.senderId}`}
-                </Text>
-                <Text
-                  style={{ color: colors.text }}
-                  className="text-[16px]"
-                  numberOfLines={2}
-                >
-                  {highlightMatches(result.text)}
-                </Text>
-              </View>
+                {/* Username + Message */}
+                <View className="mr-3 flex-1">
+                  <Text
+                    style={{ color: colors.icon }}
+                    className="text-[12px]"
+                    numberOfLines={2}
+                  >
+                    {user?.username ?? `User ${result.senderId}`}
+                  </Text>
 
-              {/* Date */}
-              <View className="items-end">
-                <Text
-                  style={{ color: placeholderColor }}
-                  className="text-[11px]"
-                >
-                  {formatSearchDate(result.sentAt).date}
-                </Text>
+                  <Text
+                    style={{ color: colors.text }}
+                    className="text-[16px]"
+                    numberOfLines={2}
+                  >
+                    {highlightMatches(result.text)}
+                  </Text>
+                </View>
 
-                <Text
-                  style={{ color: placeholderColor }}
-                  className="text-[11px]"
-                >
-                  {formatSearchDate(result.sentAt).time}
-                </Text>
-              </View>
-            </Pressable>
-          );
-        })}
-    </View>
+                {/* Date */}
+                <View className="items-end">
+                  <Text
+                    style={{
+                      color: placeholderColor,
+                    }}
+                    className="text-[11px]"
+                  >
+                    {formatSearchDate(result.sentAt).date}
+                  </Text>
+
+                  <Text
+                    style={{
+                      color: placeholderColor,
+                    }}
+                    className="text-[11px]"
+                  >
+                    {formatSearchDate(result.sentAt).time}
+                  </Text>
+                </View>
+              </Pressable>
+            );
+          })}
+      </ScrollView>
+    </SafeAreaView>
   );
 }

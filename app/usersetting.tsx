@@ -72,6 +72,8 @@ export default function UserSettings() {
         width: image.assets[0].width,
         height: image.assets[0].height,
         size: new File(image.assets[0].uri).size,
+        maxSize: 5 * 1024 * 1024,
+        maxDimension: 512,
       });
 
       router.push({
