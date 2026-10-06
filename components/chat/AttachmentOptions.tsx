@@ -12,7 +12,7 @@ import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { Feather } from "@expo/vector-icons";
 import { launchFile, launchGallery } from "@/lib/Attachments";
 import { router } from "expo-router";
-import { useCameraPermission } from "react-native-vision-camera";
+import { useAttachmentCameraPermission } from "@/hooks/useAttachmentCameraPermission";
 
 type AttachmentOptionsProps = {
   onClose: () => void;
@@ -20,7 +20,7 @@ type AttachmentOptionsProps = {
 
 export function AttachmentOptions({ onClose }: AttachmentOptionsProps) {
   const { hasPermission, canRequestPermission, requestPermission } =
-    useCameraPermission();
+    useAttachmentCameraPermission();
   const theme = useTheme();
   const colors = theme.colors;
 

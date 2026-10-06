@@ -22,6 +22,21 @@ const LIBSODIUM_CJS = new Set([
 ]);
 
 config.resolver.resolveRequest = (context, moduleName, platform) => {
+  // TEMP DIAGNOSTIC: log deep react-native imports resolved for web.
+  if (process.env.LOG_RN_DEEP && platform === "web" &&
+      (moduleName.startsWith("react-native/") ||
+       moduleName === "react-native-nitro-modules" ||
+       moduleName === "react-native-nitro-image" ||
+       moduleName === "react-native-vision-camera" ||
+       moduleName === "react-native-vision-camera-worklets")) {
+    try {
+      require("fs").appendFileSync(
+        "/tmp/opencode/rn_deep_imports.log",
+        `${context.originModulePath} -> ${moduleName}\n`,
+      );
+    } catch {}
+  }
+
   // Stub out Node core modules the sumo build references but never
   // actually calls at runtime in RN/Expo (e.g. its unused `fs` fallback path).
   if (NODE_CORE_STUBS.has(moduleName)) {
