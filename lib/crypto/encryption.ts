@@ -1,7 +1,7 @@
 import sodiumModule from "./sodium";
 import { Base64 } from "js-base64";
 const sodium = (sodiumModule as any).default ?? sodiumModule;
-
+// import sodium from "libsodium-wrappers";
 // converts a string to Uint8Array
 export function encodeUtf8(str: string): Uint8Array {
   if (typeof sodium.from_string === "function") {
@@ -63,4 +63,23 @@ export async function decryptMessage({
   } catch {
     return { decryptMessage: "[Encrypted Message]" }; // if decryption fails return place holder
   }
+}
+
+export async function encryptImage({ image }: { image: Uint8Array }) {
+  await sodium.ready;
+
+  // creates a random 256 bit key
+  const randomBytes = sodium.randombytes_buf(
+    sodium.crypto_secretstream_xchacha20poly1305_KEYBYTES,
+  );
+
+  // initialize the stream
+  const secretStream =
+    sodium.crypto_secretstream_xchacha20poly1305_init_push(randomBytes);
+
+  const header = secretStream.header;
+  const state = secretStream.state;
+
+  // const encryptedImage =
+  //   sodium.crypto_secretstream_xchacha20poly1305_push(state);
 }
