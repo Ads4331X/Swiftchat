@@ -48,33 +48,7 @@ export default function AttachmentReview() {
   const handleVideoSend = async (uri: string) => {};
 
   const handleImageSend = async (uri: string) => {
-    const img = new File(uri).readableStream(); // init a stream
-    const reader = img.getReader(); // get a reader to read the stream in chunks
-    const bufferSize = 1024 * 1024; // 1MB
-    let bufferBytes = 0; // keeps track of the total bytes read
-    let buffer = []; // keeps track of the chunks read
-    while (true) {
-      // reads the iamge file in chunks one by one
-      const readImg = await reader.read();
-
-      if (readImg.done) break; // if steam is completely read break the loop
-
-      buffer.push(readImg.value);
-      bufferBytes += readImg.value?.byteLength || 0;
-
-      if (bufferSize <= bufferBytes) {
-        let mergeChunk = [];
-        for (let chunk of buffer) {
-          mergeChunk.push(...chunk); // merge the chunks to a single array of 1MB
-        }
-        // encrypt the merge chunk of 1MB
-        await encryptImage({ image: new Uint8Array(mergeChunk) });
-
-        // resets the buffer and the bufferbytes
-        buffer = [];
-        bufferBytes = 0;
-      }
-    }
+   
   };
   // Native: opens the react-native-video-trim editor and listens for its
   // events. Web: renders the ffmpeg based trim panel instead.

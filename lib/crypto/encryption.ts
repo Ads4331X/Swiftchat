@@ -1,7 +1,13 @@
+import { File } from "expo-file-system";
 import sodiumModule from "./sodium";
 import { Base64 } from "js-base64";
+import { createChunk } from "@/lib/chunk/createChunk";
+import {
+  createAttachmentFile,
+  writeAttachmentChunk,
+} from "../storage/attachmentFile";
 const sodium = (sodiumModule as any).default ?? sodiumModule;
-// import sodium from "libsodium-wrappers";
+// import sodium, { StateAddress } from "libsodium-wrappers";
 // converts a string to Uint8Array
 export function encodeUtf8(str: string): Uint8Array {
   if (typeof sodium.from_string === "function") {
@@ -65,10 +71,37 @@ export async function decryptMessage({
   }
 }
 
-export async function encryptImage({ image }: { image: Uint8Array }) {
+type SecretStreamState = ReturnType<
+  typeof sodium.crypto_secretstream_xchacha20poly1305_init_push
+>["state"];
+
+export async function encryptChunk({
+  chunk,
+  state,
+  tag,
+}: {
+  chunk: Uint8Array;
+  state: SecretStreamState;
+  tag: number;
+}) {
   await sodium.ready;
 
-  // creates a random 256 bit key
+  const encrypt = sodium.crypto_secretstream_xchacha20poly1305_push(
+    state,
+    chunk,
+    null,
+    tag,
+  );
+
+  return encrypt;
+}
+
+export async function encryptImage({ uri }: { uri: string }) {
+  const imgFile = createAttachmentFile(); // creates a file to store the encrypted image
+
+  const handle = imgFile.open();
+  await sodium.ready;
+  // creates a random 256 bit key (32 bytes)
   const randomBytes = sodium.randombytes_buf(
     sodium.crypto_secretstream_xchacha20poly1305_KEYBYTES,
   );
@@ -77,9 +110,34 @@ export async function encryptImage({ image }: { image: Uint8Array }) {
   const secretStream =
     sodium.crypto_secretstream_xchacha20poly1305_init_push(randomBytes);
 
-  const header = secretStream.header;
   const state = secretStream.state;
+  const header = secretStream.header;
 
-  // const encryptedImage =
-  //   sodium.crypto_secretstream_xchacha20poly1305_push(state);
+  const img = new File(uri).readableStream(); // inits a stream
+  const reader = img.getReader();
+  while (true) {
+    const imgChunk = await createChunk({ reader, bufferSize: 1024 * 1024 });
+    const encryptImgChunk = await encryptChunk({
+      chunk: imgChunk.chunk,
+      state,
+      tag: imgChunk.isFinal
+        ? sodium.crypto_secretstream_xchacha20poly1305_TAG_FINAL
+        : sodium.crypto_secretstream_xchacha20poly1305_TAG_MESSAGE,
+    });
+    // appends the chunk to the file
+    writeAttachmentChunk({
+      encryptedChunk: encryptImgChunk,
+      handle,
+    });
+
+    if (imgChunk.isFinal) {
+      handle.close();
+      break;
+    }
+  }
+  return {
+    encryptedImageUri: imgFile.uri,
+    secretKey: randomBytes,
+    header,
+  };
 }
