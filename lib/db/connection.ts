@@ -76,6 +76,20 @@ const STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS BlockedUser (
   userId INTEGER PRIMARY KEY
 );`,
+  `CREATE TABLE IF NOT EXISTS Attachment (
+  id INTEGER PRIMARY KEY,
+  uuid TEXT NOT NULL UNIQUE,
+  messageId INTEGER NOT NULL UNIQUE,
+  localPath TEXT,
+  mimeType TEXT NOT NULL,
+  fileSize INTEGER NOT NULL,
+  encryptedKey TEXT NOT NULL,
+  keyNonce TEXT NOT NULL,
+  encryptedHeader TEXT NOT NULL,
+  headerNonce TEXT NOT NULL,
+  uploadStatus TEXT NOT NULL DEFAULT 'pending',
+  downloadStatus TEXT NOT NULL DEFAULT 'pending'
+);`,
 ];
 
 let fts5Available = false;
@@ -149,7 +163,9 @@ async function openDbOnce(): Promise<SQLite.SQLiteDatabase | null> {
         await database.execAsync(`ALTER TABLE Message ADD COLUMN nonce TEXT;`);
       } catch {}
       try {
-        await database.execAsync(`ALTER TABLE Message ADD COLUMN reactions TEXT;`);
+        await database.execAsync(
+          `ALTER TABLE Message ADD COLUMN reactions TEXT;`,
+        );
       } catch {}
       try {
         await database.execAsync(

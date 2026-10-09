@@ -1,3 +1,5 @@
+import { FileHandle } from "expo-file-system";
+
 export async function createChunk({
   bufferSize = 1024 * 1024, // 1MB
   reader,
@@ -30,4 +32,25 @@ function mergeChunks(buffer: Uint8Array[], totalBytes: number): Uint8Array {
     offset += piece.byteLength;
   }
   return merged;
+}
+
+export async function readChunk({
+  attachmentHandle,
+}: {
+  attachmentHandle: FileHandle;
+}) {
+  // read chunk length
+  const lengthBytes = await attachmentHandle.readBytes(4);
+
+  // convert 4 bytes to number
+  const chunkLength = new DataView(
+    lengthBytes.buffer,
+    lengthBytes.byteOffset,
+    lengthBytes.byteLength,
+  ).getUint32(0, true);
+
+  // read encrypted chunk
+  const encryptedChunk = await attachmentHandle.readBytes(chunkLength);
+
+  return encryptedChunk;
 }
