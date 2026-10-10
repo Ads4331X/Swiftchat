@@ -1,22 +1,16 @@
-import { FlatList, Pressable, Text, View } from "react-native";
+import { FlatList, View } from "react-native";
 import { type RefObject, useCallback, useMemo, useRef, useState } from "react";
-import Feather from "@expo/vector-icons/Feather";
 import { type Message, type RepliedTo } from "@/hooks/useChatMessages";
-import MessageBubble from "./MessageBubble";
-import { TypingIndicator } from "./TypingIndicator";
-import MessageSkeleton from "./MessageSkeleton";
+import { MessageBubble } from "@/components/chat/message";
+import MessageSkeleton from "@/components/chat/common/MessageSkeleton";
 import EmptyState from "@/components/ui/EmptyState";
 import { markRead } from "@/lib/db";
 import { api } from "@/lib/api";
 import { listenForMarkRead } from "@/lib/socket";
 import { useEffect } from "react";
-import Avatar from "../profile/Avatar";
-type Position = {
-  pageX: number;
-  pageY: number;
-  width: number;
-  height: number;
-};
+import { type Position } from "@/components/chat/types";
+import { TypingBubble } from "./TypingBubble";
+import { ScrollToBottomButton } from "./ScrollToBottomButton";
 
 type MessageListProps = {
   messages: Message[]; // chronological, oldest -> newest (unchanged from hook)
@@ -25,9 +19,6 @@ type MessageListProps = {
   hasMore: boolean;
   currentUserId: number | null;
   listRef: RefObject<FlatList<Message> | null>;
-  textColor: string;
-  bubbleColor: string;
-  subtleText: string;
   onMessageLongPress: (message: Message, position: Position) => void;
   selectedMessageId?: number | null;
   isOtherUserTyping?: number[];
@@ -55,9 +46,6 @@ export default function MessageList({
   hasMore,
   currentUserId,
   listRef,
-  textColor,
-  bubbleColor,
-  subtleText,
   onMessageLongPress,
   selectedMessageId,
   isOtherUserTyping,
@@ -98,7 +86,7 @@ export default function MessageList({
     return () => {
       scrollToMessageRef.current = null;
     };
-  }, [messages]);
+  }, [messages, listRef, scrollToMessageRef]);
 
   // Lookup sender display names/avatars for group bubbles & typing indicator.
   const memberById = useMemo(() => {
@@ -134,9 +122,7 @@ export default function MessageList({
   // snapshot; falls back to deriving it from the message list (perfect for
   // optimistic rows and messages sent right now).
   const resolveRepliedTo = useCallback(
-    (
-      message: Message,
-    ): { repliedTo?: RepliedTo; replyToId?: number } | null => {
+    (message: Message): { repliedTo?: RepliedTo; replyToId?: number } | null => {
       if (message.repliedTo) return null;
       if (message.replyToId == null) return null;
 
@@ -235,6 +221,7 @@ export default function MessageList({
 
     return unsubscribe;
   }, [currentUserId]);
+
   const handleViewableItemsChanged = useCallback(
     async ({ viewableItems }: any) => {
       // Inverted list: data[0] is the newest message, so forward iteration
@@ -340,9 +327,6 @@ export default function MessageList({
         <MessageBubble
           message={item}
           isMine={item.senderId === currentUserId}
-          textColor={textColor}
-          bubbleColor={bubbleColor}
-          subtleText={subtleText}
           hidden={item.id === selectedMessageId}
           onLongPress={(position) => onMessageLongPress(item, position)}
           showAvatar={showAvatarSet.has(item.id)}
@@ -365,9 +349,6 @@ export default function MessageList({
     },
     [
       currentUserId,
-      textColor,
-      bubbleColor,
-      subtleText,
       selectedMessageId,
       onMessageLongPress,
       showAvatarSet,
@@ -410,44 +391,7 @@ export default function MessageList({
         // renders at the TOP.
         ListHeaderComponent={
           isOtherUserTyping?.length ? (
-            <View className="flex-row justify-start px-1 py-[1px] mt-1">
-              <View
-                className="px-3 py-2 rounded-2xl"
-                style={{
-                  backgroundColor: bubbleColor,
-                  borderBottomLeftRadius: 4,
-                  alignSelf: "flex-start",
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 10,
-                }}
-              >
-                <View className="flex-row">
-                  {typingMembers.map((member, index) => (
-                    <View
-                      key={member.id}
-                      className="rounded-full"
-                      style={{
-                        borderWidth: 2,
-                        borderColor: bubbleColor,
-                        marginLeft: index === 0 ? 0 : -8,
-                      }}
-                    >
-                      <Avatar
-                        username={member.username}
-                        avatarUrl={member.avatar}
-                        size={24}
-                        localAvatarUrlPath={null}
-                      />
-                    </View>
-                  ))}
-                </View>
-                <Text style={{ color: subtleText }} className="text-sm">
-                  {typingText}
-                </Text>
-                <TypingIndicator color={subtleText} />
-              </View>
-            </View>
+            <TypingBubble members={typingMembers} text={typingText} />
           ) : null
         }
         ListFooterComponent={null}
@@ -470,28 +414,7 @@ export default function MessageList({
       />
 
       {showScrollButton && (
-        <Pressable
-          onPress={() => scrollToBottom(true)}
-          hitSlop={8}
-          style={{
-            position: "absolute",
-            bottom: 16,
-            alignSelf: "center",
-            width: 36,
-            height: 36,
-            borderRadius: 18,
-            backgroundColor: bubbleColor,
-            alignItems: "center",
-            justifyContent: "center",
-            shadowColor: "#000",
-            shadowOpacity: 0.15,
-            shadowRadius: 4,
-            shadowOffset: { width: 0, height: 2 },
-            elevation: 3,
-          }}
-        >
-          <Feather name="chevron-down" size={20} color={textColor} />
-        </Pressable>
+        <ScrollToBottomButton onPress={() => scrollToBottom(true)} />
       )}
     </View>
   );

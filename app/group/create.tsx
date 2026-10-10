@@ -15,7 +15,7 @@ import { useTheme } from "@/constants/theme-provider";
 import { BRAND_COLOR } from "@/constants/theme";
 import { api } from "@/lib/api";
 import Avatar from "@/components/profile/Avatar";
-import MemberPicker from "@/components/chat/MemberPicker";
+import MemberPicker from "@/components/chat/members";
 import { joinConversation } from "@/lib/socket";
 
 type SearchUser = {

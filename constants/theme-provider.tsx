@@ -1,6 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import { Colors, getFormColors } from "@/constants/theme";
+import {
+  AttachmentColors,
+  Colors,
+  getAttachmentColors,
+  getFormColors,
+} from "@/constants/theme";
 import { getSetting, setSetting } from "@/lib/db";
 import { Appearance } from "@/app/appearance";
 
@@ -14,6 +19,7 @@ export type AppTheme = {
   placeholderColor: string;
   dividerColor: string;
   setAppearance: (appearance: Appearance) => Promise<void>;
+  attachmentColors: (isMine?: boolean) => AttachmentColors;
 };
 
 const ThemeContext = createContext<AppTheme | null>(null);
@@ -66,7 +72,13 @@ export function AppThemeProvider({ children }: { children: React.ReactNode }) {
 
   const isDark = colorScheme === "dark";
 
-  // Memoized so the context value keeps a stable identity — a fresh object
+  // Stable identity so consumers can reference it as a dependency safely.
+  const attachmentColors = useCallback(
+    (isMine = false) => getAttachmentColors(colorScheme, isMine),
+    [colorScheme],
+  );
+
+  // Memoized so the context value has a stable identity — a fresh object
   // every render would re-render all ~50 useTheme() consumers on each change.
   const theme: AppTheme = useMemo(
     () => ({
@@ -75,8 +87,9 @@ export function AppThemeProvider({ children }: { children: React.ReactNode }) {
       colors: Colors[colorScheme],
       ...getFormColors(colorScheme),
       setAppearance,
+      attachmentColors,
     }),
-    [colorScheme, setAppearance],
+    [colorScheme, isDark, setAppearance, attachmentColors],
   );
 
   return (

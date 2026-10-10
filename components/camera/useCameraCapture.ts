@@ -17,10 +17,7 @@ import {
 
 const VIDEO_BITRATE = 5_000_000;
 
-/**
- * How long the screen flash stays visible before the photo is taken, so the
- * overlay is actually on screen while the camera captures.
- */
+// Time the screen light stays on before the photo is taken.
 const SCREEN_FLASH_DURATION_MS = 120;
 
 const toFileUri = (path: string) =>
@@ -75,15 +72,8 @@ export function useCameraCapture({
     [mode, photoOutput, videoOutput],
   );
 
-  /*
-   * PHOTO
-   */
-
-  /**
-   * The front camera has no flash, so it lights the scene with a white overlay
-   * that is shown while the photo is taken. The overlay is always hidden again,
-   * even if the capture fails.
-   */
+  // Photo
+  // Front camera has no flash, so show a white screen while taking the photo.
   const capturePhoto = useCallback(async () => {
     if (!screenFlashEnabled) {
       return photoOutput.capturePhoto(
@@ -156,10 +146,7 @@ export function useCameraCapture({
     }
   }, [capturePhoto, isRecording]);
 
-  /*
-   * VIDEO FINISHED
-   */
-
+  // Video finished
   const handleRecordingFinished = useCallback(
     async (filePath: string) => {
       recorderRef.current = null;
@@ -218,10 +205,7 @@ export function useCameraCapture({
     [recorderRef, setIsRecording, setIsVideoLightOn],
   );
 
-  /*
-   * START / STOP RECORDING
-   */
-
+  // Start / stop recording
   const handleStartRecording = useCallback(async () => {
     if (isRecording) return;
 

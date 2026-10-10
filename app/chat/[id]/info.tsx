@@ -5,7 +5,7 @@ import Feather from "@expo/vector-icons/Feather";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useTheme } from "@/constants/theme-provider";
 import { api } from "@/lib/api";
-import { MessageBubbleContent } from "@/components/chat/MessageBubble";
+import { MessageBubbleContent } from "@/components/chat/message";
 import Avatar from "@/components/profile/Avatar";
 import { getUser } from "@/lib/db";
 
@@ -146,7 +146,7 @@ export default function MessageInfoScreen() {
       sentAt: string;
       membersJson: string;
     }>();
-  const { colors, subtleText, dividerColor, inputBg } = useTheme();
+  const { colors, subtleText, dividerColor } = useTheme();
 
   const [readBy, setReadBy] = useState<Member[]>([]);
   const [deliveredTo, setDeliveredTo] = useState<Member[]>([]);
@@ -219,9 +219,6 @@ export default function MessageInfoScreen() {
           <MessageBubbleContent
             text={messageText ?? ""}
             isMine
-            textColor={colors.text}
-            bubbleColor={inputBg}
-            subtleText={subtleText}
           />
           <Text style={{ color: subtleText }} className="text-[11px] mt-1 mr-1">
             {formatTime(sentAt ?? "")}

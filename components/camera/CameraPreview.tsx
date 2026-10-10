@@ -48,10 +48,7 @@ export function CameraPreview({
   onToggleFacing,
   onSessionActiveChange,
 }: CameraPreviewProps) {
-  /*
-   * FOCUS
-   */
-
+  // Focus
   const focusX = useSharedValue(0);
   const focusY = useSharedValue(0);
   const focusScale = useSharedValue(1.4);
@@ -89,10 +86,7 @@ export function CameraPreview({
     [cameraRef],
   );
 
-  /*
-   * SESSION
-   */
-
+  // Session
   const handleSessionStarted = useCallback(() => {
     onSessionActiveChange(true);
   }, [onSessionActiveChange]);
@@ -115,10 +109,7 @@ export function CameraPreview({
     console.warn("Camera error:", error);
   }, []);
 
-  /*
-   * GESTURES
-   */
-
+  // Gestures
   const pinchStartZoom = useSharedValue(1);
 
   const singleTapGesture = useMemo(

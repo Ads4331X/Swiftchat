@@ -8,7 +8,6 @@ import {
 import {
   checkAndCreateEncryptedFile,
   createAttachmentCacheFile,
-  createAttachmentFile,
   writeAttachmentChunk,
 } from "@/lib/storage/attachmentFile";
 import { File } from "expo-file-system";

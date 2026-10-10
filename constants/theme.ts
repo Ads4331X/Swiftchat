@@ -49,3 +49,44 @@ export function getFormColors(colorScheme?: ColorSchemeName) {
     dividerColor: isDark ? "#2A2D2F" : "#E5E7EB",
   };
 }
+
+export type AttachmentColors = {
+  cardColor: string;
+  labelColor: string;
+  dividerColor: string;
+  placeholderBg: string;
+  iconMuted: string;
+  textColor: string;
+  subtle: string;
+  trackColor: string;
+  accent: string;
+};
+
+export function getAttachmentColors(
+  colorScheme?: ColorSchemeName,
+  isMine = false,
+): AttachmentColors {
+  const isDark = colorScheme === "dark";
+  const subtleText = getFormColors(colorScheme).subtleText;
+  const divider = getFormColors(colorScheme).dividerColor;
+
+  return {
+    cardColor: isMine
+      ? "rgba(255,255,255,0.16)"
+      : isDark
+        ? "#1F2529"
+        : "#FFFFFF",
+    labelColor: isMine ? "rgba(255,255,255,0.85)" : subtleText,
+    dividerColor: isMine ? "rgba(255,255,255,0.16)" : divider,
+    placeholderBg: isMine
+      ? "rgba(0,0,0,0.22)"
+      : isDark
+        ? "#232B2F"
+        : "#E4E9EC",
+    iconMuted: isMine ? "rgba(255,255,255,0.9)" : isDark ? "#8A939A" : "#6B7280",
+    textColor: isMine ? "#FFFFFF" : isDark ? "#ECEDEE" : "#11181C",
+    subtle: isMine ? "rgba(255,255,255,0.7)" : subtleText,
+    trackColor: isMine ? "rgba(255,255,255,0.35)" : isDark ? "#3A4247" : "#D6DCE0",
+    accent: BRAND_COLOR,
+  };
+}

@@ -13,11 +13,11 @@ import useChatParticipant from "@/hooks/useChatParticipant";
 import { conversationDisplayName } from "@/lib/utils";
 import useChatTyping from "@/hooks/useChatTyping";
 import { useKeySetup } from "@/hooks/useKeySetup";
-import ChatActions from "@/components/chat/ChatActions";
-import BlockedNotice from "@/components/chat/BlockedNotice";
-import ChatComposer from "@/components/chat/ChatComposer";
-import ChatHeader from "@/components/chat/ChatHeader";
-import MessageList from "@/components/chat/MessageList";
+import ChatActions from "@/components/chat/actions";
+import BlockedNotice from "@/components/chat/header/BlockedNotice";
+import ChatComposer from "@/components/chat/composer";
+import ChatHeader from "@/components/chat/header";
+import MessageList from "@/components/chat/list";
 import ForwardSheet from "@/components/chat/forward/ForwardSheet";
 import PinModal from "@/components/security/PinModal";
 import { listenForGroupDelete } from "@/lib/socket";
@@ -28,7 +28,7 @@ import {
   getPinnedMessageLocal,
   savePinnedMessage,
 } from "@/lib/db";
-import PinnedMessages from "@/components/chat/PinnedMessages";
+import PinnedMessages from "@/components/chat/pinned";
 import { api, unblockUser } from "@/lib/api";
 import { formatPresence } from "@/lib/utils/formatPresence";
 import Toast from "react-native-toast-message";
@@ -62,14 +62,7 @@ export default function UserChat() {
     removeBlockUserId,
     ready: blockedReady,
   } = useBlockedUsers();
-  const {
-    colors,
-    subtleText,
-    dividerColor,
-    inputBg,
-    inputBorderColor,
-    placeholderColor,
-  } = useTheme();
+  const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const {
     needsPin,
@@ -387,9 +380,6 @@ export default function UserChat() {
         avatarUrl={isGroup ? "" : (otherUser?.avatarUrl ?? avatarUrl)}
         isGroup={isGroup}
         memberCount={memberCount}
-        textColor={colors.text}
-        dividerColor={dividerColor}
-        backgroundColor={colors.background}
         chatId={id}
         localAvatarUrlPath={otherUser ? otherUser.localAvatarUrlPath : null}
         presence={
@@ -419,9 +409,6 @@ export default function UserChat() {
         hasMore={hasMore}
         currentUserId={currentUserId}
         listRef={listRef}
-        textColor={colors.text}
-        bubbleColor={inputBg}
-        subtleText={subtleText}
         selectedMessageId={selectedMessage?.id ?? null}
         onMessageLongPress={handleLongPress}
         isOtherUserTyping={isOtherUserTyping}
@@ -462,13 +449,6 @@ export default function UserChat() {
           }}
           sending={sending}
           insets={insets}
-          inputBg={inputBg}
-          inputBorderColor={inputBorderColor}
-          placeholderColor={placeholderColor}
-          textColor={colors.text}
-          subtleText={subtleText}
-          dividerColor={dividerColor}
-          backgroundColor={colors.background}
           showAttachmentOptions={showAttachmentOptions}
           setShowAttachmentOptions={setShowAttachmentOptions}
         />
@@ -478,8 +458,6 @@ export default function UserChat() {
         message={selectedMessage}
         currentUserId={currentUserId}
         position={menuPosition}
-        textColor={colors.text}
-        bubbleColor={inputBg}
         onEdit={handleEdit}
         onInfo={handleMessageInfo}
         onReply={handleReplyMessage}

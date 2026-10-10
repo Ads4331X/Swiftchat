@@ -16,11 +16,7 @@ import type { CameraLensOption } from "@/components/camera/useCameraLenses";
 
 const MAX_DISPLAY_ZOOM = 10;
 
-/**
- * Opacity of the front camera screen light. The photo flash is a bit brighter
- * than the video light, and both stay dim enough to not wash out the preview or
- * hide the controls.
- */
+// Screen light opacity: photo is brighter than video.
 const SCREEN_FLASH_OPACITY = 0.35;
 const SCREEN_LIGHT_OPACITY = 0.25;
 
@@ -58,23 +54,14 @@ export default function CameraScreen() {
     requestPermission: requestMicrophonePermission,
   } = useMicrophonePermission();
 
-  // The flash and the torch are part of the main lens module, so they stay
-  // available even while another lens (e.g. the ultra-wide one) is active.
+  // Flash and torch come from the main lens, so they work on any lens.
   const hasTorch = mainDevice?.hasTorch ?? false;
   const hasFlash = mainDevice?.hasFlash ?? false;
 
-  /*
-   * FLASH / LIGHT
-   *
-   * The rear camera lights photos up with the hardware flash and videos with the
-   * hardware torch. The front camera has neither, so it lights up with a white
-   * screen overlay instead. Everything is a simple `off / on` toggle.
-   */
-
+  // Flash / light
   const isFront = facing === "front";
 
-  // The screen light is always available on the front camera, no matter what
-  // `hasFlash` and `hasTorch` report for that device.
+  // Front camera always has a screen light.
   const hasScreenLight = isFront;
 
   const isScreenFlashEnabled =
@@ -86,10 +73,7 @@ export default function CameraScreen() {
   const isFlashDisabled =
     !hasScreenLight && (mode === "video" ? !hasTorch : !hasFlash);
 
-  /*
-   * CAPTURE
-   */
-
+  // Capture
   const {
     outputs,
     handleClickPhoto,
@@ -109,14 +93,7 @@ export default function CameraScreen() {
     recorderRef,
   });
 
-  /*
-   * ZOOM
-   *
-   * The zoom steps are resolved from the physical lenses of the camera, see
-   * `useCameraLenses`. Picking a step may activate another lens (e.g. `0.5x`
-   * activates the ultra-wide one) before the zoom is applied to it.
-   */
-
+  // Zoom
   const zoom = useSharedValue(1);
 
   const minZoom = device?.minZoom ?? 1;
@@ -149,20 +126,14 @@ export default function CameraScreen() {
     [device?.id, setActiveDevice, zoom],
   );
 
-  /*
-   * PERMISSIONS
-   */
-
+  // Permissions
   useEffect(() => {
     if (!hasCameraPermission) {
       requestCameraPermission();
     }
   }, [hasCameraPermission, requestCameraPermission]);
 
-  /*
-   * FOCUS / SCREEN
-   */
-
+  // Focus
   useFocusEffect(
     useCallback(() => {
       setIsFocused(true);
@@ -173,10 +144,7 @@ export default function CameraScreen() {
     }, []),
   );
 
-  /*
-   * RECORDING TIMER
-   */
-
+  // Recording timer
   useEffect(() => {
     isRecordingRef.current = isRecording;
   }, [isRecording]);
@@ -201,30 +169,23 @@ export default function CameraScreen() {
     return () => clearInterval(timer);
   }, [isRecording]);
 
-  /*
-   * CAMERA FLIP
-   */
-
+  // Camera flip
   const toggleCameraFacing = useCallback(() => {
     if (isRecordingRef.current) return;
 
     setIsVideoLightOn(false);
     setFlashSetting("off");
 
-    // Always start again on the main lens of the camera we flip to.
+    // Start again on the main lens.
     setActiveDevice(null);
     zoom.value = 1;
 
     setFacing((current) => (current === "back" ? "front" : "back"));
   }, [setActiveDevice, zoom]);
 
-  /*
-   * FLASH / LIGHT / MODE
-   */
-
+  // Flash / light / mode
   const handleFlashSetting = useCallback(() => {
-    // While recording, the button toggles the light: the hardware torch on the
-    // rear camera and the screen light on the front camera.
+    // While recording, toggle the light instead of the photo flash.
     if (mode === "video") {
       setIsVideoLightOn((current) => !current);
       return;
@@ -239,10 +200,7 @@ export default function CameraScreen() {
     setMode(nextMode);
   }, []);
 
-  /*
-   * CANCEL
-   */
-
+  // Cancel
   const handleCancel = useCallback(() => {
     if (isRecording) {
       recorderRef.current?.stopRecording();
@@ -256,10 +214,7 @@ export default function CameraScreen() {
     }
   }, [isRecording]);
 
-  /*
-   * SHUTTER
-   */
-
+  // Shutter
   const handleShutter = useCallback(() => {
     if (isRecording) {
       handleStopRecording();
@@ -284,10 +239,6 @@ export default function CameraScreen() {
     setIsSessionActive(active);
   }, []);
 
-  /*
-   * CAMERA UNAVAILABLE
-   */
-
   if (!hasCameraPermission || device == null) {
     return (
       <View className="flex-1 items-center justify-center bg-black">
@@ -297,10 +248,6 @@ export default function CameraScreen() {
       </View>
     );
   }
-
-  /*
-   * UI
-   */
 
   return (
     <View className="flex-1 bg-black">
@@ -335,13 +282,7 @@ export default function CameraScreen() {
         onShutter={handleShutter}
       />
 
-      {/*
-        Screen light of the front camera, which has two separate behaviours:
-        - photo: a short, brighter flash while the picture is taken
-        - video: a dimmer light for the whole recording
-        Both disappear as soon as their moment is over.
-      */}
-
+      {/* Front camera screen light: flash for photo, dim light while recording. */}
       {(isScreenFlashVisible || isScreenLightRecording) && (
         <View
           pointerEvents="none"

@@ -2,37 +2,20 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useCameraDevice, useCameraDevices } from "react-native-vision-camera";
 import type { CameraDevice } from "react-native-vision-camera";
 
-/**
- * A zoom step the user can pick, together with the lens that has to be active
- * for it and the zoom to apply on that lens.
- */
+// A zoom step the user can pick and the lens + zoom needed for it.
 export type CameraLensOption = {
-  /** The value shown in the UI, e.g. `0.5` renders as "0.5x". */
   value: number;
-  /** The Camera device that has to be active to use this step. */
   device: CameraDevice;
-  /** The zoom to apply once `device` is active. */
   zoom: number;
 };
 
 const ULTRA_WIDE_ZOOM = 0.5;
 const TELE_ZOOM_STEPS = [2, 3];
 
-/**
- * How far a telephoto lens may be away from a zoom step (in percent) before we
- * stop treating it as the optical zoom for that step. Without this, a `5x`
- * telephoto lens would be offered as "2x".
- */
+// How close a tele lens must be to a zoom step to count as that step (30%).
 const TELE_ZOOM_TOLERANCE = 0.3;
 
-/**
- * Finds the ultra-wide lens, if this camera really has one.
- *
- * On iOS every lens is also a device of its own (`builtInUltraWideCamera`), so
- * we can activate it directly. On Android the lens lives inside the logical
- * device and can only be reached by zooming out, which is only possible when
- * the device reports a zoom below `1`.
- */
+// Find the ultra-wide lens: its own device on iOS, a zoom below 1x on Android.
 function findUltraWide(
   devices: CameraDevice[],
   mainDevice: CameraDevice,
@@ -59,11 +42,7 @@ function findUltraWide(
   return undefined;
 }
 
-/**
- * Finds the telephoto lens, but only on platforms that expose it as a device of
- * its own. Android switches to it automatically while zooming on the logical
- * device, so there is nothing to select there.
- */
+// Find the telephoto lens (only iOS exposes it as its own device).
 function findTelephoto(
   devices: CameraDevice[],
   mainDevice: CameraDevice,
@@ -76,10 +55,7 @@ function findTelephoto(
   );
 }
 
-/**
- * The optical zoom the telephoto lens provides relative to the main lens, or
- * `undefined` if the focal lengths are unknown.
- */
+// Optical zoom of the tele lens relative to the main lens.
 function telephotoZoomValue(
   telephoto: CameraDevice,
   mainDevice: CameraDevice,
@@ -92,11 +68,7 @@ function telephotoZoomValue(
   return telephotoFocal / mainFocal;
 }
 
-/**
- * Builds the zoom steps this camera can actually deliver: `0.5x` only when an
- * ultra-wide lens exists, `1x` for the main lens and the higher steps when the
- * camera can reach them, either optically or digitally.
- */
+// Build the zoom steps this camera can do: 0.5x, 1x and the higher steps.
 function buildZoomOptions(
   devices: CameraDevice[],
   mainDevice: CameraDevice,
@@ -135,11 +107,7 @@ function buildZoomOptions(
   return options;
 }
 
-/**
- * Resolves the physical lenses of the camera at `facing` and keeps track of the
- * one that is currently active, so picking `0.5x` can activate the ultra-wide
- * lens instead of only changing the zoom.
- */
+// Resolve the lenses for the given camera and track the active one.
 export function useCameraLenses(facing: "back" | "front") {
   const devices = useCameraDevices();
   const mainDevice = useCameraDevice(facing);

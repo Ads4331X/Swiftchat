@@ -15,7 +15,8 @@ import { type EdgeInsets } from "react-native-safe-area-context";
 import Feather from "@expo/vector-icons/Feather";
 
 import { BRAND_COLOR } from "@/constants/theme";
-import { AttachmentOptions } from "./AttachmentOptions";
+import { useTheme } from "@/constants/theme-provider";
+import { AttachmentOptions } from "@/components/chat/AttachmentOptions";
 
 type ChatInputBarProps = {
   draft: string;
@@ -23,14 +24,6 @@ type ChatInputBarProps = {
   onSend: () => void;
   sending: boolean;
   insets: EdgeInsets;
-  inputBg: string;
-  inputBorderColor: string;
-  placeholderColor: string;
-  textColor: string;
-  subtleText: string;
-  dividerColor: string;
-  backgroundColor: string;
-  isTyping?: boolean;
   onFocus?: () => void;
   showAttachmentOptions: boolean;
   setShowAttachmentOptions: React.Dispatch<React.SetStateAction<boolean>>;
@@ -42,18 +35,12 @@ export default function ChatInputBar({
   onSend,
   sending,
   insets,
-  inputBg,
-  inputBorderColor,
-  placeholderColor,
-  textColor,
-  subtleText,
-  dividerColor,
-  backgroundColor,
-  isTyping,
   showAttachmentOptions,
   setShowAttachmentOptions,
   onFocus,
 }: ChatInputBarProps) {
+  const { colors, subtleText, inputBg, inputBorderColor, placeholderColor, dividerColor } =
+    useTheme();
   const [keyboardUp, setKeyboardUp] = useState(false);
 
   useEffect(() => {
@@ -77,7 +64,7 @@ export default function ChatInputBar({
       style={{
         borderTopWidth: StyleSheet.hairlineWidth,
         borderTopColor: dividerColor,
-        backgroundColor,
+        backgroundColor: colors.background,
         paddingBottom: keyboardUp ? 8 : (insets?.bottom ?? 0) || 8,
       }}
     >
@@ -106,7 +93,7 @@ export default function ChatInputBar({
         className="flex-1 rounded-2xl px-4"
         style={{
           backgroundColor: inputBg,
-          color: textColor,
+          color: colors.text,
           borderWidth: 1,
           borderColor: inputBorderColor,
           minHeight: 40,

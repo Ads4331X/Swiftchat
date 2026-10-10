@@ -8,7 +8,7 @@ import { BRAND_COLOR } from "@/constants/theme";
 import MemberPicker, {
   MemberSearchUser,
   PickedMember,
-} from "@/components/chat/MemberPicker";
+} from "@/components/chat/members";
 import { api } from "@/lib/api";
 import { shareConversationKeyWithMembers } from "@/lib/crypto";
 

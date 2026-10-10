@@ -16,7 +16,12 @@ function SkeletonBar({
   align?: "left" | "right";
 }) {
   return (
-    <View style={{ width: "100%", alignItems: align === "right" ? "flex-end" : "flex-start" }}>
+    <View
+      style={{
+        width: "100%",
+        alignItems: align === "right" ? "flex-end" : "flex-start",
+      }}
+    >
       <View
         style={{
           width,
@@ -65,7 +70,13 @@ export default function MessageSkeleton() {
         </View>
 
         {/* Own message */}
-        <SkeletonBar width="55%" height={48} borderRadius={16} color={color} align="right" />
+        <SkeletonBar
+          width="55%"
+          height={48}
+          borderRadius={16}
+          color={color}
+          align="right"
+        />
 
         {/* Incoming with avatar */}
         <View style={{ flexDirection: "row", gap: 8 }}>
@@ -79,12 +90,23 @@ export default function MessageSkeleton() {
           />
           <View style={{ gap: 6, flex: 1 }}>
             <SkeletonBar width={90} height={10} borderRadius={5} color={color} />
-            <SkeletonBar width={170} height={40} borderRadius={16} color={color} />
+            <SkeletonBar
+              width={170}
+              height={40}
+              borderRadius={16}
+              color={color}
+            />
           </View>
         </View>
 
         {/* Own message - wider */}
-        <SkeletonBar width="70%" height={56} borderRadius={16} color={color} align="right" />
+        <SkeletonBar
+          width="70%"
+          height={56}
+          borderRadius={16}
+          color={color}
+          align="right"
+        />
 
         {/* Incoming */}
         <View style={{ gap: 6, width: "65%" }}>

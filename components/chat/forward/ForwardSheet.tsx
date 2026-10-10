@@ -2,14 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
-  Image,
   Pressable,
-  StyleSheet,
   Text,
   View,
 } from "react-native";
 import BottomSheet, { BottomSheetView } from "@gorhom/bottom-sheet";
-import Feather from "@expo/vector-icons/Feather";
 import Toast from "react-native-toast-message";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -29,6 +26,10 @@ import {
 } from "@/lib/db";
 import { acquireFlushLock, releaseFlushLock } from "@/lib/sync";
 import { encryptMessage, getOrCreateConversationKey } from "@/lib/crypto";
+import {
+  SelectionCheckbox,
+  UserListItem,
+} from "@/components/chat/common";
 
 type ForwardSheetProps = {
   bottomSheetRef: React.RefObject<React.ElementRef<typeof BottomSheet> | null>;
@@ -48,69 +49,31 @@ function ForwardChatRow({
   showDivider: boolean;
   onPress: () => void;
 }) {
-  const { colors, subtleText, dividerColor } = useTheme();
+  const { dividerColor } = useTheme();
   const name = conversationDisplayName(chat.name, chat.members);
   const avatarUrl =
     chat.members.length === 1 ? (chat.members[0]?.avatar ?? "") : "";
-  const initial = name.charAt(0).toUpperCase();
 
   return (
-    <Pressable onPress={onPress} className="active:opacity-60">
-      <View className="flex-row items-center px-4 py-3 gap-3">
-        {avatarUrl ? (
-          <Image
-            source={{ uri: avatarUrl }}
-            className="w-12 h-12 rounded-full"
-          />
-        ) : (
-          <View
-            className="w-12 h-12 rounded-full items-center justify-center"
-            style={{ backgroundColor: BRAND_COLOR }}
-          >
-            <Text className="text-white text-lg font-bold">{initial}</Text>
-          </View>
-        )}
-
-        <View className="flex-1">
-          <Text
-            numberOfLines={1}
-            style={{ color: colors.text }}
-            className="font-semibold text-base"
-          >
-            {name}
-          </Text>
-          {chat.members.length > 1 ? (
-            <Text
-              numberOfLines={1}
-              style={{ color: subtleText }}
-              className="text-sm mt-0.5"
-            >
-              {chat.members.length + 1} members
-            </Text>
-          ) : null}
-        </View>
-
-        <View
-          className="w-6 h-6 rounded-full items-center justify-center border-2"
-          style={{
-            borderColor: selected ? BRAND_COLOR : dividerColor,
-            backgroundColor: selected ? BRAND_COLOR : "transparent",
-          }}
-        >
-          {selected ? <Feather name="check" size={13} color="#fff" /> : null}
-        </View>
-      </View>
-
-      {showDivider ? (
-        <View
-          className="ml-[76px]"
-          style={{
-            height: StyleSheet.hairlineWidth,
-            backgroundColor: dividerColor,
-          }}
+    <UserListItem
+      username={name}
+      avatarUrl={avatarUrl}
+      subtitle={
+        chat.members.length > 1
+          ? `${chat.members.length + 1} members`
+          : undefined
+      }
+      onPress={onPress}
+      showDivider={showDivider}
+      dividerInset={76}
+      trailing={
+        <SelectionCheckbox
+          selected={selected}
+          size={24}
+          unselectedBorderColor={dividerColor}
         />
-      ) : null}
-    </Pressable>
+      }
+    />
   );
 }
 

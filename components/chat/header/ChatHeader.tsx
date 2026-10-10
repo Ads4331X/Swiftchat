@@ -11,10 +11,7 @@ type ChatHeaderProps = {
   avatarUrl?: string;
   isGroup?: boolean;
   memberCount?: number;
-  textColor: string;
-  dividerColor: string;
   localAvatarUrlPath: string | null;
-  backgroundColor: string;
   memberIds: string | undefined;
   chatId: string;
   presence: string;
@@ -27,9 +24,6 @@ export default function ChatHeader({
   avatarUrl,
   isGroup = false,
   memberCount,
-  textColor,
-  dividerColor,
-  backgroundColor,
   memberIds,
   chatId,
   presence,
@@ -37,7 +31,7 @@ export default function ChatHeader({
   isOnline,
 }: ChatHeaderProps) {
   const router = useRouter();
-  const { subtleText } = useTheme();
+  const { colors, subtleText, dividerColor } = useTheme();
 
   const handleBack = () => {
     if (router.canGoBack()) router.back();
@@ -50,7 +44,7 @@ export default function ChatHeader({
       style={{
         borderBottomWidth: StyleSheet.hairlineWidth,
         borderBottomColor: dividerColor,
-        backgroundColor,
+        backgroundColor: colors.background,
       }}
     >
       <Pressable
@@ -58,7 +52,7 @@ export default function ChatHeader({
         hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
         className="p-2 -ml-1 mr-2"
       >
-        <Feather name="arrow-left" size={24} color={textColor} />
+        <Feather name="arrow-left" size={24} color={colors.text} />
       </Pressable>
 
       <Avatar
@@ -100,7 +94,7 @@ export default function ChatHeader({
       >
         <Text
           numberOfLines={1}
-          style={{ color: textColor }}
+          style={{ color: colors.text }}
           className="ml-3 font-bold text-lg"
         >
           {username || "Chat"}
