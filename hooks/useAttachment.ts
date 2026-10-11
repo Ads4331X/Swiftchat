@@ -1,4 +1,5 @@
-import { api } from "@/lib/api";
+import { api, getBackendUrl } from "@/lib/api";
+import { getToken } from "@/lib/auth";
 import { decryptImage } from "@/lib/crypto";
 import {
   createAttachment,
@@ -8,21 +9,28 @@ import {
 import {
   checkAndCreateEncryptedFile,
   createAttachmentCacheFile,
-  writeAttachmentChunk,
 } from "@/lib/storage/attachmentFile";
-import { File } from "expo-file-system";
 import { useEffect, useState } from "react";
+import * as Crypto from "expo-crypto";
+import { fetch as expoFetch } from "expo/fetch";
 type Attachment = NonNullable<Awaited<ReturnType<typeof getAttachment>>>;
+type DecryptedAttachment = ReturnType<typeof createAttachmentCacheFile>;
 
 export function useAttachment({
   conversationId,
   messageId,
+  enabled,
 }: {
   conversationId: number;
   messageId: number;
+  enabled: boolean;
 }) {
-  const [decryptAttachment, setDecryptAttachment] = useState<File | null>(null);
+  const [decryptAttachment, setDecryptAttachment] =
+    useState<DecryptedAttachment | null>(null);
+  const [mimeType, setMimeType] = useState<string | null>(null);
+  const [fileSize, setFileSize] = useState<number | null>(null);
   useEffect(() => {
+    if (!enabled) return;
     const loadAttachment = async () => {
       try {
         // gets the attachment metadata from local storage
@@ -35,25 +43,37 @@ export function useAttachment({
           );
           if (!response.data) throw new Error("No attachment found");
 
-          // metadata of  attachment
-          const meta: Attachment = response.data;
+          // Server metadata: `encryptionHeader` (not `encryptedHeader`) and no
+          // uuid, so normalise it and mint a stable local uuid for the file
+          // names used below.
+          const meta: any = response.data;
+          const uuid: string = meta.uuid ?? Crypto.randomUUID();
+          const encryptedHeader =
+            meta.encryptedHeader ?? meta.encryptionHeader;
 
           // stores the attachment on local storage
           await createAttachment({
-            uuid: meta.uuid,
-            messageId: meta.messageId,
+            uuid,
+            messageId: meta.messageId ?? messageId,
             localPath: null,
             mimeType: meta.mimeType,
             fileSize: meta.fileSize,
             encryptedKey: meta.encryptedKey,
-            encryptedHeader: meta.encryptedHeader,
+            encryptedHeader,
             keyNonce: meta.keyNonce,
             headerNonce: meta.headerNonce,
           });
 
           // sets the metadata fetched from the server to local table
-          attachment = meta;
+          attachment = {
+            ...meta,
+            uuid,
+            messageId: meta.messageId ?? messageId,
+            encryptedHeader,
+          } as Attachment;
         }
+        setMimeType(attachment.mimeType);
+        setFileSize(attachment.fileSize ?? null);
 
         // try to create a cache file
         const cacheFile = createAttachmentCacheFile(
@@ -64,6 +84,7 @@ export function useAttachment({
         // if cache file exists (decrypted attachment alr exists locally)
         if (cacheFile.exists) {
           setDecryptAttachment(cacheFile);
+
           return;
         }
 
@@ -80,27 +101,37 @@ export function useAttachment({
         }
         // download the encrypted attachment from the server
         else {
-          const response = await api.get(
-            `api/conversations/attachments/${messageId}`,
+          // `expo/fetch` streams the response body (axios cannot); the server
+          // returns the raw encrypted bytes as octet-stream.
+          const token = await getToken("token");
+          const response = await expoFetch(
+            `${getBackendUrl()}/api/conversations/attachments/${messageId}`,
+            token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
           );
-
-          const reader = response.data.body;
-          const handle = encryptedFile.open();
-          while (true) {
-            // reads chunk by chunk
-            const { done, value } = await reader.read();
-            if (done) break;
-            writeAttachmentChunk({ handle, encryptedChunk: value });
+          if (!response.ok || !response.body) {
+            throw new Error("Failed to download attachment");
           }
 
-          reader.releaseLock?.();
-          handle.close();
+          const reader = response.body.getReader();
+          const handle = encryptedFile.open();
+          try {
+            while (true) {
+              // The server file is already chunk-framed exactly as
+              // `readChunk` expects, so write the raw bytes through unchanged
+              // (do NOT re-frame with `writeAttachmentChunk`).
+              const { done, value } = await reader.read();
+              if (done) break;
+              if (value) handle.writeBytes(value);
+            }
+          } finally {
+            reader.releaseLock?.();
+            handle.close();
+          }
 
-          // update the local path
-          await updateLocalPath({
-            localPath: encryptedFile.uri,
-            messageId,
-          });
+          // update the local path; also on the in-memory row so decryption
+          // works even when the SQLite update no-ops (web).
+          attachment.localPath = encryptedFile.uri;
+          await updateLocalPath({ localPath: encryptedFile.uri, messageId });
 
           setDecryptAttachment(
             await decryptAttachmentFile({
@@ -118,9 +149,14 @@ export function useAttachment({
     };
 
     loadAttachment();
-  }, [messageId, conversationId]);
+  }, [messageId, conversationId, enabled]);
 
-  return { file: decryptAttachment };
+  return {
+    file: decryptAttachment,
+    sourceUri: decryptAttachment?.uri ?? null,
+    mimeType: decryptAttachment?.type ?? mimeType,
+    fileSize,
+  };
 }
 
 async function decryptAttachmentFile({
@@ -133,7 +169,7 @@ async function decryptAttachmentFile({
   conversationId: number;
 }) {
   if (attachment.mimeType.startsWith("image/")) {
-    return await decryptImage({ messageId, conversationId });
+    return await decryptImage({ messageId, conversationId, attachment });
   }
 
   throw new Error("Unsupported attachment type");

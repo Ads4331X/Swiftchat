@@ -408,6 +408,7 @@ export default function UserChat() {
         loadingMore={loadingMore}
         hasMore={hasMore}
         currentUserId={currentUserId}
+        conversationId={Number(id)}
         listRef={listRef}
         selectedMessageId={selectedMessage?.id ?? null}
         onMessageLongPress={handleLongPress}

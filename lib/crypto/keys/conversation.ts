@@ -36,6 +36,17 @@ async function getCachedConversationKey(
   }
 }
 
+/**
+ * Synchronous read of the in-session key cache. On web the SQLite cache can be
+ * unavailable (`getDb()` returns null), so attachment encryption/decryption
+ * must be able to fall back to the key cached in memory this session.
+ */
+export function getInMemoryConversationKey(
+  conversationId: number,
+): Uint8Array | null {
+  return conversationKeyCache.get(String(conversationId)) ?? null;
+}
+
 function cacheConversationKey(
   conversationId: string,
   conversationKey: Uint8Array,

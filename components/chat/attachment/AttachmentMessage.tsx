@@ -13,12 +13,13 @@ export function AttachmentMessage({
   thumbnailUri,
   isMine = false,
   timeText,
-  isFavorite,
   onDownload,
   onOpen,
-  onToggleFavorite,
 }: AttachmentMessageProps) {
-  const kind = useMemo(() => kindFromMime(attachment.mimeType), [attachment.mimeType]);
+  const kind = useMemo(
+    () => kindFromMime(attachment.mimeType),
+    [attachment.mimeType],
+  );
 
   if (kind === "audio") {
     return (
@@ -58,10 +59,8 @@ export function AttachmentMessage({
       thumbnailUri={thumbnailUri}
       isMine={isMine}
       timeText={timeText}
-      isFavorite={isFavorite}
       onDownload={onDownload}
       onOpen={onOpen}
-      onToggleFavorite={onToggleFavorite}
     />
   );
 }

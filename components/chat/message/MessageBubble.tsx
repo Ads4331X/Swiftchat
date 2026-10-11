@@ -1,22 +1,18 @@
-import {
-  Keyboard,
-  Image,
-  Pressable,
-  Text,
-  View,
-} from "react-native";
-import {
-  type Message,
-  type RepliedTo,
-} from "@/hooks/useChatMessages";
+import { Keyboard, Image, Pressable, Text, View } from "react-native";
+import { type Message, type RepliedTo } from "@/hooks/useChatMessages";
 import { BRAND_COLOR } from "@/constants/theme";
-import { memo, useRef } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { type Position } from "@/components/chat/types";
 import { MessageBubbleContent } from "./MessageBubbleContent";
 import { ReactionChips } from "./ReactionChips";
+import { useAttachment } from "@/hooks/useAttachment";
+import AttachmentMessage from "../AttachmentMessage";
+import { hasAttachment } from "@/lib/db/attachments";
+import { formatBubbleTime } from "./utils";
 
 export type MessageBubbleProps = {
   message: Message;
+  conversationId: number;
   isMine: boolean;
   onLongPress: (position: Position) => void;
   hidden?: boolean;
@@ -63,11 +59,49 @@ export default memo(function MessageBubble({
   highlighted,
   repliedTo: repliedToProp,
   replyToId: replyToIdProp,
+  conversationId,
   forwardedFromMsgId: forwardedFromMsgIdProp,
   isFirstInGroup,
 }: MessageBubbleProps) {
   const bubbleRef = useRef<View>(null);
   const AVATAR_SIZE = 28;
+  const [checkAttachment, setCheckAttachment] = useState(false);
+  const hasRemoteAttachment = message.attachment != null;
+
+  useEffect(() => {
+    let active = true;
+
+    hasAttachmentForMessage();
+
+    async function hasAttachmentForMessage() {
+      const local = await hasAttachment({ messageId: message.id });
+      // A server-provided attachment is enough to attempt loading even when the
+      // local cache row is missing (recipient device, cleared cache, web).
+      if (active) setCheckAttachment(local || hasRemoteAttachment);
+    }
+
+    return () => {
+      active = false;
+    };
+  }, [message.id, hasRemoteAttachment]);
+
+  const { sourceUri, mimeType, fileSize } = useAttachment({
+    conversationId,
+    messageId: message.id,
+    enabled: checkAttachment,
+  });
+
+  // Attachment bubbles carry their own footer (timestamp, actions). Only draw
+  // the text bubble when there is actual text or a quoted/forwarded context to
+  // show, so image-only messages don't render an empty bubble next to the media.
+  const repliedTo = repliedToProp ?? message.repliedTo;
+  const forwardedFromMsgId =
+    forwardedFromMsgIdProp ?? message.forwardedFromMsgId;
+  const hasBody =
+    message.text.trim().length > 0 ||
+    Boolean(repliedTo) ||
+    (replyToIdProp ?? message.replyToId) != null ||
+    forwardedFromMsgId != null;
 
   const handleLongPress = () => {
     const measure = () => {
@@ -155,24 +189,36 @@ export default memo(function MessageBubble({
               {senderName}
             </Text>
           ) : null}
-          <MessageBubbleContent
-            text={message.text}
-            isMine={isMine}
-            editedAt={message.editedAt ?? undefined}
-            sentAt={message.sentAt}
-            isPending={message.id < 0}
-            isRead={message.read}
-            hasAnyoneRead={hasAnyoneRead}
-            hasEveryoneRead={hasEveryoneRead}
-            isGroup={isGroup}
-            repliedTo={repliedToProp ?? message.repliedTo}
-            replyToId={replyToIdProp ?? message.replyToId}
-            forwardedFromMsgId={
-              forwardedFromMsgIdProp ?? message.forwardedFromMsgId
-            }
-            onQuotePress={onQuotePress}
-            highlighted={highlighted}
-          />
+
+          {mimeType ? (
+            <AttachmentMessage
+              attachment={{ mimeType: mimeType, fileSize: fileSize ?? undefined }}
+              sourceUri={sourceUri}
+              status={sourceUri ? "ready" : "downloading"}
+              isMine={isMine}
+              timeText={
+                message.sentAt ? formatBubbleTime(message.sentAt) : undefined
+              }
+            />
+          ) : null}
+          {hasBody ? (
+            <MessageBubbleContent
+              text={message.text}
+              isMine={isMine}
+              editedAt={message.editedAt ?? undefined}
+              sentAt={message.sentAt}
+              isPending={message.id < 0}
+              isRead={message.read}
+              hasAnyoneRead={hasAnyoneRead}
+              hasEveryoneRead={hasEveryoneRead}
+              isGroup={isGroup}
+              repliedTo={repliedTo}
+              replyToId={replyToIdProp ?? message.replyToId}
+              forwardedFromMsgId={forwardedFromMsgId}
+              onQuotePress={onQuotePress}
+              highlighted={highlighted}
+            />
+          ) : null}
           <ReactionChips reactions={message.reactions} isMine={isMine} />
         </View>
       </View>

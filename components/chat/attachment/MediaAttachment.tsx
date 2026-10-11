@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Image } from "expo-image";
 import { Feather } from "@expo/vector-icons";
 import { Pressable, Text, View } from "react-native";
@@ -11,7 +12,7 @@ import {
   resolveAspect,
 } from "./utils";
 import { StatusOverlay, PlayOverlay } from "./StatusOverlay";
-import { AttachmentFooter } from "./AttachmentFooter";
+import { MediaViewer } from "./MediaViewer";
 
 export function MediaAttachment({
   attachment,
@@ -22,10 +23,8 @@ export function MediaAttachment({
   thumbnailUri,
   isMine,
   timeText,
-  isFavorite,
   onDownload,
   onOpen,
-  onToggleFavorite,
 }: {
   attachment: AttachmentMeta;
   kind: "image" | "video";
@@ -35,13 +34,13 @@ export function MediaAttachment({
   thumbnailUri?: string | null;
   isMine?: boolean;
   timeText?: string;
-  isFavorite?: boolean;
   onDownload?: () => void;
   onOpen?: () => void;
-  onToggleFavorite?: () => void;
 }) {
   const { attachmentColors } = useTheme();
   const colors = attachmentColors(!!isMine);
+
+  const [viewerOpen, setViewerOpen] = useState(false);
 
   const aspect = resolveAspect(attachment.width, attachment.height, kind === "video" ? 16 / 9 : 4 / 3);
   const height = clampMediaHeight(MEDIA_WIDTH, aspect);
@@ -53,13 +52,25 @@ export function MediaAttachment({
   const duration = formatDuration(attachment.durationMs);
   const typeLabel = kind === "video" ? "Video" : "Photo";
 
+  const handlePress = () => {
+    if (!showVisual) {
+      onDownload?.();
+      return;
+    }
+    if (kind === "image") {
+      setViewerOpen(true);
+      return;
+    }
+    onOpen?.();
+  };
+
   return (
     <View
       className="overflow-hidden rounded-[14px]"
       style={{ width: MEDIA_WIDTH, backgroundColor: colors.cardColor }}
     >
       <Pressable
-        onPress={showVisual ? onOpen : onDownload}
+        onPress={handlePress}
         accessibilityRole="button"
         accessibilityLabel={`${typeLabel} attachment`}
         style={{ width: MEDIA_WIDTH, height, backgroundColor: colors.placeholderBg }}
@@ -93,24 +104,29 @@ export function MediaAttachment({
         ) : null}
 
         {kind === "video" && duration ? (
-          <View
-            className="absolute bottom-2 left-2 flex-row items-center gap-1 rounded-md px-1.5 py-0.5"
-            style={{ backgroundColor: "rgba(0,0,0,0.55)" }}
-          >
+          <View className="absolute bottom-2 left-2 flex-row items-center gap-1 rounded-md bg-black/60 px-1.5 py-0.5">
             <Feather name="play" size={10} color="#fff" />
             <Text className="text-[11px] font-semibold text-white">{duration}</Text>
           </View>
         ) : null}
+
+        {showVisual ? (
+          <View className="absolute bottom-2 right-2 flex-row items-center gap-1 rounded-md bg-black/60 px-1.5 py-0.5">
+            <Feather name="info" size={10} color="#fff" />
+            <Text className="text-[11px] font-semibold text-white" numberOfLines={1}>
+              {[size, typeLabel, timeText].filter(Boolean).join(" · ")}
+            </Text>
+          </View>
+        ) : null}
       </Pressable>
 
-      <AttachmentFooter
-        colors={colors}
-        left={[size, typeLabel].filter(Boolean).join(" · ")}
-        timeText={timeText}
-        showFavorite={status === "ready" && kind === "image"}
-        isFavorite={isFavorite}
-        onToggleFavorite={onToggleFavorite}
-      />
+      {kind === "image" ? (
+        <MediaViewer
+          visible={viewerOpen}
+          uri={visualUri}
+          onClose={() => setViewerOpen(false)}
+        />
+      ) : null}
     </View>
   );
 }

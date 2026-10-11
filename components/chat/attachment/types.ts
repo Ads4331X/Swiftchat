@@ -24,8 +24,6 @@ export type AttachmentMessageProps = {
   thumbnailUri?: string | null;
   isMine?: boolean;
   timeText?: string;
-  isFavorite?: boolean;
   onDownload?: () => void;
   onOpen?: () => void;
-  onToggleFavorite?: () => void;
 };

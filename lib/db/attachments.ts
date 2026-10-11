@@ -111,3 +111,8 @@ export async function updateLocalPath({
     return null;
   }
 }
+
+export async function hasAttachment({ messageId }: { messageId: number }) {
+  const attachment = await getAttachment({ messageId });
+  return attachment !== null;
+}

@@ -18,6 +18,7 @@ type MessageListProps = {
   loadingMore: boolean;
   hasMore: boolean;
   currentUserId: number | null;
+  conversationId: number;
   listRef: RefObject<FlatList<Message> | null>;
   onMessageLongPress: (message: Message, position: Position) => void;
   selectedMessageId?: number | null;
@@ -45,6 +46,7 @@ export default function MessageList({
   loadingMore,
   hasMore,
   currentUserId,
+  conversationId,
   listRef,
   onMessageLongPress,
   selectedMessageId,
@@ -122,7 +124,9 @@ export default function MessageList({
   // snapshot; falls back to deriving it from the message list (perfect for
   // optimistic rows and messages sent right now).
   const resolveRepliedTo = useCallback(
-    (message: Message): { repliedTo?: RepliedTo; replyToId?: number } | null => {
+    (
+      message: Message,
+    ): { repliedTo?: RepliedTo; replyToId?: number } | null => {
       if (message.repliedTo) return null;
       if (message.replyToId == null) return null;
 
@@ -326,6 +330,7 @@ export default function MessageList({
       return (
         <MessageBubble
           message={item}
+          conversationId={conversationId}
           isMine={item.senderId === currentUserId}
           hidden={item.id === selectedMessageId}
           onLongPress={(position) => onMessageLongPress(item, position)}
@@ -349,10 +354,12 @@ export default function MessageList({
     },
     [
       currentUserId,
+      conversationId,
       selectedMessageId,
       onMessageLongPress,
       showAvatarSet,
       firstInGroupSet,
+
       otherAvatarUrl,
       otherUsername,
       isGroup,

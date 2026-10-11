@@ -37,4 +37,11 @@ export type Message = {
   /** ID of the original message this message is replying to. */
   replyToId?: number;
   forwardedFromMsgId?: number;
+
+  /**
+   * Attachment metadata returned by the server for messages that carry a file.
+   * Lets the bubble know an attachment exists before the local cache row (or
+   * the encrypted bytes) have been fetched.
+   */
+  attachment?: { mimeType: string } | null;
 };
