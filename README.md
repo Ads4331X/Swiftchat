@@ -16,7 +16,28 @@ This is an [Expo](https://expo.dev) project created with [`create-expo-app`](htt
    npx expo start
    ```
 
-In the output, you'll find options to open the app in a
+For development on the same Wi-Fi, prefer LAN mode. This command detects the
+IPv4 address used by the laptop's default network route and tells Expo to
+advertise that address (rather than a Docker/virtual interface):
+
+```bash
+npm run start:lan
+```
+
+Keep the phone and laptop on the same Wi-Fi network. If the phone cannot
+connect, allow Metro and the API through Ubuntu's firewall from the local
+Wi-Fi subnet (adjust the subnet if yours differs):
+
+```bash
+sudo ufw allow from 192.168.1.0/24 to any port 8081 proto tcp
+sudo ufw allow from 192.168.1.0/24 to any port 3000 proto tcp
+sudo ufw status
+```
+
+Expo's tunnel mode is available as `npm run start:tunnel`, but requires
+`@expo/ngrok` and is not needed when LAN mode works.
+
+In the output, you'll find options to open the app in:
 
 - [development build](https://docs.expo.dev/develop/development-builds/introduction/)
 - [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)

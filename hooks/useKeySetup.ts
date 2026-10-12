@@ -42,6 +42,14 @@ export function useKeySetup() {
       setNeedsPin(false);
       return true;
     }
+    if (result.reason === "conflict") {
+      // A recoverable identity conflict. Do NOT show the PIN modal and do NOT
+      // generate, register, or overwrite anything — surface it and let the app
+      // continue with the identity already present (if any).
+      console.warn("[useKeySetup] identity conflict:", result.message);
+      setNeedsPin(false);
+      return true;
+    }
     setPinMode("enter");
     setNeedsPin(true);
     return false;
@@ -58,6 +66,12 @@ export function useKeySetup() {
       setKeyReadyVersion((v) => v + 1);
       return { ok: true };
     } catch (err: any) {
+      // Surface an explicit server rejection (e.g. a 409 conflict) verbatim
+      // instead of misreporting it as a network error.
+      const serverError = err?.response?.data?.error;
+      if (serverError) {
+        return { ok: false, error: String(serverError) };
+      }
       if (err?.isAxiosError || err?.message?.includes("Network Error")) {
         return {
           ok: false,
@@ -83,20 +97,26 @@ export function useKeySetup() {
   //  - "enter": the account has a server backup but no local key yet -> the
   //             PIN must be ENTERED to recover the key (never "No local key").
   const openRecoveryPin = useCallback(async (): Promise<"add" | "enter" | "none"> => {
-    const result = await ensureLocalKeys();
-    if (result.ok) {
-      setPinMode("add");
-      setNeedsPin(true);
-      return "add";
+    try {
+      const result = await ensureLocalKeys();
+      if (result.ok) {
+        setPinMode("add");
+        setNeedsPin(true);
+        return "add";
+      }
+      if (result.reason === "pinNeeded") {
+        setPinMode("enter");
+        setNeedsPin(true);
+        return "enter";
+      }
+      // "lost"/"conflict": the key is unrecoverable or mismatched on this
+      // device — nothing safe to do here.
+      setNeedsPin(false);
+      return "none";
+    } catch {
+      setNeedsPin(false);
+      return "none";
     }
-    if (result.reason === "pinNeeded") {
-      setPinMode("enter");
-      setNeedsPin(true);
-      return "enter";
-    }
-    // "lost": the key is unrecoverable on this device — nothing to do.
-    setNeedsPin(false);
-    return "none";
   }, []);
 
   const addPin = useCallback(async (pin: string) => {
@@ -107,7 +127,11 @@ export function useKeySetup() {
       setKeyReadyVersion((v) => v + 1);
       return { ok: true };
     } catch (err: any) {
-      return { ok: false, error: err?.message || "Could not save PIN." };
+      return {
+        ok: false,
+        error:
+          err?.response?.data?.error || err?.message || "Could not save PIN.",
+      };
     } finally {
       setBusy(false);
     }

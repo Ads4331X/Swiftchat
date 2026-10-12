@@ -3,6 +3,8 @@ import { Base64 } from "js-base64";
 import { api } from "@/lib/api";
 import { getCurrentUserId, getPrivateKey } from "@/lib/auth";
 import { encodeUtf8 } from "./encryption";
+import { derivePublicKeyFromPrivateKey } from "./keys/derivePublicKey";
+import { withIdentityLock } from "./keys/identityLock";
 const sodium = (sodiumModule as any).default ?? sodiumModule;
 
 export type KeyBackupParams = {
@@ -166,19 +168,54 @@ export async function recoverPrivateKey({ password }: { password: string }) {
 }
 
 export async function addRecoveryPin(password: string) {
-  const userId = await getCurrentUserId(); // gets the user ID
+  // Serialize with ensureLocalKeys/initializeKeys so a backup is never written
+  // while the active identity is being generated or recovered.
+  return withIdentityLock(async () => {
+    const userId = await getCurrentUserId(); // gets the user ID
 
-  const privateKeyName = userId
-    ? `privateKey_u${userId}`
-    : "privateKey"; // gets the private key name
+    const privateKeyName = userId
+      ? `privateKey_u${userId}`
+      : "privateKey"; // gets the private key name
 
-  const privateKey = await getPrivateKey(privateKeyName); // gets the private key from local storage
-  if (!privateKey) {
-    throw new Error("No local key found. Please log in first.");
-  }
-  // backs up the private key
-  await backupPrivateKey({
-    privateKey: Base64.toUint8Array(privateKey), // converts the Base64 private key to Uint8Array
-    password,
+    const privateKey = await getPrivateKey(privateKeyName); // gets the private key from local storage
+    if (!privateKey) {
+      throw new Error("No local key found. Please log in first.");
+    }
+
+    // The PIN backup must describe the SAME identity the server currently
+    // knows about, otherwise a later restore would decrypt a key that no
+    // longer matches the registered public key. Verify before backing up — and
+    // never overwrite the server key or an existing backup to "fix" it.
+    const derivedPublicKey = Base64.fromUint8Array(
+      await derivePublicKeyFromPrivateKey(Base64.toUint8Array(privateKey)),
+    );
+
+    let serverPublicKey: string | undefined;
+    try {
+      const details = await api.get("/api/user/user-details");
+      serverPublicKey = details.data?.publicKey ?? undefined;
+    } catch {
+      throw new Error(
+        "Could not verify your encryption key with the server. Please try again.",
+      );
+    }
+
+    if (serverPublicKey && serverPublicKey !== derivedPublicKey) {
+      throw new Error(
+        "This device's encryption key does not match the key registered on the server. Recovery PIN was not updated.",
+      );
+    }
+
+    // If the server has no key yet, register this identity before backing it up
+    // so the backup and the registered key can never diverge.
+    if (!serverPublicKey) {
+      await api.put("/api/user/public-key", { publicKey: derivedPublicKey });
+    }
+
+    // backs up the private key
+    await backupPrivateKey({
+      privateKey: Base64.toUint8Array(privateKey), // converts the Base64 private key to Uint8Array
+      password,
+    });
   });
 }

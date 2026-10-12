@@ -13,6 +13,7 @@ import { CameraPreview } from "@/components/camera/CameraPreview";
 import { useCameraCapture } from "@/components/camera/useCameraCapture";
 import { useCameraLenses } from "@/components/camera/useCameraLenses";
 import type { CameraLensOption } from "@/components/camera/useCameraLenses";
+import { useLatestAssest } from "@/hooks/useLatestAssest";
 
 const MAX_DISPLAY_ZOOM = 10;
 
@@ -24,6 +25,8 @@ export default function CameraScreen() {
   const recorderRef = useRef<Recorder | null>(null);
   const cameraRef = useRef<CameraRef>(null);
   const isRecordingRef = useRef(false);
+
+  const latestAssestUri = useLatestAssest();
 
   const [facing, setFacing] = useState<"back" | "front">("back");
 
@@ -280,6 +283,7 @@ export default function CameraScreen() {
         onToggleFacing={toggleCameraFacing}
         onCancel={handleCancel}
         onShutter={handleShutter}
+        latestAssestUri={latestAssestUri}
       />
 
       {/* Front camera screen light: flash for photo, dim light while recording. */}
