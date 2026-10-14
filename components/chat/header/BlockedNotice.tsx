@@ -1,11 +1,11 @@
 import { memo } from "react";
 import {
   ActivityIndicator,
-  Pressable,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+import { AppPressable as Pressable } from "@/components/ui/AppPressable";
 import { type EdgeInsets } from "react-native-safe-area-context";
 import Feather from "@expo/vector-icons/Feather";
 import { BRAND_COLOR } from "@/constants/theme";

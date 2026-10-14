@@ -8,7 +8,7 @@ export type VideoTrimmerResult = string | null;
 
 export type UseVideoTrimmerOptions = {
   /** Uri of the media that should be trimmed. */
-  uri: string;
+  uri?: string;
   /** Longest clip the user is allowed to keep, in milliseconds. */
   maxDurationMs: number;
   /** Called when trimming finishes or the editor is dismissed. */

@@ -360,8 +360,10 @@ export const useVideoTrimmer: UseVideoTrimmer = ({
   };
 
   return {
-    openTrimmer: () => setOpen(true),
-    trimmer: open ? (
+    openTrimmer: () => {
+      if (uri) setOpen(true);
+    },
+    trimmer: open && uri ? (
       <TrimPanel
         uri={uri}
         maxDurationMs={maxDurationMs}

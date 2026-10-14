@@ -1,4 +1,5 @@
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
+import { AppPressable as Pressable } from "@/components/ui/AppPressable";
 import Feather from "@expo/vector-icons/Feather";
 import { BRAND_COLOR } from "@/constants/theme";
 import { useTheme } from "@/constants/theme-provider";

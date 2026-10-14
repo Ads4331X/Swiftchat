@@ -2,12 +2,12 @@ import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Keyboard,
-  Pressable,
   ScrollView,
   Text,
   TextInput,
   View,
 } from "react-native";
+import { AppPressable as Pressable } from "@/components/ui/AppPressable";
 import Feather from "@expo/vector-icons/Feather";
 import { useTheme } from "@/constants/theme-provider";
 import { BRAND_COLOR } from "@/constants/theme";

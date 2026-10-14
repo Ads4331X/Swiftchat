@@ -1,4 +1,4 @@
-import { Animated, Dimensions, View } from "react-native";
+import { Animated, Dimensions, StyleSheet, View } from "react-native";
 import { useTheme } from "@/constants/theme-provider";
 import { useEffect, useRef } from "react";
 
@@ -10,10 +10,7 @@ function SkeletonRow({
   boxColor: string;
 }) {
   return (
-    <Animated.View
-      style={{ opacity }}
-      className="flex-row items-center p-3 gap-3 w-full mb-2"
-    >
+    <Animated.View style={[styles.row, { opacity }]}>
       <View
         style={{ backgroundColor: boxColor }}
         className="w-12 h-12 rounded-full"
@@ -69,3 +66,14 @@ export default function SkeletonLoader() {
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 12,
+    gap: 12,
+    width: "100%",
+    marginBottom: 8,
+  },
+});

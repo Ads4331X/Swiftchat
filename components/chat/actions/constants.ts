@@ -24,6 +24,9 @@ export const EXIT_EASING = REasing.out(REasing.cubic);
 export const ENTER_DURATION = 120;
 export const ENTER_EASING = REasing.out(REasing.quad);
 
+// shared surface color so the reaction bar and menu read as one panel
+export const SURFACE_COLOR = "rgba(40,40,40,0.6)";
+
 export const reactionBarStyle = {
   width: REACTION_BAR_WIDTH,
   height: REACTION_BAR_HEIGHT,
@@ -32,7 +35,7 @@ export const reactionBarStyle = {
   justifyContent: "center" as const,
   paddingHorizontal: REACTION_BAR_PADDING_H,
   gap: REACTION_GAP,
-  backgroundColor: "rgba(40,40,40,0.55)",
+  backgroundColor: SURFACE_COLOR,
   borderRadius: 28,
   overflow: "hidden" as const,
   shadowColor: "#000",
@@ -44,7 +47,7 @@ export const reactionBarStyle = {
 
 export const menuStyle = {
   width: MENU_WIDTH,
-  backgroundColor: "rgba(40,40,40,0.6)",
+  backgroundColor: SURFACE_COLOR,
   borderRadius: 16,
   overflow: "hidden" as const,
   shadowColor: "#000",

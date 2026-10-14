@@ -11,8 +11,10 @@ import {
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { Feather } from "@expo/vector-icons";
 import { launchFile, launchGallery } from "@/lib/Attachments";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useAttachmentCameraPermission } from "@/hooks/useAttachmentCameraPermission";
+import { useSendImages } from "@/components/review/useSendImages";
+import type { SendImage, SendVideo } from "@/components/review/types";
 
 type AttachmentOptionsProps = {
   onClose: () => void;
@@ -23,6 +25,9 @@ export function AttachmentOptions({ onClose }: AttachmentOptionsProps) {
     useAttachmentCameraPermission();
   const theme = useTheme();
   const colors = theme.colors;
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const conversationId = Number(id);
+  const { sendImages, sendVideos } = useSendImages({ conversationId });
 
   const handleCameraPress = async () => {
     if (!hasPermission) {
@@ -43,8 +48,36 @@ export function AttachmentOptions({ onClose }: AttachmentOptionsProps) {
 
     router.push({ pathname: "/CameraScreen" });
   };
-  const handleGalleryPress = async () => {
-    await launchGallery();
+const handleGalleryPress = async () => {
+    const result = await launchGallery();
+    const assets = result?.assets;
+    if (!assets) return;
+
+    // useSendImages compresses, encryptes and uploads them for us
+    const images: SendImage[] = [];
+    const videos: SendVideo[] = [];
+
+    for (const asset of assets) {
+      if (asset.type === "image") {
+        images.push({
+          uri: asset.uri,
+          width: asset.width,
+          height: asset.height,
+          size: asset.fileSize,
+        });
+      } else {
+        videos.push({
+          uri: asset.uri,
+          width: asset.width,
+          height: asset.height,
+          size: asset.fileSize,
+          mimeType: asset.mimeType,
+        });
+      }
+    }
+
+    if (images.length) sendImages(images, "");
+    if (videos.length) sendVideos(videos, "");
   };
   const handleFilePress = async () => {
     await launchFile();

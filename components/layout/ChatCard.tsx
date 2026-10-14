@@ -180,10 +180,8 @@ function ClearAction({
     <Reanimated.View style={[styles.clearActionWrap, opacity]}>
       <Pressable
         onPress={onPress}
-        style={({ pressed }) => [
-          styles.clearAction,
-          { opacity: pressed ? 0.7 : 1 },
-        ]}
+        className="active:opacity-70"
+        style={styles.clearAction}
       >
         <Feather name="trash-2" size={20} color="#fff" />
         <Text style={styles.clearActionText}>Clear</Text>
@@ -194,7 +192,7 @@ function ClearAction({
 
 const styles = StyleSheet.create({
   clearActionWrap: {
-    height: "100%",
+    alignSelf: "stretch",
     width: CLEAR_ACTION_WIDTH,
   },
   clearAction: {

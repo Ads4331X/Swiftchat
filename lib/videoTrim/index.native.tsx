@@ -32,6 +32,7 @@ export const useVideoTrimmer: UseVideoTrimmer = ({
 
   return {
     openTrimmer: () => {
+      if (!uri) return;
       showEditor(uri, {
         maxDuration: maxDurationMs,
         saveToPhoto: false, // keep private videos out of the gallery

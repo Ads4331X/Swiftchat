@@ -76,7 +76,12 @@ export function MediaAttachment({
         style={{ width: MEDIA_WIDTH, height, backgroundColor: colors.placeholderBg }}
       >
         {showVisual ? (
-          <Image source={{ uri: visualUri as string }} contentFit="cover" transition={180} className="h-full w-full" />
+          <Image
+            source={{ uri: visualUri as string }}
+            contentFit="cover"
+            transition={180}
+            style={{ width: "100%", height: "100%" }}
+          />
         ) : (
           <View className="absolute inset-0 items-center justify-center">
             <Feather

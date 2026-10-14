@@ -1,4 +1,5 @@
-import { Text, Pressable, View } from "react-native";
+import { Text, View } from "react-native";
+import { AppPressable as Pressable } from "@/components/ui/AppPressable";
 import { useTheme } from "@/constants/theme-provider";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 

@@ -1,5 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import { Pressable } from "react-native";
+import { AppPressable as Pressable } from "@/components/ui/AppPressable";
 
 export function CircularControl({
   onPress,

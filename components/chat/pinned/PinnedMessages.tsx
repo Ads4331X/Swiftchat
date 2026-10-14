@@ -1,5 +1,6 @@
 import { memo } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
+import { AppPressable as Pressable } from "@/components/ui/AppPressable";
 import { MaterialIcons, Feather } from "@expo/vector-icons";
 import { type Message } from "@/hooks/useChatMessages";
 import { BRAND_COLOR } from "@/constants/theme";

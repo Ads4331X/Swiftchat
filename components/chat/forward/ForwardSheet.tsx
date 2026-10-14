@@ -262,7 +262,7 @@ export default function ForwardSheet({
       enablePanDownToClose
       backgroundStyle={{ backgroundColor: colors.background }}
     >
-      <BottomSheetView className="flex-1">
+      <BottomSheetView style={{ flex: 1 }}>
         <NewChatSheetHeader onClose={closeSheet} title="Forward message" />
 
         {message ? (

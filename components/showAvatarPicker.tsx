@@ -1,6 +1,7 @@
 import { launchCamera, launchGallery } from "@/lib/avatar";
 import { useCallback, forwardRef } from "react";
-import { View, Text, Pressable, StyleSheet, Platform } from "react-native";
+import { View, Text, StyleSheet, Platform } from "react-native";
+import { AppPressable as Pressable } from "@/components/ui/AppPressable";
 import BottomSheet, {
   BottomSheetView,
   BottomSheetBackdrop,
