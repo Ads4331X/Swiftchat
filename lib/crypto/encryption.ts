@@ -13,7 +13,20 @@ import { openSourceFile } from "../storage/sourceFile";
 import { getAttachment } from "../db/attachments";
 import { getConversationKeyCache } from "../db";
 import { getInMemoryConversationKey } from "./keys/conversation";
+import {
+  ATTACHMENT_KEYBYTES,
+  ATTACHMENT_PREFIXBYTES,
+  DECRYPT_YIELD_INTERVAL,
+  buildChunkNonce,
+  encodeUtf8,
+  sealChunk,
+  tryOpenChunk,
+  yieldToEventLoop,
+} from "./helpers";
 const sodium = (sodiumModule as any).default ?? sodiumModule;
+
+// re-export so @/lib/crypto still exposes encodeUtf8.
+export { encodeUtf8 } from "./helpers";
 
 type AttachmentRow = NonNullable<Awaited<ReturnType<typeof getAttachment>>>;
 
@@ -29,20 +42,6 @@ async function resolveConversationKey(
   if (keyBase64) return Base64.toUint8Array(keyBase64);
 
   return getInMemoryConversationKey(conversationId);
-}
-
-// Encryption runs synchronously on the JS thread; yielding between chunks lets
-// React process events/state so the UI does not freeze during large files.
-function yieldToEventLoop() {
-  return new Promise((resolve) => setTimeout(resolve, 0));
-}
-// import sodium, { StateAddress } from "libsodium-wrappers";
-// converts a string to Uint8Array
-export function encodeUtf8(str: string): Uint8Array {
-  if (typeof sodium.from_string === "function") {
-    return sodium.from_string(str); // uses libsodium to convert string to bytes
-  }
-  return new TextEncoder().encode(str); // uses js textencoder to convert string to bytes
 }
 
 export async function encryptMessage({
@@ -100,34 +99,7 @@ export async function decryptMessage({
   }
 }
 
-const IMG_KEYBYTES = 32;
-const IMG_PREFIXBYTES = 16;
-
-function buildChunkNonce(
-  prefix: Uint8Array,
-  index: number,
-  isFinal: boolean,
-): Uint8Array {
-  const nonce = new Uint8Array(24);
-  nonce.set(prefix, 0);
-  new DataView(nonce.buffer).setUint32(16, index, true);
-  nonce[20] = isFinal ? 1 : 0;
-  return nonce;
-}
-
-function tryOpenChunk(
-  chunk: Uint8Array,
-  nonce: Uint8Array,
-  key: Uint8Array,
-): Uint8Array | null {
-  try {
-    return sodium.crypto_secretbox_open_easy(chunk, nonce, key) || null;
-  } catch {
-    return null;
-  }
-}
-
-export async function encryptImage({
+export async function encryptAttachment({
   uri,
   conversationId,
   caption,
@@ -136,37 +108,29 @@ export async function encryptImage({
   conversationId: number;
   caption?: string;
 }) {
-  const imgFile = createAttachmentFile(); // creates a file to store the encrypted image
-  console.log(
-    "encryptImage conversationId:",
-    conversationId,
-    typeof conversationId,
-  );
-  const handle = imgFile.file.open();
+  const attachmentFile = createAttachmentFile(); // creates a file to store the encrypted attachment
+
+  const handle = attachmentFile.file.open();
   await sodium.ready;
   // creates a random 256 bit key (32 bytes)
-  const randomBytes = sodium.randombytes_buf(IMG_KEYBYTES);
-  const prefix = sodium.randombytes_buf(IMG_PREFIXBYTES);
+  const randomBytes = sodium.randombytes_buf(ATTACHMENT_KEYBYTES);
+  const prefix = sodium.randombytes_buf(ATTACHMENT_PREFIXBYTES);
 
   const { reader, mimeType } = await openSourceFile(uri);
   let index = 0;
   try {
     while (true) {
-      const imgChunk = await createChunk({ reader, bufferSize: 1024 * 1024 });
-      const nonce = buildChunkNonce(prefix, index, imgChunk.isFinal);
-      const encryptImgChunk = sodium.crypto_secretbox_easy(
-        imgChunk.chunk,
-        nonce,
-        randomBytes,
-      );
+      const chunk = await createChunk({ reader, bufferSize: 1024 * 1024 });
+      const nonce = buildChunkNonce(prefix, index, chunk.isFinal);
+      const encryptedChunk = sealChunk(chunk.chunk, nonce, randomBytes);
       // appends the chunk to the file
       writeAttachmentChunk({
-        encryptedChunk: encryptImgChunk,
+        encryptedChunk,
         handle,
       });
       index++;
 
-      if (imgChunk.isFinal) break;
+      if (chunk.isFinal) break;
 
       await yieldToEventLoop();
     }
@@ -204,76 +168,97 @@ export async function encryptImage({
     });
 
   return {
-    encryptedImageUri: imgFile.file.uri,
+    encryptedAttachmentUri: attachmentFile.file.uri,
     encryptedKey: encryptedSecretKey,
     keyNonce: secretKeyNonce,
     encryptedHeader,
     headerNonce,
-    uuid: imgFile.uuid,
+    uuid: attachmentFile.uuid,
     mimeType,
-    fileSize: imgFile.file.size,
+    fileSize: attachmentFile.file.size,
 
     encryptedText,
     nonce,
   };
 }
 
-export async function decryptImage({
+export async function decryptAttachment({
   messageId,
   conversationId,
   attachment,
+  encryptedSize,
+  onProgress,
 }: {
   messageId: number;
   conversationId: number;
-  /** Attachment row; avoids a (possibly unavailable on web) SQLite re-read. */
-  attachment?: AttachmentRow;
+  attachment?: AttachmentRow; // skips a SQLite re-read
+  encryptedSize?: number; // encrypted size, for progress
+  onProgress?: (fraction: number) => void; // 0..1 decrypt progress
 }) {
   await sodium.ready;
 
-  const image = attachment ?? (await getAttachment({ messageId }));
+  const attachmentData = attachment ?? (await getAttachment({ messageId }));
   const conversationKey = await resolveConversationKey(conversationId);
 
-  if (!conversationKey || !image || !image.localPath) {
-    console.warn(
-      "decryptImage could not find",
-      { keyFound: !!conversationKey, imageFound: !!image, localPath: image?.localPath },
-    );
+  if (!conversationKey || !attachmentData || !attachmentData.localPath) {
+    console.warn("decryptAttachment could not find", {
+      keyFound: !!conversationKey,
+      attachmentFound: !!attachmentData,
+      localPath: attachmentData?.localPath,
+    });
     throw new Error("data not found");
   }
 
-  const cacheFile = createAttachmentCacheFile(image.uuid, image.mimeType);
+  const cacheFile = createAttachmentCacheFile(
+    attachmentData.uuid,
+    attachmentData.mimeType,
+  );
 
   const cacheHandle = cacheFile.open();
-  // decrypts image secret key
-  const { decryptMessage: decryptImgSecretKey } = await decryptMessage({
-    encryptedMessage: image.encryptedKey,
-    nonce: image.keyNonce,
+  // decrypts the attachment secret key
+  const { decryptMessage: decryptedSecretKey } = await decryptMessage({
+    encryptedMessage: attachmentData.encryptedKey,
+    nonce: attachmentData.keyNonce,
     decryptedConversationKey: conversationKey,
   });
 
-  // decrypts image header
-  const { decryptMessage: decryptImgHeader } = await decryptMessage({
-    encryptedMessage: image.encryptedHeader,
-    nonce: image.headerNonce,
+  // decrypts the attachment header
+  const { decryptMessage: decryptedHeader } = await decryptMessage({
+    encryptedMessage: attachmentData.encryptedHeader,
+    nonce: attachmentData.headerNonce,
     decryptedConversationKey: conversationKey,
   });
 
-  const handleImgFile = await openAttachmentFile({
-    localPath: image.localPath,
+  const attachmentHandle = await openAttachmentFile({
+    localPath: attachmentData.localPath,
   });
 
-  const prefix = Base64.toUint8Array(decryptImgHeader);
-  const secretKey = Base64.toUint8Array(decryptImgSecretKey);
+  const prefix = Base64.toUint8Array(decryptedHeader);
+  const secretKey = Base64.toUint8Array(decryptedSecretKey);
+
+  if (prefix.length !== 16 || secretKey.length !== 32) {
+    throw new Error("Invalid attachment encryption metadata");
+  }
+
+  // estimate chunk count from the encrypted size for progress.
+  const estimatedChunks =
+    encryptedSize && encryptedSize > 0
+      ? Math.max(1, Math.ceil(encryptedSize / (1024 * 1024)))
+      : 0;
 
   let index = 0;
   try {
     while (true) {
       // reads (gets) the encrypted chunk from the file
       const encryptedChunk = await readChunk({
-        attachmentHandle: handleImgFile,
+        attachmentHandle,
       });
 
-      // decrypts the img chunk
+      if (encryptedChunk === null) {
+        throw new Error("Attachment is missing its final chunk");
+      }
+
+      // decrypts the attachment chunk
       let plain = tryOpenChunk(
         encryptedChunk,
         buildChunkNonce(prefix, index, false),
@@ -288,18 +273,25 @@ export async function decryptImage({
         );
         isFinal = true;
       }
-      if (!plain) throw new Error("Decryption of image chunks failed");
+      if (!plain) throw new Error("Decryption of attachment chunks failed");
 
       writeAttachmentCacheChunk({ handle: cacheHandle, chunk: plain });
       index++;
 
+      if (onProgress && estimatedChunks > 0) {
+        onProgress(Math.min(0.99, index / estimatedChunks));
+      }
+
       if (isFinal) break;
 
-      await yieldToEventLoop();
+      // yield every few chunks so the UI stays responsive.
+      if (index % DECRYPT_YIELD_INTERVAL === 0) {
+        await yieldToEventLoop();
+      }
     }
   } finally {
     cacheHandle.close();
-    handleImgFile.close();
+    attachmentHandle.close();
   }
 
   return cacheFile;

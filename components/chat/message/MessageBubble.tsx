@@ -65,31 +65,33 @@ export default memo(function MessageBubble({
 }: MessageBubbleProps) {
   const bubbleRef = useRef<View>(null);
   const AVATAR_SIZE = 28;
-  const [checkAttachment, setCheckAttachment] = useState(false);
+
+  // render attachment immediately from the payload; fall back to a local
+  // check only for legacy cached rows without a persisted attachment.
   const hasRemoteAttachment = message.attachment != null;
+  const [hasLocalAttachment, setHasLocalAttachment] = useState(false);
 
   useEffect(() => {
+    if (hasRemoteAttachment) return;
     let active = true;
-
-    hasAttachmentForMessage();
-
-    async function hasAttachmentForMessage() {
-      const local = await hasAttachment({ messageId: message.id });
-      // A server-provided attachment is enough to attempt loading even when the
-      // local cache row is missing (recipient device, cleared cache, web).
-      if (active) setCheckAttachment(local || hasRemoteAttachment);
-    }
-
+    hasAttachment({ messageId: message.id }).then((local) => {
+      if (active && local) setHasLocalAttachment(true);
+    });
     return () => {
       active = false;
     };
   }, [message.id, hasRemoteAttachment]);
 
-  const { sourceUri, mimeType, fileSize } = useAttachment({
+  const showAttachment = hasRemoteAttachment || hasLocalAttachment;
+
+  const { sourceUri, mimeType, fileSize, status, progress } = useAttachment({
     conversationId,
     messageId: message.id,
-    enabled: checkAttachment,
+    enabled: showAttachment,
   });
+
+  // prefer loader mimeType, fall back to payload so the placeholder renders early.
+  const attachmentMime = mimeType ?? message.attachment?.mimeType ?? null;
 
   // Attachment bubbles carry their own footer (timestamp, actions). Only draw
   // the text bubble when there is actual text or a quoted/forwarded context to
@@ -190,11 +192,15 @@ export default memo(function MessageBubble({
             </Text>
           ) : null}
 
-          {mimeType ? (
+          {showAttachment && attachmentMime ? (
             <AttachmentMessage
-              attachment={{ mimeType: mimeType, fileSize: fileSize ?? undefined }}
+              attachment={{
+                mimeType: attachmentMime,
+                fileSize: fileSize ?? message.attachment?.fileSize ?? undefined,
+              }}
               sourceUri={sourceUri}
-              status={sourceUri ? "ready" : "downloading"}
+              status={status === "idle" ? "downloading" : status}
+              progress={progress}
               isMine={isMine}
               timeText={
                 message.sentAt ? formatBubbleTime(message.sentAt) : undefined

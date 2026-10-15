@@ -16,6 +16,7 @@ import { ReviewThumbnails } from "./ReviewThumbnails";
 import { ReviewTopBar } from "./ReviewTopBar";
 import { useSendImages } from "./useSendImages";
 import { deleteTempFile, isVideoAsset, parseAssets, safeDelete } from "./utils";
+import type { SendImage, SendVideo } from "./types";
 
 const MAX_TRIM_MS = 30_000;
 
@@ -52,7 +53,7 @@ export function AttachmentReviewScreen() {
     params.type === "video" ||
     (params.type === "array" && isVideoAsset(assets[selectedIndex]));
 
-  const { sendImages, sending } = useSendImages({ conversationId });
+  const { send, sending } = useSendImages({ conversationId });
 
   // files we must never delete: the original and everything the picker handed us
   const keepUris = [originalUri, ...assets.map((asset) => asset.uri)];
@@ -97,24 +98,45 @@ export function AttachmentReviewScreen() {
   };
 
   const handleSend = () => {
-    // all picked images, or the single previewed file (videos aren't wired up yet).
     // gallery assets carry their dimensions so they can be compressed on send.
-    const images = assets.length
-      ? assets
-          .filter((asset) => !isVideoAsset(asset))
-          .map((asset) => ({
-            uri: asset.uri,
-            width: asset.width,
-            height: asset.height,
-            size: asset.fileSize,
-          }))
-      : isVideo || !uriRef.current
-        ? []
-        : [{ uri: uriRef.current }];
+    // a trimmed gallery video replaces the currently selected asset's uri.
+    const images: SendImage[] = [];
+    const videos: SendVideo[] = [];
 
-    if (!images.length) return;
+    assets.forEach((asset, index) => {
+      const assetUri =
+        index === selectedIndex && uriRef.current ? uriRef.current : asset.uri;
 
-    sendImages(images, caption);
+      if (isVideoAsset(asset)) {
+        videos.push({
+          uri: assetUri,
+          width: asset.width,
+          height: asset.height,
+          size: asset.fileSize,
+          mimeType: asset.mimeType,
+        });
+      } else {
+        images.push({
+          uri: assetUri,
+          width: asset.width,
+          height: asset.height,
+          size: asset.fileSize,
+        });
+      }
+    });
+
+    // single-file flow (camera photo / video) with no gallery assets.
+    if (!assets.length && uriRef.current) {
+      if (isVideo) {
+        videos.push({ uri: uriRef.current });
+      } else {
+        images.push({ uri: uriRef.current });
+      }
+    }
+
+    if (!images.length && !videos.length) return;
+
+    send({ images, videos, caption });
   };
 
   return (

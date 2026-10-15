@@ -9,7 +9,11 @@ import {
   parseLocalMessage,
   persistServerMessages,
 } from "@/lib/chat";
+import { prefetchAttachments } from "@/lib/chat/attachmentLoader";
 import { Message } from "@/types/message";
+
+// how many attachments from a loaded page to warm.
+const PREFETCH_LIMIT = 16;
 
 type Props = {
   id: string | number;
@@ -72,6 +76,10 @@ export default function useChatMessagePagination({
       // Save to local cache
       await persistServerMessages(olderMessages, decryptedOlderMessages);
 
+      prefetchAttachments(
+        decryptedOlderMessages.slice(-PREFETCH_LIMIT),
+      ).catch(() => {});
+
       if (decryptedOlderMessages.length < PAGE_SIZE) {
         setHasMore(false);
       }
@@ -106,6 +114,10 @@ export default function useChatMessagePagination({
 
           return [...newMessages, ...prev];
         });
+
+        prefetchAttachments(
+          decryptedLocalOlder.slice(-PREFETCH_LIMIT),
+        ).catch(() => {});
 
         if (decryptedLocalOlder.length < PAGE_SIZE) {
           setHasMore(false);

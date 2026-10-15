@@ -16,7 +16,11 @@ import {
   parseLocalMessage,
   persistServerMessages,
 } from "@/lib/chat";
+import { prefetchAttachments } from "@/lib/chat/attachmentLoader";
 import { Message } from "@/types/message";
+
+// how many newest attachments to warm on open.
+const PREFETCH_LIMIT = 16;
 
 type Props = {
   id: string | number;
@@ -208,6 +212,10 @@ export default function useChatMessageSync({
 
             if (active && decryptedCache.length > 0) {
               setMessages(decryptedCache);
+              // warm the newest attachments while the screen renders.
+              prefetchAttachments(decryptedCache.slice(-PREFETCH_LIMIT)).catch(
+                () => {},
+              );
             }
           }
           if (active) {
@@ -256,6 +264,10 @@ export default function useChatMessageSync({
 
         // 4. Save server messages to the local cache
         await persistServerMessages(serverMessages, decryptedServerMessages);
+
+        prefetchAttachments(
+          decryptedServerMessages.slice(-PREFETCH_LIMIT),
+        ).catch(() => {});
 
         if (decryptedServerMessages.length < PAGE_SIZE) {
           setHasMore(false);

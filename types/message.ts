@@ -43,5 +43,10 @@ export type Message = {
    * Lets the bubble know an attachment exists before the local cache row (or
    * the encrypted bytes) have been fetched.
    */
-  attachment?: { mimeType: string } | null;
+  attachment?: {
+    mimeType: string;
+    fileSize?: number;
+    width?: number;
+    height?: number;
+  } | null;
 };

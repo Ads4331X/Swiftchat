@@ -85,7 +85,7 @@ export default function UserSettings() {
     };
 
     compressAndNavigate();
-  }, [image]);
+  }, [image, router]);
 
   const openSheet = () => {
     setAvatarSheetMounted(true);

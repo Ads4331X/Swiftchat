@@ -101,7 +101,7 @@ export async function updateLocalPath({
     if (!db) return null;
 
     return await db.runAsync(
-      `UPDATE attachments
+      `UPDATE Attachment
        SET localPath = ?
        WHERE messageId = ?;`,
       [localPath, messageId],

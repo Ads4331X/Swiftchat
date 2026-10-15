@@ -12,13 +12,14 @@ type SaveMsgParams = {
   replyToId?: number;
   repliedTo?: string;
   forwardedFromMsgId?: number;
+  attachment?: string;
 };
 
 // Shared by `saveMessage` and `confirmPendingMessage`. Upsert rather than
 // INSERT OR REPLACE: `readAt`/`read` are only meaningful on first insert, and a
 // blind REPLACE wiped them every time a message was re-cached (edits, socket
 // refreshes, background flushes), making already-read messages look unread.
-const MESSAGE_UPSERT_SQL = `INSERT INTO Message (id, text, sentAt, senderId, conversationId, nonce, reactions, readAt, read, replyToId, repliedTo, forwardedFromMsgId) VALUES (?, ?, ?, ?, ?, ?, ?, '', 0, ?, ?, ?)
+const MESSAGE_UPSERT_SQL = `INSERT INTO Message (id, text, sentAt, senderId, conversationId, nonce, reactions, readAt, read, replyToId, repliedTo, forwardedFromMsgId, attachment) VALUES (?, ?, ?, ?, ?, ?, ?, '', 0, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          text = excluded.text,
          sentAt = excluded.sentAt,
@@ -28,7 +29,8 @@ const MESSAGE_UPSERT_SQL = `INSERT INTO Message (id, text, sentAt, senderId, con
          reactions = excluded.reactions,
          replyToId = excluded.replyToId,
          repliedTo = excluded.repliedTo,
-         forwardedFromMsgId = excluded.forwardedFromMsgId`;
+         forwardedFromMsgId = excluded.forwardedFromMsgId,
+         attachment = COALESCE(excluded.attachment, Message.attachment)`;
 
 const MESSAGE_UPSERT_PARAMS = ({
   message,
@@ -41,6 +43,7 @@ const MESSAGE_UPSERT_PARAMS = ({
   replyToId,
   repliedTo,
   forwardedFromMsgId,
+  attachment,
 }: SaveMsgParams) => [
   messageId,
   message,
@@ -52,6 +55,7 @@ const MESSAGE_UPSERT_PARAMS = ({
   replyToId ?? null,
   repliedTo ?? null,
   forwardedFromMsgId ?? null,
+  attachment ?? null,
 ];
 
 export async function saveMessage(params: SaveMsgParams) {

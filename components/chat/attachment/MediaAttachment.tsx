@@ -13,6 +13,7 @@ import {
 } from "./utils";
 import { StatusOverlay, PlayOverlay } from "./StatusOverlay";
 import { MediaViewer } from "./MediaViewer";
+import { VideoViewer } from "./VideoViewer";
 
 export function MediaAttachment({
   attachment,
@@ -41,6 +42,7 @@ export function MediaAttachment({
   const colors = attachmentColors(!!isMine);
 
   const [viewerOpen, setViewerOpen] = useState(false);
+  const [videoOpen, setVideoOpen] = useState(false);
 
   const aspect = resolveAspect(attachment.width, attachment.height, kind === "video" ? 16 / 9 : 4 / 3);
   const height = clampMediaHeight(MEDIA_WIDTH, aspect);
@@ -59,6 +61,10 @@ export function MediaAttachment({
     }
     if (kind === "image") {
       setViewerOpen(true);
+      return;
+    }
+    if (kind === "video") {
+      setVideoOpen(true);
       return;
     }
     onOpen?.();
@@ -95,7 +101,7 @@ export function MediaAttachment({
 
         {status === "ready" && kind === "video" ? (
           <View className="absolute inset-0 items-center justify-center">
-            <PlayOverlay onPress={onOpen} />
+            <PlayOverlay onPress={() => setVideoOpen(true)} />
           </View>
         ) : status !== "ready" ? (
           <View className="absolute inset-0 items-center justify-center">
@@ -130,6 +136,14 @@ export function MediaAttachment({
           visible={viewerOpen}
           uri={visualUri}
           onClose={() => setViewerOpen(false)}
+        />
+      ) : null}
+
+      {kind === "video" ? (
+        <VideoViewer
+          visible={videoOpen}
+          uri={sourceUri}
+          onClose={() => setVideoOpen(false)}
         />
       ) : null}
     </View>

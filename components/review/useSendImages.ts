@@ -1,8 +1,8 @@
+import { encryptAttachment } from "@/lib/crypto";
 import { useCallback, useState } from "react";
 import { router } from "expo-router";
 import { api } from "@/lib/api";
 import { getCurrentUserId } from "@/lib/auth";
-import { encryptImage } from "@/lib/crypto";
 import { getConversationOtherUser, saveMessage } from "@/lib/db";
 import { createAttachment } from "@/lib/db/attachments";
 import { appendEncryptedFile } from "@/lib/storage/uploadFile";
@@ -71,7 +71,46 @@ export function useSendImages({
     [conversationId],
   );
 
-  return { sendImages, sendVideos, sending };
+  // sends images and videos together, opening the chat once at the end.
+  const send = useCallback(
+    async ({
+      images = [],
+      videos = [],
+      caption = "",
+    }: {
+      images?: SendImage[];
+      videos?: SendVideo[];
+      caption?: string;
+    }) => {
+      if (conversationId == null) {
+        console.warn("AttachmentReview: no conversationId available");
+        return;
+      }
+      if (!images.length && !videos.length) return;
+
+      setSending(true);
+      try {
+        // remember the last id so we can open the chat on it
+        let lastMessageId: number | null = null;
+
+        for (const image of images) {
+          lastMessageId = await uploadImage({ image, conversationId, caption });
+        }
+        for (const video of videos) {
+          lastMessageId = await uploadVideo({ video, conversationId, caption });
+        }
+
+        if (lastMessageId != null) {
+          await openConversation(conversationId, lastMessageId);
+        }
+      } finally {
+        setSending(false);
+      }
+    },
+    [conversationId],
+  );
+
+  return { send, sendImages, sendVideos, sending };
 }
 
 // shrinks the image down to the size limits before it is encrypted. Falls back
@@ -85,7 +124,10 @@ async function prepareImage(image: SendImage) {
     const result = await compressImage({ uri, width, height, size });
     return result.uri;
   } catch (error) {
-    console.warn("AttachmentReview: image compression failed, sending original", error);
+    console.warn(
+      "AttachmentReview: image compression failed, sending original",
+      error,
+    );
     return uri;
   }
 }
@@ -127,7 +169,10 @@ async function prepareVideo(video: SendVideo) {
     });
     return result.uri;
   } catch (error) {
-    console.warn("AttachmentReview: video compression failed, sending original", error);
+    console.warn(
+      "AttachmentReview: video compression failed, sending original",
+      error,
+    );
     return uri;
   }
 }
@@ -162,11 +207,11 @@ async function uploadImageFile({
   caption: string;
 }) {
   // encryptes the image locally
-  const image = await encryptImage({ uri, conversationId, caption });
+  const image = await encryptAttachment({ uri, conversationId, caption });
 
   const formData = new FormData();
   appendEncryptedFile(formData, {
-    uri: image.encryptedImageUri,
+    uri: image.encryptedAttachmentUri,
     uuid: image.uuid,
     mimeType: image.mimeType,
   });
@@ -186,7 +231,7 @@ async function uploadImageFile({
   // saves the file metadata locally
   await createAttachment({
     messageId,
-    localPath: image.encryptedImageUri,
+    localPath: image.encryptedAttachmentUri,
     mimeType: image.mimeType,
     fileSize: image.fileSize,
     encryptedKey: image.encryptedKey,
@@ -221,7 +266,8 @@ async function openConversation(conversationId: number, messageId: number) {
     const { data } = await api.get("/api/conversations");
     const conversations: any[] = Array.isArray(data) ? data : [];
     const conversation = conversations.find(
-      (item) => String(item.conversationId ?? item.id) === String(conversationId),
+      (item) =>
+        String(item.conversationId ?? item.id) === String(conversationId),
     );
 
     const members: any[] = conversation?.members ?? [];

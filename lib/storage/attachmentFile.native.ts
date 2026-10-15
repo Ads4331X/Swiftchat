@@ -81,6 +81,11 @@ export function createAttachmentCacheFile(uuid: string, mimeType: string) {
       ensureFile(file, cacheDir);
       return file.open();
     },
+    delete() {
+      if (file.exists) {
+        file.delete();
+      }
+    },
   };
 }
 

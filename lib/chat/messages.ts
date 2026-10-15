@@ -18,12 +18,11 @@ export type LocalMessageRow = Message & {
   repliedTo?: string | null;
 };
 
-// SQLite returns the `reactions` column as a JSON string. Parse it back into
-// the `MessageReaction[]` shape used in-memory, treating invalid/empty values
-// as "no reactions". Same for the `repliedTo` quote snapshot.
+// parses the `reactions`, `repliedTo` and `attachment` JSON columns.
 export function parseLocalMessage(row: LocalMessageRow): Message {
   const { reactions, repliedTo, ...rest } = row;
-  const out: Message = { ...rest, reactions: [] };
+  const rawAttachment = (row as { attachment?: unknown }).attachment;
+  const out: Message = { ...rest, reactions: [], attachment: undefined };
   if (reactions) {
     try {
       const parsed = JSON.parse(reactions);
@@ -39,6 +38,13 @@ export function parseLocalMessage(row: LocalMessageRow): Message {
       out.repliedTo = JSON.parse(repliedTo) as RepliedTo;
     } catch {
       out.repliedTo = undefined;
+    }
+  }
+  if (typeof rawAttachment === "string" && rawAttachment) {
+    try {
+      out.attachment = JSON.parse(rawAttachment) as Message["attachment"];
+    } catch {
+      out.attachment = undefined;
     }
   }
   return out;
@@ -104,6 +110,9 @@ export async function persistMessageLocally(
       options?.repliedTo ??
       (message.repliedTo ? JSON.stringify(message.repliedTo) : undefined),
     forwardedFromMsgId: message.forwardedFromMsgId,
+    attachment: message.attachment
+      ? JSON.stringify(message.attachment)
+      : undefined,
   });
 
   await indexMessage({ messageId: Number(message.id), content: decryptedText });

@@ -24,7 +24,8 @@ const STATEMENTS = [
     read Boolean NOT NULL DEFAULT 0,
     reactions TEXT,
     replyToId INTEGER,
-    repliedTo TEXT
+    repliedTo TEXT,
+    attachment TEXT
   );`,
   `CREATE TABLE IF NOT EXISTS Conversation (
     id INTEGER PRIMARY KEY,
@@ -175,6 +176,11 @@ async function openDbOnce(): Promise<SQLite.SQLiteDatabase | null> {
       try {
         await database.execAsync(
           `ALTER TABLE Message ADD COLUMN repliedTo TEXT;`,
+        );
+      } catch {}
+      try {
+        await database.execAsync(
+          `ALTER TABLE Message ADD COLUMN attachment TEXT;`,
         );
       } catch {}
       try {

@@ -27,7 +27,7 @@ export function AttachmentOptions({ onClose }: AttachmentOptionsProps) {
   const colors = theme.colors;
   const { id } = useLocalSearchParams<{ id: string }>();
   const conversationId = Number(id);
-  const { sendImages, sendVideos } = useSendImages({ conversationId });
+  const { send } = useSendImages({ conversationId });
 
   const handleCameraPress = async () => {
     if (!hasPermission) {
@@ -76,8 +76,7 @@ const handleGalleryPress = async () => {
       }
     }
 
-    if (images.length) sendImages(images, "");
-    if (videos.length) sendVideos(videos, "");
+    if (images.length || videos.length) send({ images, videos, caption: "" });
   };
   const handleFilePress = async () => {
     await launchFile();
