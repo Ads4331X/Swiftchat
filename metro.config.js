@@ -9,7 +9,7 @@ config.resolver.unstable_enablePackageExports = false;
 
 const defaultResolveRequest = config.resolver.resolveRequest;
 
-const EMPTY_MODULE = path.resolve(__dirname, "lib/shims/empty.js");
+const EMPTY_MODULE = path.resolve(__dirname, "src/core/shims/empty.js");
 const NODE_CORE_STUBS = new Set(["fs", "node:fs"]);
 
 // Force the CJS (main) builds of the libsodium packages on web. Their ESM

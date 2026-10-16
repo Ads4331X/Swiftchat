@@ -37,10 +37,17 @@ yarn-error.*
 *.tsbuildinfo
 
 app-example
+build.log
+
+# local runtime output
+attachments/
+
+# tooling
+.claude/
 
 # generated native folders
 /ios
 /android
 
-
+# local env files
 .env
