@@ -84,11 +84,12 @@ export default memo(function MessageBubble({
 
   const showAttachment = hasRemoteAttachment || hasLocalAttachment;
 
-  const { sourceUri, mimeType, fileSize, status, progress } = useAttachment({
-    conversationId,
-    messageId: message.id,
-    enabled: showAttachment,
-  });
+  const { sourceUri, mimeType, fileSize, waveform, durationMs, status, progress } =
+    useAttachment({
+      conversationId,
+      messageId: message.id,
+      enabled: showAttachment,
+    });
 
   // prefer loader mimeType, fall back to payload so the placeholder renders early.
   const attachmentMime = mimeType ?? message.attachment?.mimeType ?? null;
@@ -197,11 +198,14 @@ export default memo(function MessageBubble({
               attachment={{
                 mimeType: attachmentMime,
                 fileSize: fileSize ?? message.attachment?.fileSize ?? undefined,
+                waveform: waveform ?? undefined,
+                durationMs: durationMs ?? undefined,
               }}
               sourceUri={sourceUri}
               status={status === "idle" ? "downloading" : status}
               progress={progress}
               isMine={isMine}
+              seed={message.id}
               timeText={
                 message.sentAt ? formatBubbleTime(message.sentAt) : undefined
               }

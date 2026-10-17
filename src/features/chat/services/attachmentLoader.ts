@@ -1,6 +1,6 @@
 import { api, getBackendUrl } from "@/core/api";
 import { getToken } from "@/features/auth/services";
-import { decryptAttachment } from "@/core/crypto";
+import { decryptAttachment, readAttachmentHeader } from "@/core/crypto";
 import {
   createAttachment,
   getAttachment,
@@ -29,6 +29,8 @@ export type AttachmentState = {
   sourceUri: string | null;
   mimeType: string | null;
   fileSize: number | null;
+  waveform: number[] | null;
+  durationMs: number | null;
 };
 
 const IDLE_STATE: AttachmentState = {
@@ -37,6 +39,8 @@ const IDLE_STATE: AttachmentState = {
   sourceUri: null,
   mimeType: null,
   fileSize: null,
+  waveform: null,
+  durationMs: null,
 };
 
 // module-level registry keyed by messageId, so one load is shared
@@ -209,7 +213,18 @@ async function runLoad({
   // decrypted cache already on disk.
   const cacheFile = createAttachmentCacheFile(attachment.uuid, mimeType);
   if (cacheFile.exists) {
-    return set({ status: "ready", progress: 1, sourceUri: cacheFile.uri });
+    const header = await readAttachmentHeader({
+      messageId,
+      conversationId,
+      attachment,
+    });
+    return set({
+      status: "ready",
+      progress: 1,
+      sourceUri: cacheFile.uri,
+      waveform: header.waveform,
+      durationMs: header.durationMs,
+    });
   }
 
   const encryptedFile = checkAndCreateEncryptedFile(attachment.uuid);
@@ -225,7 +240,13 @@ async function runLoad({
       encryptedSize: encryptedFile.size,
       onProgress: reportDecrypt,
     });
-    return set({ status: "ready", progress: 1, sourceUri: decrypted });
+    return set({
+      status: "ready",
+      progress: 1,
+      sourceUri: decrypted.uri,
+      waveform: decrypted.waveform,
+      durationMs: decrypted.durationMs,
+    });
   }
 
   // download the encrypted file (streamed, axios can't).
@@ -275,7 +296,13 @@ async function runLoad({
     encryptedSize: received || encryptedFile.size,
     onProgress: reportDecrypt,
   });
-  return set({ status: "ready", progress: 1, sourceUri: decrypted });
+  return set({
+    status: "ready",
+    progress: 1,
+    sourceUri: decrypted.uri,
+    waveform: decrypted.waveform,
+    durationMs: decrypted.durationMs,
+  });
 }
 
 async function decryptToCache({
@@ -290,13 +317,21 @@ async function decryptToCache({
   conversationId: number;
   encryptedSize: number;
   onProgress: (fraction: number) => void;
-}): Promise<string> {
-  const cacheFile = await decryptAttachment({
+}): Promise<{
+  uri: string;
+  waveform: number[] | null;
+  durationMs: number | null;
+}> {
+  const { cacheFile, waveform, durationMs } = await decryptAttachment({
     messageId,
     conversationId,
     attachment,
     encryptedSize,
     onProgress,
   });
-  return cacheFile.uri;
+  return {
+    uri: cacheFile.uri,
+    waveform: waveform ?? null,
+    durationMs: durationMs ?? null,
+  };
 }

@@ -103,10 +103,14 @@ export async function encryptAttachment({
   uri,
   conversationId,
   caption,
+  waveform,
+  durationMs,
 }: {
   uri: string;
   conversationId: number;
   caption?: string;
+  waveform?: number[];
+  durationMs?: number;
 }) {
   const attachmentFile = createAttachmentFile(); // creates a file to store the encrypted attachment
 
@@ -151,10 +155,22 @@ export async function encryptAttachment({
 
   const base64Header = Base64.fromUint8Array(prefix);
 
+  // when extra metadata is present, wrap the prefix in a JSON envelope so the
+  // receiver can recover the chunk-nonce prefix, waveform and duration.
+  // old messages store the raw base64 prefix and decrypt via the fallback.
+  const hasExtras = (waveform && waveform.length > 0) || durationMs != null;
+  const headerPayload = hasExtras
+    ? JSON.stringify({
+        p: base64Header,
+        ...(waveform && waveform.length > 0 ? { w: waveform } : {}),
+        ...(durationMs != null ? { d: Math.round(durationMs) } : {}),
+      })
+    : base64Header;
+
   // encrypt the header
   const { encryptedMessage: encryptedHeader, nonce: headerNonce } =
     await encryptMessage({
-      message: base64Header,
+      message: headerPayload,
       decryptedConversationKey: conversationKey,
     });
 
@@ -180,6 +196,71 @@ export async function encryptAttachment({
     encryptedText,
     nonce,
   };
+}
+
+/** Parse a decrypted attachment header: JSON envelope { p, w, d } or raw base64. */
+function parseHeaderPayload(decryptedHeader: string): {
+  base64Prefix: string;
+  waveform?: number[];
+  durationMs?: number;
+} {
+  try {
+    const parsed = JSON.parse(decryptedHeader);
+    if (parsed?.p) {
+      return {
+        base64Prefix: parsed.p,
+        waveform: parsed.w,
+        durationMs: typeof parsed.d === "number" ? parsed.d : undefined,
+      };
+    }
+  } catch {
+    // old format — the decrypted string is the raw base64 prefix.
+  }
+  return { base64Prefix: decryptedHeader };
+}
+
+async function decryptHeader({
+  attachmentData,
+  conversationKey,
+}: {
+  attachmentData: AttachmentRow;
+  conversationKey: Uint8Array;
+}) {
+  const { decryptMessage: decryptedHeader } = await decryptMessage({
+    encryptedMessage: attachmentData.encryptedHeader,
+    nonce: attachmentData.headerNonce,
+    decryptedConversationKey: conversationKey,
+  });
+  return parseHeaderPayload(decryptedHeader);
+}
+
+/** Reads only the small header to recover the waveform/duration, without decrypting the file. */
+export async function readAttachmentHeader({
+  messageId,
+  conversationId,
+  attachment,
+}: {
+  messageId: number;
+  conversationId: number;
+  attachment?: AttachmentRow;
+}): Promise<{ waveform: number[] | null; durationMs: number | null }> {
+  const empty = { waveform: null, durationMs: null };
+  const attachmentData = attachment ?? (await getAttachment({ messageId }));
+  if (!attachmentData) return empty;
+
+  const conversationKey = await resolveConversationKey(conversationId);
+  if (!conversationKey) return empty;
+
+  try {
+    await sodium.ready;
+    const { waveform, durationMs } = await decryptHeader({
+      attachmentData,
+      conversationKey,
+    });
+    return { waveform: waveform ?? null, durationMs: durationMs ?? null };
+  } catch {
+    return empty;
+  }
 }
 
 export async function decryptAttachment({
@@ -222,18 +303,17 @@ export async function decryptAttachment({
     decryptedConversationKey: conversationKey,
   });
 
-  // decrypts the attachment header
-  const { decryptMessage: decryptedHeader } = await decryptMessage({
-    encryptedMessage: attachmentData.encryptedHeader,
-    nonce: attachmentData.headerNonce,
-    decryptedConversationKey: conversationKey,
+  // decrypts the header (carries the chunk prefix + optional waveform/duration)
+  const { base64Prefix, waveform, durationMs } = await decryptHeader({
+    attachmentData,
+    conversationKey,
   });
 
   const attachmentHandle = await openAttachmentFile({
     localPath: attachmentData.localPath,
   });
 
-  const prefix = Base64.toUint8Array(decryptedHeader);
+  const prefix = Base64.toUint8Array(base64Prefix);
   const secretKey = Base64.toUint8Array(decryptedSecretKey);
 
   if (prefix.length !== 16 || secretKey.length !== 32) {
@@ -294,5 +374,5 @@ export async function decryptAttachment({
     attachmentHandle.close();
   }
 
-  return cacheFile;
+  return { cacheFile, waveform, durationMs };
 }

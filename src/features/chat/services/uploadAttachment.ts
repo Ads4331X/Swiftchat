@@ -10,12 +10,22 @@ export async function uploadAttachment({
   uri,
   conversationId,
   caption,
+  waveform,
+  durationMs,
 }: {
   uri: string;
   conversationId: number;
-  caption: string;
+  caption?: string;
+  waveform?: number[];
+  durationMs?: number;
 }) {
-  const attachment = await encryptAttachment({ uri, conversationId, caption });
+  const attachment = await encryptAttachment({
+    uri,
+    conversationId,
+    caption,
+    waveform,
+    durationMs,
+  });
 
   const formData = new FormData();
   appendEncryptedFile(formData, {

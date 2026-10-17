@@ -11,6 +11,7 @@ import {
 import { useEffect, useState } from "react";
 
 import { type EdgeInsets } from "react-native-safe-area-context";
+import { useLocalSearchParams } from "expo-router";
 
 import Feather from "@expo/vector-icons/Feather";
 
@@ -18,6 +19,8 @@ import { BRAND_COLOR } from "@/shared/theme/theme";
 import { useTheme } from "@/shared/providers/theme-provider";
 import { AttachmentOptions } from "@/features/attachments/components/AttachmentOptions";
 import { useVoiceRecorder } from "@/features/attachments/hooks/useVoiceRecorder";
+import { VoiceRecorderBar } from "./VoiceRecorderBar";
+import { useSendAttachments } from "@/features/attachments/hooks/useSendAttachments";
 
 type ChatInputBarProps = {
   draft: string;
@@ -49,8 +52,22 @@ export default function ChatInputBar({
     dividerColor,
   } = useTheme();
   const [keyboardUp, setKeyboardUp] = useState(false);
-  const { startRecording, stopRecording, audioUri, isRecording } =
+  const { startRecording, stopRecording, deleteRecording, isRecording } =
     useVoiceRecorder();
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const conversationId = Number(id);
+  const { send } = useSendAttachments({ conversationId });
+
+  const handleStopRecording = async () => {
+    const { uri, waveform, durationMs } = await stopRecording();
+    if (!uri) return;
+
+    await send({
+      attachments: [
+        { uri, kind: "audio", mimeType: "audio/m4a", waveform, durationMs },
+      ],
+    });
+  };
 
   useEffect(() => {
     const showEvt =
@@ -67,13 +84,20 @@ export default function ChatInputBar({
     };
   }, []);
 
-  const handleAudioRecording = () => {
-    if (isRecording) {
-      startRecording();
-    } else {
-      stopRecording();
-    }
-  };
+  if (isRecording) {
+    return (
+      <View
+        style={{
+          paddingBottom: keyboardUp ? 8 : (insets?.bottom ?? 0) || 8,
+        }}
+      >
+        <VoiceRecorderBar
+          onCancel={deleteRecording}
+          onStop={handleStopRecording}
+        />
+      </View>
+    );
+  }
 
   return (
     <View
@@ -125,7 +149,7 @@ export default function ChatInputBar({
         className="p-1 mb-2"
         onPress={() => {
           setShowAttachmentOptions(false);
-          handleAudioRecording();
+          startRecording();
         }}
       >
         <Feather name="mic" size={22} color={subtleText} />

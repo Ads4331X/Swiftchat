@@ -40,7 +40,7 @@ app-example
 build.log
 
 # local runtime output
-attachments/
+# attachments/
 
 # tooling
 .claude/
