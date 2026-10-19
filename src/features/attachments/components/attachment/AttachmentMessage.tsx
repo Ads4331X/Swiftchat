@@ -46,6 +46,7 @@ export function AttachmentMessage({
         progress={progress}
         isMine={isMine}
         timeText={timeText}
+        sourceUri={sourceUri ?? null}
         onDownload={onDownload}
         onOpen={onOpen}
       />

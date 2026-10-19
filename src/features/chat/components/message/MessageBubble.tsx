@@ -6,6 +6,7 @@ import { type Position } from "@/features/chat/types";
 import { MessageBubbleContent } from "@/features/chat/components/message/MessageBubbleContent";
 import { ReactionChips } from "@/features/chat/components/message/ReactionChips";
 import { useAttachment } from "@/features/attachments/hooks/useAttachment";
+import { ensureAttachmentLoaded } from "@/features/chat/services/attachmentLoader";
 import AttachmentMessage from "@/features/attachments/components/attachment/AttachmentMessage";
 import { hasAttachment } from "@/core/db/attachments";
 import { formatBubbleTime } from "@/features/chat/components/message/utils";
@@ -90,6 +91,10 @@ export default memo(function MessageBubble({
       messageId: message.id,
       enabled: showAttachment,
     });
+
+  const retryDownload = () => {
+    ensureAttachmentLoaded({ messageId: message.id, conversationId }).catch(() => {});
+  };
 
   // prefer loader mimeType, fall back to payload so the placeholder renders early.
   const attachmentMime = mimeType ?? message.attachment?.mimeType ?? null;
@@ -197,6 +202,7 @@ export default memo(function MessageBubble({
             <AttachmentMessage
               attachment={{
                 mimeType: attachmentMime,
+                fileName: message.attachment?.fileName,
                 fileSize: fileSize ?? message.attachment?.fileSize ?? undefined,
                 waveform: waveform ?? undefined,
                 durationMs: durationMs ?? undefined,
@@ -205,6 +211,7 @@ export default memo(function MessageBubble({
               status={status === "idle" ? "downloading" : status}
               progress={progress}
               isMine={isMine}
+              onDownload={retryDownload}
               seed={message.id}
               timeText={
                 message.sentAt ? formatBubbleTime(message.sentAt) : undefined

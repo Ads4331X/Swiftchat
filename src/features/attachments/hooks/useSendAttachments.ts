@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import Toast from "react-native-toast-message";
 import {
   sendAttachment,
   type SendAttachment,
@@ -43,6 +44,13 @@ export function useSendAttachments({
         if (lastMessageId != null) {
           await openChatAfterSend(conversationId, lastMessageId);
         }
+      } catch (err) {
+        console.error("Attachment send failed:", err);
+        Toast.show({
+          type: "error",
+          text1: "Couldn't send attachment",
+          text2: "Check your connection and try again.",
+        });
       } finally {
         setSending(false);
       }

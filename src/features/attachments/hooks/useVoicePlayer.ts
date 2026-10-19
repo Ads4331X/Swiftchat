@@ -11,11 +11,24 @@ export function useVoicePlayer({ uri }: { uri: string }) {
   };
 
   const pause = () => {
-    player.pause();    
+    player.pause();
   };
 
   const seekTo = (time: number) => {
-    player.seekTo(time);
+    if (!status.isLoaded || !Number.isFinite(time) || time < 0) {
+      return;
+    }
+
+    // Web reports duration as NaN until media metadata loads; still allow the
+    // seek so the browser stores it as the default playback position. Clamp
+    // only when a real duration is known.
+    const duration = status.duration;
+    const clamped =
+      Number.isFinite(duration) && duration > 0
+        ? Math.min(time, duration)
+        : time;
+
+    player.seekTo(clamped);
   };
 
   return {

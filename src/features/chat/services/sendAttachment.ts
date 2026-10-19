@@ -5,6 +5,7 @@ import { uploadAttachment } from "@/features/chat/services/uploadAttachment";
 export type SendAttachment = {
   uri: string;
   kind: "image" | "video" | "audio" | "document";
+  name?: string | null;
   width?: number | null;
   height?: number | null;
   size?: number | null;
@@ -24,12 +25,13 @@ export async function sendAttachment({
   conversationId: number;
   caption?: string;
 }) {
-  const { uri, waveform, durationMs } = attachment;
+  const { uri, name, waveform, durationMs } = attachment;
   const readyUri = await compressAttachment(attachment);
 
   try {
     return await uploadAttachment({
       uri: readyUri,
+      fileName: name ?? undefined,
       conversationId,
       caption,
       waveform,

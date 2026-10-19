@@ -1,6 +1,6 @@
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Feather } from "@expo/vector-icons";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Text, View } from "react-native";
 import { useTheme } from "@/shared/providers/theme-provider";
 import type {
   AttachmentMeta,
@@ -41,7 +41,12 @@ export function VoiceAttachment({
 }) {
   const { attachmentColors } = useTheme();
   const colors = attachmentColors(!!isMine);
-  const { play, pause, seekTo, status: playbackStatus } = useVoicePlayer({
+  const {
+    play,
+    pause,
+    seekTo,
+    status: playbackStatus,
+  } = useVoicePlayer({
     uri: sourceUri ?? "",
   });
 
@@ -55,46 +60,99 @@ export function VoiceAttachment({
     return placeholderWaveform(seed);
   }, [attachment.waveform, seed, hasWaveform]);
 
+  // Web reports NaN before metadata loads and can report Infinity; native reports 0
+  // before load. Only trust a finite positive duration and fall back to metadata.
+  const playerDuration = playbackStatus.duration;
+  const safePlayerDuration =
+    Number.isFinite(playerDuration) && playerDuration > 0 ? playerDuration : 0;
   const totalSeconds =
-    playbackStatus.duration || (attachment.durationMs ?? 0) / 1000;
-  const currentSeconds = playbackStatus.currentTime ?? 0;
-  const hasPlaybackTime =
+    safePlayerDuration || (attachment.durationMs ?? 0) / 1000;
+  const currentSeconds = Number.isFinite(playbackStatus.currentTime)
+    ? playbackStatus.currentTime
+    : 0;
+
+  // Local scrub position: while the finger is on the waveform, the bars and
+  // time follow it immediately instead of waiting for player status ticks.
+  const [scrubSeconds, setScrubSeconds] = useState<number | null>(null);
+  const isScrubbing = scrubSeconds !== null;
+  const effectiveSeconds = scrubSeconds ?? currentSeconds;
+
+  const canShowProgress =
     isReady &&
-    playbackStatus.isLoaded &&
-    Number.isFinite(currentSeconds) &&
     Number.isFinite(totalSeconds) &&
-    totalSeconds > 0;
-  const playedFraction =
-    hasPlaybackTime
-      ? Math.max(0, Math.min(1, currentSeconds / totalSeconds))
-      : 0;
+    totalSeconds > 0 &&
+    Number.isFinite(effectiveSeconds) &&
+    (isScrubbing || playbackStatus.isLoaded);
+
+  const playedFraction = canShowProgress
+    ? Math.max(0, Math.min(1, effectiveSeconds / totalSeconds))
+    : 0;
 
   // playback fill while ready, download progress while fetching.
-  const filled = hasPlaybackTime
+  const filled = canShowProgress
     ? playedFraction
     : isBusy
       ? Math.max(0, Math.min(1, progress))
       : 0;
 
   // elapsed while playing / scrubbed, total duration otherwise.
-  const displayMs =
-    hasPlaybackTime && (playbackStatus.playing || currentSeconds > 0)
-      ? currentSeconds * 1000
-      : totalSeconds > 0
-        ? totalSeconds * 1000
-        : (attachment.durationMs ?? 0);
+  const showElapsed =
+    canShowProgress &&
+    (isScrubbing || playbackStatus.playing || currentSeconds > 0);
+  const displayMs = showElapsed
+    ? effectiveSeconds * 1000
+    : totalSeconds > 0
+      ? totalSeconds * 1000
+      : (attachment.durationMs ?? 0);
   const timeLabel = isReady
-    ? formatDuration(Math.round(displayMs)) || timeText || ""
+    ? showElapsed
+      ? // While playing or scrubbing never fall back to the message
+        // timestamp: formatDuration(0) returns "" and would flash timeText.
+        formatDuration(Math.round(displayMs)) || "0:00"
+      : formatDuration(Math.round(displayMs)) || timeText || ""
     : isBusy
       ? `${percent(progress)}%`
       : formatFileSize(attachment.fileSize) || timeText || "";
 
   const trackRef = useRef(0);
+  const lastSeekRef = useRef(0);
 
-  const handleSeek = (locationX: number) => {
-    if (!isReady || totalSeconds <= 0 || trackRef.current <= 0) return;
+  const timeAtLocation = (locationX: number): number | null => {
+    if (
+      !isReady ||
+      !Number.isFinite(locationX) ||
+      !Number.isFinite(totalSeconds) ||
+      totalSeconds <= 0 ||
+      !Number.isFinite(trackRef.current) ||
+      trackRef.current <= 0
+    ) {
+      return null;
+    }
     const fraction = Math.max(0, Math.min(1, locationX / trackRef.current));
-    seekTo(fraction * totalSeconds);
+    return fraction * totalSeconds;
+  };
+
+  const beginScrub = (locationX: number) => {
+    const target = timeAtLocation(locationX);
+    if (target == null) return;
+    setScrubSeconds(target);
+    lastSeekRef.current = target;
+    seekTo(target);
+  };
+
+  const moveScrub = (locationX: number) => {
+    const target = timeAtLocation(locationX);
+    if (target == null) return;
+    setScrubSeconds(target);
+    // Throttle player seeks during fast drags; the bar still follows the finger.
+    if (Math.abs(target - lastSeekRef.current) >= 0.05) {
+      lastSeekRef.current = target;
+      seekTo(target);
+    }
+  };
+
+  const endScrub = () => {
+    setScrubSeconds(null);
   };
 
   const controlBg = isReady
@@ -146,19 +204,26 @@ export function VoiceAttachment({
             }
             size={16}
             color={controlIcon}
-            style={isReady && !playbackStatus.playing ? { marginLeft: 2 } : undefined}
+            style={
+              isReady && !playbackStatus.playing ? { marginLeft: 2 } : undefined
+            }
           />
         )}
       </CircularControl>
 
-      <Pressable
+      <View
         className="flex-1 justify-center"
         style={{ height: BAR_AREA_HEIGHT }}
-        disabled={!isReady}
+        pointerEvents={isReady ? "box-only" : "none"}
         onLayout={(event) => {
           trackRef.current = event.nativeEvent.layout.width;
         }}
-        onPress={(event) => handleSeek(event.nativeEvent.locationX)}
+        onStartShouldSetResponder={() => isReady}
+        onMoveShouldSetResponder={() => isReady}
+        onResponderGrant={(event) => beginScrub(event.nativeEvent.locationX)}
+        onResponderMove={(event) => moveScrub(event.nativeEvent.locationX)}
+        onResponderRelease={endScrub}
+        onResponderTerminate={endScrub}
       >
         <View
           className="flex-row items-center"
@@ -179,7 +244,7 @@ export function VoiceAttachment({
             />
           ))}
         </View>
-      </Pressable>
+      </View>
 
       <Text
         allowFontScaling={false}

@@ -10,12 +10,14 @@ export async function uploadAttachment({
   uri,
   conversationId,
   caption,
+  fileName,
   waveform,
   durationMs,
 }: {
   uri: string;
   conversationId: number;
   caption?: string;
+  fileName?: string;
   waveform?: number[];
   durationMs?: number;
 }) {
@@ -35,6 +37,7 @@ export async function uploadAttachment({
   });
 
   formData.append("conversationId", String(conversationId));
+  if (fileName) formData.append("fileName", fileName);
   formData.append("encryptedKey", attachment.encryptedKey);
   formData.append("keyNonce", attachment.keyNonce);
   formData.append("encryptedHeader", attachment.encryptedHeader);
@@ -42,7 +45,9 @@ export async function uploadAttachment({
   formData.append("messageText", attachment.encryptedText);
   formData.append("nonce", attachment.nonce);
 
-  const response = await api.post("/api/conversations/messages", formData);
+  const response = await api.post("/api/conversations/messages", formData, {
+    timeout: 0,
+  });
   const messageId = Number(response.data.id);
 
   await createAttachment({

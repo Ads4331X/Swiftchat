@@ -1,6 +1,8 @@
 import { Feather } from "@expo/vector-icons";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import Toast from "react-native-toast-message";
 import { useTheme } from "@/shared/providers/theme-provider";
+import { openDocument } from "@/features/attachments/services/openDocument";
 import type { AttachmentMeta, AttachmentStatus } from "@/features/attachments/components/attachment/types";
 import { MEDIA_WIDTH, documentVisual, formatFileSize, statusSubtitle } from "@/features/attachments/components/attachment/utils";
 
@@ -10,6 +12,7 @@ export function DocumentAttachment({
   progress,
   isMine,
   timeText,
+  sourceUri,
   onDownload,
   onOpen,
 }: {
@@ -18,6 +21,7 @@ export function DocumentAttachment({
   progress: number;
   isMine?: boolean;
   timeText?: string;
+  sourceUri?: string | null;
   onDownload?: () => void;
   onOpen?: () => void;
 }) {
@@ -35,8 +39,31 @@ export function DocumentAttachment({
     [formatFileSize(attachment.fileSize), timeText].filter(Boolean).join(" · "),
   );
 
+  const handlePress = () => {
+    if (isReady && sourceUri) {
+      if (onOpen) {
+        onOpen();
+        return;
+      }
+
+      openDocument({ uri: sourceUri, mimeType: attachment.mimeType }).catch(() => {
+        Toast.show({
+          type: "error",
+          text1: "Can't open document",
+          text2: "No available app can open this file.",
+        });
+      });
+      return;
+    }
+
+    onDownload?.();
+  };
+
   return (
-    <View
+    <Pressable
+      onPress={handlePress}
+      accessibilityRole="button"
+      accessibilityLabel={isReady ? "Open document" : "Download document"}
       className="flex-row items-center gap-2.5 rounded-[14px] p-2.5"
       style={{ width: MEDIA_WIDTH, backgroundColor: colors.cardColor }}
     >
@@ -56,14 +83,7 @@ export function DocumentAttachment({
         </Text>
       </View>
 
-      <Pressable
-        onPress={isReady ? onOpen : onDownload}
-        accessibilityRole="button"
-        accessibilityLabel={isReady ? "Open document" : "Download document"}
-        hitSlop={8}
-        className="items-center justify-center"
-        style={{ width: 34, height: 34 }}
-      >
+      <View className="items-center justify-center" style={{ width: 34, height: 34 }}>
         {isBusy ? (
           <ActivityIndicator size="small" color={colors.accent} />
         ) : (
@@ -73,7 +93,7 @@ export function DocumentAttachment({
             color={status === "error" ? "#E5484D" : colors.accent}
           />
         )}
-      </Pressable>
-    </View>
+      </View>
+    </Pressable>
   );
 }

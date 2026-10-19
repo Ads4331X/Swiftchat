@@ -45,6 +45,7 @@ export type Message = {
    */
   attachment?: {
     mimeType: string;
+    fileName?: string;
     fileSize?: number;
     width?: number;
     height?: number;

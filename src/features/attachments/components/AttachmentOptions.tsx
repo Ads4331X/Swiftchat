@@ -10,11 +10,15 @@ import {
 } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { Feather } from "@expo/vector-icons";
-import { launchFile, launchGallery } from "@/features/attachments/services/pickers";
+import {
+  launchFile,
+  launchGallery,
+} from "@/features/attachments/services/pickers";
 import { router, useLocalSearchParams } from "expo-router";
 import { useAttachmentCameraPermission } from "@/features/attachments/hooks/useAttachmentCameraPermission";
 import { useSendAttachments } from "@/features/attachments/hooks/useSendAttachments";
 import type { SendAttachment } from "@/features/chat/services/sendAttachment";
+import { DocumentPickerAsset } from "expo-document-picker";
 
 type AttachmentOptionsProps = {
   onClose: () => void;
@@ -48,7 +52,7 @@ export function AttachmentOptions({ onClose }: AttachmentOptionsProps) {
 
     router.push({ pathname: "/camera" as any });
   };
-const handleGalleryPress = async () => {
+  const handleGalleryPress = async () => {
     const result = await launchGallery();
     const assets = result?.assets;
     if (!assets) return;
@@ -66,8 +70,46 @@ const handleGalleryPress = async () => {
     if (attachments.length) send({ attachments, caption: "" });
   };
   const handleFilePress = async () => {
-    await launchFile();
+    const result = await launchFile();
+    console.log(result);
+
+    if (!result) return;
+
+    let uri: string;
+
+    if (typeof FileList !== "undefined" && result instanceof FileList) {
+      const file = result[0];
+      if (!file) return;
+
+      uri = URL.createObjectURL(file);
+      router.push({
+        pathname: "/attachment-review",
+        params: {
+          uri,
+          type: "document",
+          name: file.name,
+          mimeType: file.type,
+          size: String(file.size),
+        },
+      });
+    } else {
+      const asset = (result as DocumentPickerAsset[])[0];
+      if (!asset) return;
+
+      uri = asset.uri;
+      router.push({
+        pathname: "/attachment-review",
+        params: {
+          uri: asset.uri,
+          type: "document",
+          name: asset.name,
+          mimeType: asset.mimeType ?? "",
+          size: String(asset.size ?? 0),
+        },
+      });
+    }
   };
+
   const options = [
     {
       label: "Camera",
