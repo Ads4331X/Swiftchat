@@ -1,8 +1,30 @@
+import { sendIceCandidate } from "@/core/socket/call-signaling";
 import { AudioModule } from "expo-audio";
 import { requestCameraPermissionsAsync } from "expo-image-picker";
-import { mediaDevices } from "react-native-webrtc";
+import {
+  MediaStream,
+  RTCPeerConnection,
+  mediaDevices,
+} from "react-native-webrtc";
 
-async function requestPermissions({
+// the library's types don't expose the event handlers, so we describe the ones we use
+type PeerEventHandlers = {
+  onconnectionstatechange: (() => void) | null;
+  ontrack: ((event: { streams: readonly MediaStream[] }) => void) | null;
+  onicecandidate:
+    | ((event: {
+        candidate: { toJSON: () => RTCIceCandidateInit } | null;
+      }) => void)
+    | null;
+};
+
+// takes the types from the library's own methods so they match
+type LibSessionDescription = Parameters<
+  RTCPeerConnection["setRemoteDescription"]
+>[0];
+type LibIceCandidate = Parameters<RTCPeerConnection["addIceCandidate"]>[0];
+
+export async function requestPermissions({
   callType,
 }: {
   callType: "audio" | "video";
@@ -20,10 +42,12 @@ const peerConnections = new Map<number, RTCPeerConnection>();
 
 export function createPeerConnection({
   participantId,
+  callId,
   onRemoteStream,
   onConnectionStateChange,
 }: {
   participantId: number;
+  callId: string;
   onConnectionStateChange: (state: RTCPeerConnectionState) => void;
   onRemoteStream: (stream: MediaStream) => void;
 }) {
@@ -57,13 +81,16 @@ export function createPeerConnection({
 
   peerConnections.set(participantId, participantPeer);
 
+  // typed view of the peer so we can set the handlers
+  const peerEvents = participantPeer as unknown as PeerEventHandlers;
+
   // callback for connection state change
-  participantPeer.onconnectionstatechange = () => {
+  peerEvents.onconnectionstatechange = () => {
     onConnectionStateChange(participantPeer.connectionState);
   };
 
   // callback for receiving a remote track
-  participantPeer.ontrack = (event) => {
+  peerEvents.ontrack = (event) => {
     try {
       const stream = handleRemoteTrack({ event });
       onRemoteStream(stream);
@@ -72,9 +99,12 @@ export function createPeerConnection({
     }
   };
 
-  participantPeer.onicecandidate = (event) => {
+  peerEvents.onicecandidate = (event) => {
     if (event.candidate) {
-      // send the candidate
+      sendIceCandidate({
+        callId,
+        candidate: event.candidate.toJSON(),
+      });
     }
   };
 
@@ -111,11 +141,15 @@ export async function addLocalTracks({
 }) {
   // loop through all the stream tracks
   for (const track of stream.getTracks()) {
-    peerConnection.addTrack(track); // adds each track to the peerconnection
+    peerConnection.addTrack(track, stream); // adds each track to the peerconnection (with its stream so the other side gets it)
   }
 }
 
-export function handleRemoteTrack({ event }: { event: RTCTrackEvent }) {
+export function handleRemoteTrack({
+  event,
+}: {
+  event: { streams: readonly MediaStream[] };
+}) {
   const firstStream = event.streams[0];
 
   if (!firstStream) {
@@ -204,7 +238,7 @@ export async function createAnswer({
   if (!pc) return;
 
   // saves (sets) the other participant's connection information.
-  await pc.setRemoteDescription(offer); // saves the proposal (offer) send my other participants
+  await pc.setRemoteDescription(offer as unknown as LibSessionDescription); // saves the proposal (offer) send my other participants
 
   // creates an response of the offer provided
   const answer = await pc.createAnswer();
@@ -223,7 +257,7 @@ export async function handleAnswer({
   const pc = peerConnections.get(participantId);
   if (!pc) return;
 
-  await pc.setRemoteDescription(answer); // sets the answer send by the participant to remote
+  await pc.setRemoteDescription(answer as unknown as LibSessionDescription); // sets the answer send by the participant to remote
 }
 
 // finds the network path between the users in the call
@@ -237,5 +271,5 @@ export async function addIceCandidate({
   const pc = peerConnections.get(participantId);
   if (!pc) return;
 
-  await pc.addIceCandidate(candidate);
+  await pc.addIceCandidate(candidate as unknown as LibIceCandidate);
 }
