@@ -20,6 +20,8 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { AppThemeProvider, useTheme } from "@/shared/providers/theme-provider";
 import { PresenceProvider } from "@/shared/providers/presence-provider";
+import { CallProvider } from "@/features/calls/use-call";
+import CallOverlay from "@/features/calls/components/CallOverlay";
 
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
@@ -121,7 +123,10 @@ export default function RootLayout() {
         <AppThemeProvider>
           <PresenceProvider>
             <KeyboardProvider>
-              <AppNavigator />
+              <CallProvider>
+                <AppNavigator />
+                <CallOverlay />
+              </CallProvider>
             </KeyboardProvider>
           </PresenceProvider>
         </AppThemeProvider>

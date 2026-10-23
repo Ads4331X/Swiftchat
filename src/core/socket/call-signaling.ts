@@ -1,4 +1,4 @@
-import { connectSocket, getSocket } from "./client";
+import { connectSocket, getSocket, listenForSocketEvent } from "./client";
 
 type CallType = "audio" | "video";
 
@@ -115,27 +115,20 @@ export function onCallOffer(
     callId: string;
     senderId: number;
     offer: RTCSessionDescriptionInit;
+    callType: "audio" | "video";
   }) => void,
 ) {
-  const socket = getSocket();
-  if (!socket) return;
-
-  socket.on("call:offer", callback);
-  return () => socket.off("call:offer", callback);
+  return listenForSocketEvent("call:offer", callback);
 }
 
 export function onCallAnswer(
   callback: (data: {
     callId: string;
-    senderId?: number;
+    senderId: number;
     answer: RTCSessionDescriptionInit;
   }) => void,
 ) {
-  const socket = getSocket();
-  if (!socket) return;
-
-  socket.on("call:answer", callback);
-  return () => socket.off("call:answer", callback);
+  return listenForSocketEvent("call:answer", callback);
 }
 
 export function onIceCandidate(
@@ -145,11 +138,7 @@ export function onIceCandidate(
     candidate: RTCIceCandidateInit;
   }) => void,
 ) {
-  const socket = getSocket();
-  if (!socket) return;
-
-  socket.on("call:ice-candidate", callback);
-  return () => socket.off("call:ice-candidate", callback);
+  return listenForSocketEvent("call:ice-candidate", callback);
 }
 
 export async function initiateCall({
@@ -193,39 +182,23 @@ export function onIncomingCall(
     callType: CallType;
   }) => void,
 ) {
-  const socket = getSocket();
-  if (!socket) return;
-
-  socket.on("incoming-call", callback);
-  return () => socket.off("incoming-call", callback);
+  return listenForSocketEvent("incoming-call", callback);
 }
 
 export function onCallAccepted(
   callback: (data: { callId: string; userId: number }) => void,
 ) {
-  const socket = getSocket();
-  if (!socket) return;
-
-  socket.on("call:accepted", callback);
-  return () => socket.off("call:accepted", callback);
+  return listenForSocketEvent("call:accepted", callback);
 }
 
 export function onCallDeclined(
   callback: (data: { callId: string; userId: number }) => void,
 ) {
-  const socket = getSocket();
-  if (!socket) return;
-
-  socket.on("call:declined", callback);
-  return () => socket.off("call:declined", callback);
+  return listenForSocketEvent("call:declined", callback);
 }
 
 export function onCallEnded(
   callback: (data: { callId: string; userId: number }) => void,
 ) {
-  const socket = getSocket();
-  if (!socket) return;
-
-  socket.on("call:ended", callback);
-  return () => socket.off("call:ended", callback);
+  return listenForSocketEvent("call:ended", callback);
 }

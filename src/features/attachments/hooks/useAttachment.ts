@@ -11,10 +11,12 @@ export function useAttachment({
   conversationId,
   messageId,
   enabled,
+  autoLoad = true,
 }: {
   conversationId: number;
   messageId: number;
   enabled: boolean;
+  autoLoad?: boolean;
 }) {
   const [state, setState] = useState<AttachmentState>(() =>
     getAttachmentState(messageId),
@@ -24,10 +26,12 @@ export function useAttachment({
     if (!enabled) return;
 
     const unsubscribe = subscribeAttachment(messageId, setState);
-    ensureAttachmentLoaded({ messageId, conversationId }).catch(() => {});
+    if (autoLoad) {
+      ensureAttachmentLoaded({ messageId, conversationId }).catch(() => {});
+    }
 
     return unsubscribe;
-  }, [messageId, conversationId, enabled]);
+  }, [messageId, conversationId, enabled, autoLoad]);
 
   return {
     sourceUri: state.sourceUri,

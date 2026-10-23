@@ -8,14 +8,24 @@ import {
   onCallDeclined,
   onCallEnded,
   sendCallOffer,
+  sendCallAnswer,
+  onCallOffer,
+  onCallAnswer,
+  onIceCandidate,
 } from "@/core/socket/call-signaling";
 import type { MediaStream } from "react-native-webrtc";
 import {
+  addIceCandidate,
   addLocalTracks,
+  closePeerConnection,
+  createAnswer,
   createOffer,
   createPeerConnection,
   getLocalMedia,
+  handleAnswer,
   requestPermissions,
+  startCallAudio,
+  stopLocalMedia,
 } from "./webrtc";
 
 type IncomingCall = {
@@ -30,22 +40,47 @@ export function setupCallListeners({
   onAccepted,
   onDeclined,
   onEnded,
+  onOffer,
+  onAnswer,
+  onIce,
 }: {
   onIncoming: (call: IncomingCall) => void;
   onAccepted: (data: { callId: string; userId: number }) => void;
   onDeclined: (data: { callId: string; userId: number }) => void;
   onEnded: (data: { callId: string; userId: number }) => void;
+  onOffer: (data: {
+    callId: string;
+    senderId: number;
+    offer: RTCSessionDescriptionInit;
+    callType: "audio" | "video";
+  }) => void;
+  onAnswer: (data: {
+    callId: string;
+    senderId: number;
+    answer: RTCSessionDescriptionInit;
+  }) => void;
+  onIce: (data: {
+    callId: string;
+    senderId: number;
+    candidate: RTCIceCandidateInit;
+  }) => void;
 }) {
   const unsubscribeIncoming = onIncomingCall(onIncoming);
   const unsubscribeAccepted = onCallAccepted(onAccepted);
   const unsubscribeDeclined = onCallDeclined(onDeclined);
   const unsubscribeEnded = onCallEnded(onEnded);
+  const unsubscribeOffer = onCallOffer(onOffer);
+  const unsubscribeAnswer = onCallAnswer(onAnswer);
+  const unsubscribeIce = onIceCandidate(onIce);
 
   return () => {
     unsubscribeIncoming?.();
     unsubscribeAccepted?.();
     unsubscribeDeclined?.();
     unsubscribeEnded?.();
+    unsubscribeOffer?.();
+    unsubscribeAnswer?.();
+    unsubscribeIce?.();
   };
 }
 
@@ -97,6 +132,8 @@ export async function prepareCall({
     throw new Error("Failed to access microphone or camera");
   }
 
+  await startCallAudio({ callType });
+
   return stream;
 }
 
@@ -145,7 +182,7 @@ export async function createOutgoingOffer({
   onRemoteStream: (stream: MediaStream) => void;
   onConnectionStateChange: (state: RTCPeerConnectionState) => void;
 }) {
-  await setupOutgoingCall({
+  const { stream } = await setupOutgoingCall({
     callType,
     participantId,
     callId,
@@ -153,17 +190,100 @@ export async function createOutgoingOffer({
     onConnectionStateChange,
   });
 
-  const offer = await createOffer({ participantId });
+  try {
+    const offer = await createOffer({ participantId });
 
-  if (!offer) {
-    throw new Error("Failed to create call offer");
+    if (!offer) {
+      throw new Error("Failed to create call offer");
+    }
+
+    await sendCallOffer({
+      callId,
+      receiverId: participantId,
+      offer,
+    });
+
+    return { stream, offer };
+  } catch (err) {
+    await stopLocalMedia({ stream });
+    closePeerConnection({ participantId });
+    throw err;
   }
+}
 
-  await sendCallOffer({
+export async function handleCallAnswer({
+  participantId,
+  answer,
+}: {
+  participantId: number;
+  answer: RTCSessionDescriptionInit;
+}) {
+  await handleAnswer({ participantId, answer });
+}
+
+export async function handleIncomingIce({
+  senderId,
+  candidate,
+}: {
+  senderId: number;
+  candidate: RTCIceCandidateInit;
+}) {
+  await addIceCandidate({
+    participantId: senderId,
+    candidate,
+  });
+}
+
+export async function handleIncomingOffer({
+  callId,
+  senderId,
+  callType,
+  offer,
+  onRemoteStream,
+  onConnectionStateChange,
+}: {
+  callId: string;
+  senderId: number;
+  callType: "audio" | "video";
+  offer: RTCSessionDescriptionInit;
+  onRemoteStream: (stream: MediaStream) => void;
+  onConnectionStateChange: (state: RTCPeerConnectionState) => void;
+}) {
+  const stream = await prepareCall({ callType });
+
+  const peerConnection = createPeerConnection({
+    participantId: senderId,
     callId,
-    receiverId: participantId,
-    offer,
+    onRemoteStream,
+    onConnectionStateChange,
   });
 
-  return offer;
+  if (!peerConnection) {
+    stream.getTracks().forEach((track) => track.stop());
+    throw new Error("Failed to create peer connection");
+  }
+
+  try {
+    await addLocalTracks({ stream, peerConnection });
+
+    const answer = await createAnswer({
+      offer,
+      participantId: senderId,
+    });
+
+    if (!answer) {
+      throw new Error("Failed to create call answer");
+    }
+
+    await sendCallAnswer({
+      callId,
+      answer,
+    });
+
+    return { stream, peerConnection, answer };
+  } catch (err) {
+    await stopLocalMedia({ stream });
+    closePeerConnection({ participantId: senderId });
+    throw err;
+  }
 }
