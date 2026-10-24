@@ -20,12 +20,15 @@ import {
   handleCallAnswer,
   handleIncomingIce,
   handleIncomingOffer,
+  handleParticipantLeft as closeCallParticipant,
+  prepareCall,
   rejectIncomingCall,
   setupCallListeners,
   startCall as signalStartCall,
 } from "./call-manager";
 import {
   closeAllPeerConnections,
+  hasTurnCredentials,
   setCallSpeakerphone,
   stopCallAudio,
   stopLocalMedia,
@@ -39,6 +42,7 @@ type IncomingCallData = {
   conversationId: number;
   callerId: number;
   callType: CallType;
+  participantCount: number;
 };
 
 type StartCallArgs = {
@@ -51,7 +55,7 @@ type StartCallArgs = {
 type CallContextValue = {
   call: OngoingCall | null;
   localStream: MediaStream | null;
-  remoteStream: MediaStream | null;
+  remoteStreams: { participantId: number; stream: MediaStream }[];
   isMuted: boolean;
   isSpeakerOn: boolean;
   isCameraOn: boolean;
@@ -69,7 +73,9 @@ const CallContext = createContext<CallContextValue | null>(null);
 export function CallProvider({ children }: { children: React.ReactNode }) {
   const [call, setCall] = useState<OngoingCall | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+  const [remoteStreams, setRemoteStreams] = useState<
+    { participantId: number; stream: MediaStream }[]
+  >([]);
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeakerOn, setIsSpeakerOn] = useState(false);
   const [isCameraOn, setIsCameraOn] = useState(true);
@@ -97,20 +103,25 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const resetCall = useCallback(() => {
+    if (!callRef.current && !localStreamRef.current) return;
+
     const stream = localStreamRef.current;
 
     if (stream) {
       void stopLocalMedia({ stream });
     }
 
-    closeAllPeerConnections();
-    void stopCallAudio();
-    commitLocalStream(null);
-    setRemoteStream(null);
-    setIsMuted(false);
-    setIsSpeakerOn(false);
-    setIsCameraOn(true);
-    commitCall(null);
+    try {
+      closeAllPeerConnections();
+    } finally {
+      void stopCallAudio();
+      commitLocalStream(null);
+      setRemoteStreams([]);
+      setIsMuted(false);
+      setIsSpeakerOn(false);
+      setIsCameraOn(true);
+      commitCall(null);
+    }
   }, [commitCall, commitLocalStream]);
 
   const finishCall = useCallback(async () => {
@@ -127,27 +138,71 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     resetCall();
   }, [resetCall]);
 
-  const handleRemoteStream = useCallback((stream: MediaStream) => {
-    setRemoteStream(stream);
-  }, []);
+  const handleRemoteStream = useCallback(
+    (participantId: number, stream: MediaStream) => {
+      setRemoteStreams((current) => {
+        const existing = current.findIndex(
+          (entry) => entry.participantId === participantId,
+        );
+        if (existing < 0) return [...current, { participantId, stream }];
+        const next = [...current];
+        next[existing] = { participantId, stream };
+        return next;
+      });
+    },
+    [],
+  );
 
   const handleConnectionStateChange = useCallback(
-    (state: RTCPeerConnectionState) => {
+    (
+      state: RTCPeerConnectionState,
+      iceState: RTCIceConnectionState,
+      participantId: number,
+    ) => {
       if (state === "connected") {
-        patchCall({ status: "active" });
+        const current = callRef.current;
+        patchCall({
+          status: "active",
+          connectedAt: current?.connectedAt ?? Date.now(),
+        });
         return;
       }
 
       if (state === "connecting") {
-        patchCall({ status: "connecting" });
+        const current = callRef.current;
+        if (current?.status !== "active") patchCall({ status: "connecting" });
         return;
       }
 
       if (state === "failed") {
+        const current = callRef.current;
+        if (current && current.participantCount > 2) {
+          closeCallParticipant({ participantId });
+          setRemoteStreams((entries) =>
+            entries.filter((entry) => entry.participantId !== participantId),
+          );
+          patchCall({
+            participantIds: current.participantIds.filter(
+              (id) => id !== participantId,
+            ),
+          });
+          Toast.show({
+            type: "error",
+            text1: "Participant connection failed",
+            text2: hasTurnCredentials()
+              ? `Connection to participant ${participantId} failed.`
+              : "Check TURN configuration and network access.",
+          });
+          return;
+        }
+
+        const connectionHelp = hasTurnCredentials()
+          ? `ICE connection failed (${iceState}). Check the network or TURN relay availability.`
+          : "TURN relay credentials are missing. Configure EXPO_PUBLIC_TURN_USERNAME and EXPO_PUBLIC_TURN_CREDENTIAL, then restart Metro.";
         Toast.show({
           type: "error",
           text1: "Call failed",
-          text2: "Could not establish a connection.",
+          text2: connectionHelp,
         });
         void finishCall();
       }
@@ -178,6 +233,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         participantName: "Incoming call",
         direction: "incoming",
         status: "incoming",
+        participantIds: [data.callerId],
+        participantCount: data.participantCount,
       });
 
       void (async () => {
@@ -215,11 +272,23 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         throw new Error("You are already on a call.");
       }
 
-      const callId = await signalStartCall({ callType, conversationId });
+      const stream = await prepareCall({ callType });
+      let callId: string;
+      let participantCount: number;
+      try {
+        const result = await signalStartCall({ callType, conversationId });
+        callId = result.callId;
+        participantCount = result.participantCount;
+      } catch (err) {
+        await stopLocalMedia({ stream });
+        await stopCallAudio();
+        throw err;
+      }
 
       setIsMuted(false);
       setIsSpeakerOn(callType === "video");
       setIsCameraOn(callType === "video");
+      commitLocalStream(stream);
       commitCall({
         callId,
         callType,
@@ -228,9 +297,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         participantName: participantName ?? "Unknown",
         direction: "outgoing",
         status: "outgoing",
+        participantIds: [],
+        participantCount,
       });
     },
-    [commitCall],
+    [commitCall, commitLocalStream],
   );
 
   const acceptCall = useCallback(async () => {
@@ -244,19 +315,30 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    patchCall({ status: "connecting" });
-
+    let stream: MediaStream | undefined;
     try {
+      stream = await prepareCall({ callType: current.callType });
+      commitLocalStream(stream);
+      patchCall({ status: "connecting" });
       await acceptIncomingCall({ callId: current.callId });
     } catch (err) {
+      if (stream) {
+        await stopLocalMedia({ stream });
+        commitLocalStream(null);
+      }
+      await rejectIncomingCall({ callId: current.callId }).catch(() => {});
+      resetCall();
       Toast.show({
         type: "error",
         text1: "Could not accept call",
         text2: err instanceof Error ? err.message : "Please try again.",
       });
-      await finishCall();
     }
-  }, [finishCall, patchCall]);
+  }, [
+    commitLocalStream,
+    patchCall,
+    resetCall,
+  ]);
 
   const declineCall = useCallback(async () => {
     const current = callRef.current;
@@ -273,44 +355,69 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   }, [resetCall]);
 
   const handleAccepted = useCallback(
-    async ({ callId, userId }: { callId: string; userId: number }) => {
+    async ({
+      callId,
+      userId,
+      peerIds,
+      offerPeerIds,
+    }: {
+      callId: string;
+      userId: number;
+      peerIds: number[];
+      offerPeerIds: number[];
+    }) => {
       const current = callRef.current;
 
       if (!current || current.callId !== callId) return;
 
-      patchCall({ status: "connecting", participantId: userId });
+      const participantIds = new Set(current.participantIds);
+      peerIds.forEach((peerId) => participantIds.add(peerId));
+      patchCall({
+        status: current.status === "active" ? "active" : "connecting",
+        participantIds: [...participantIds],
+      });
 
-      try {
-        const { stream } = await createOutgoingOffer({
-          callType: current.callType,
-          participantId: userId,
-          callId,
-          onRemoteStream: handleRemoteStream,
-          onConnectionStateChange: handleConnectionStateChange,
-        });
-
-        if (callRef.current?.callId !== callId) {
-          void stopLocalMedia({ stream });
-          return;
-        }
-
-        commitLocalStream(stream);
-        setIsMuted(false);
-        setIsSpeakerOn(current.callType === "video");
-        setIsCameraOn(current.callType === "video");
-      } catch (err) {
+      const stream = localStreamRef.current;
+      if (!stream) {
         Toast.show({
           type: "error",
-          text1: "Call failed",
-          text2:
-            err instanceof Error ? err.message : "Unable to start the call.",
+          text1: "Call media is not ready",
+          text2: "Please leave the call and try again.",
         });
-        await finishCall();
+        return;
       }
+
+      await Promise.all(
+        offerPeerIds.map(async (participantId) => {
+          try {
+            await createOutgoingOffer({
+              callType: current.callType,
+              participantId,
+              callId,
+              localStream: stream,
+              onRemoteStream: handleRemoteStream,
+              onConnectionStateChange: handleConnectionStateChange,
+            });
+          } catch (err) {
+            Toast.show({
+              type: "error",
+              text1: "Could not connect a participant",
+              text2:
+                err instanceof Error ? err.message : "Please try again.",
+            });
+            setRemoteStreams((entries) =>
+              entries.filter((entry) => entry.participantId !== participantId),
+            );
+            patchCall({
+              participantIds: callRef.current?.participantIds.filter(
+                (id) => id !== participantId,
+              ),
+            });
+          }
+        }),
+      );
     },
     [
-      commitLocalStream,
-      finishCall,
       handleConnectionStateChange,
       handleRemoteStream,
       patchCall,
@@ -336,6 +443,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           senderId: data.senderId,
           callType: data.callType,
           offer: data.offer,
+          localStream: localStreamRef.current ?? undefined,
           onRemoteStream: handleRemoteStream,
           onConnectionStateChange: handleConnectionStateChange,
         });
@@ -345,18 +453,23 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        commitLocalStream(stream);
-        setIsMuted(false);
-        setIsSpeakerOn(data.callType === "video");
-        setIsCameraOn(data.callType === "video");
+        if (!localStreamRef.current) commitLocalStream(stream);
       } catch (err) {
+        closeCallParticipant({ participantId: data.senderId });
+        setRemoteStreams((entries) =>
+          entries.filter((entry) => entry.participantId !== data.senderId),
+        );
+        patchCall({
+          participantIds: callRef.current?.participantIds.filter(
+            (id) => id !== data.senderId,
+          ),
+        });
         Toast.show({
           type: "error",
-          text1: "Call failed",
-          text2:
-            err instanceof Error ? err.message : "Unable to answer the call.",
+          text1: "Could not connect participant",
+          text2: err instanceof Error ? err.message : "Please try again.",
         });
-        await finishCall();
+        if (current.participantCount <= 2) await finishCall();
       }
     },
     [
@@ -383,13 +496,14 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           participantId: data.senderId,
           answer: data.answer,
         });
-      } catch {
+      } catch (err) {
+        closeCallParticipant({ participantId: data.senderId });
         Toast.show({
           type: "error",
-          text1: "Call failed",
-          text2: "Could not apply the call answer.",
+          text1: "Could not connect participant",
+          text2: err instanceof Error ? err.message : "Please try again.",
         });
-        await finishCall();
+        if (current.participantCount <= 2) await finishCall();
       }
     },
     [finishCall],
@@ -418,10 +532,28 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   );
 
   const handleDeclined = useCallback(
-    ({ callId }: { callId: string; userId: number }) => {
+    ({ callId, userId }: { callId: string; userId: number }) => {
       const current = callRef.current;
 
       if (!current || current.callId !== callId) return;
+
+      if (current.participantCount > 2) {
+        closeCallParticipant({ participantId: userId });
+        setRemoteStreams((entries) =>
+          entries.filter((entry) => entry.participantId !== userId),
+        );
+        patchCall({
+          participantIds: current.participantIds.filter(
+            (participantId) => participantId !== userId,
+          ),
+        });
+        Toast.show({
+          type: "info",
+          text1: "Participant declined",
+          text2: "The group call can continue.",
+        });
+        return;
+      }
 
       Toast.show({
         type: "info",
@@ -430,7 +562,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       });
       resetCall();
     },
-    [resetCall],
+    [patchCall, resetCall],
   );
 
   const handleEnded = useCallback(
@@ -445,12 +577,29 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     [resetCall],
   );
 
+  const handleParticipantLeft = useCallback(
+    ({ callId, userId }: { callId: string; userId: number }) => {
+      if (callRef.current?.callId !== callId) return;
+      closeCallParticipant({ participantId: userId });
+      setRemoteStreams((entries) =>
+        entries.filter((entry) => entry.participantId !== userId),
+      );
+      patchCall({
+        participantIds: callRef.current.participantIds.filter(
+          (participantId) => participantId !== userId,
+        ),
+      });
+    },
+    [patchCall],
+  );
+
   useEffect(() => {
     return setupCallListeners({
       onIncoming: handleIncoming,
       onAccepted: handleAccepted,
       onDeclined: handleDeclined,
       onEnded: handleEnded,
+      onParticipantLeft: handleParticipantLeft,
       onOffer: handleOffer,
       onAnswer: handleAnswer,
       onIce: handleIce,
@@ -460,6 +609,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     handleAnswer,
     handleDeclined,
     handleEnded,
+    handleParticipantLeft,
     handleIce,
     handleIncoming,
     handleOffer,
@@ -510,7 +660,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     () => ({
       call,
       localStream,
-      remoteStream,
+      remoteStreams,
       isMuted,
       isSpeakerOn,
       isCameraOn,
@@ -531,7 +681,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       isMuted,
       isSpeakerOn,
       localStream,
-      remoteStream,
+      remoteStreams,
       startCall,
       toggleMute,
       toggleSpeaker,

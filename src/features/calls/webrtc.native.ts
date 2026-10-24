@@ -1,6 +1,7 @@
 import { sendIceCandidate } from "@/core/socket/call-signaling";
 import { AudioModule } from "expo-audio";
 import { requestCameraPermissionsAsync } from "expo-image-picker";
+import { NativeModules, Platform } from "react-native";
 import InCallManager from "react-native-incall-manager";
 import type {
   MediaStream,
@@ -12,6 +13,12 @@ import { getWebRTC } from "./webrtc-module";
 // the library's types don't expose the event handlers, so we describe the ones we use
 type PeerEventHandlers = {
   onconnectionstatechange: (() => void) | null;
+  oniceconnectionstatechange: (() => void) | null;
+  onicecandidateerror: ((event: {
+    errorCode?: number;
+    errorText?: string;
+    url?: string;
+  }) => void) | null;
   ontrack: ((event: { streams: readonly MediaStream[] }) => void) | null;
   onicecandidate:
     | ((event: {
@@ -45,6 +52,8 @@ export async function requestPermissions({
 const peerConnections = new Map<number, RTCPeerConnectionType>();
 
 const pendingIceCandidates = new Map<number, RTCIceCandidateInit[]>(); // Stores ICE candidates that arrive before the remote description is ready.
+const hasInCallManager = Boolean(NativeModules.InCallManager);
+let warnedAboutMissingInCallManager = false;
 
 export function createPeerConnection({
   participantId,
@@ -54,8 +63,12 @@ export function createPeerConnection({
 }: {
   participantId: number;
   callId: string;
-  onConnectionStateChange: (state: RTCPeerConnectionState) => void;
-  onRemoteStream: (stream: MediaStream) => void;
+  onConnectionStateChange: (
+    state: RTCPeerConnectionState,
+    iceState: RTCIceConnectionState,
+    participantId: number,
+  ) => void;
+  onRemoteStream: (participantId: number, stream: MediaStream) => void;
 }) {
   // if peer connection is already there
   if (peerConnections.has(participantId)) {
@@ -66,16 +79,16 @@ export function createPeerConnection({
     {
       urls: "stun:stun.relay.metered.ca:80",
     },
-    {
+    ...(hasTurnCredentials() ? [{
       urls: [
         "turn:global.relay.metered.ca:80",
         "turn:global.relay.metered.ca:80?transport=tcp",
         "turn:global.relay.metered.ca:443",
         "turns:global.relay.metered.ca:443?transport=tcp",
       ],
-      username: process.env.EXPO_PUBLIC_TURN_USERNAME!,
-      credential: process.env.EXPO_PUBLIC_TURN_CREDENTIAL!,
-    },
+      username: process.env.EXPO_PUBLIC_TURN_USERNAME!.trim(),
+      credential: process.env.EXPO_PUBLIC_TURN_CREDENTIAL!.trim(),
+    }] : []),
   ];
 
   const iceConfiguration: RTCConfiguration = {
@@ -93,14 +106,34 @@ export function createPeerConnection({
 
   // callback for connection state change
   peerEvents.onconnectionstatechange = () => {
-    onConnectionStateChange(participantPeer.connectionState);
+    onConnectionStateChange(
+      participantPeer.connectionState,
+      participantPeer.iceConnectionState,
+      participantId,
+    );
+  };
+
+  peerEvents.oniceconnectionstatechange = () => {
+    onConnectionStateChange(
+      participantPeer.connectionState,
+      participantPeer.iceConnectionState,
+      participantId,
+    );
+  };
+
+  peerEvents.onicecandidateerror = (event) => {
+    console.warn("WebRTC ICE candidate error:", {
+      code: event.errorCode,
+      message: event.errorText,
+      server: event.url,
+    });
   };
 
   // callback for receiving a remote track
   peerEvents.ontrack = (event) => {
     try {
       const stream = handleRemoteTrack({ event });
-      onRemoteStream(stream);
+      onRemoteStream(participantId, stream);
     } catch (err) {
       console.error("Failed to handle remote track:", err);
     }
@@ -118,12 +151,34 @@ export function createPeerConnection({
   return participantPeer;
 }
 
+export function hasTurnCredentials() {
+  return Boolean(
+    process.env.EXPO_PUBLIC_TURN_USERNAME?.trim() &&
+      process.env.EXPO_PUBLIC_TURN_CREDENTIAL?.trim(),
+  );
+}
+
 export async function getLocalMedia({
   callType,
 }: {
   callType: "audio" | "video";
 }) {
   try {
+    const videoConstraints =
+      Platform.OS === "ios"
+        ? {
+            width: { ideal: 540, max: 720 },
+            height: { ideal: 960, max: 960 },
+            frameRate: { ideal: 24, max: 24 },
+            facingMode: "user",
+          }
+        : {
+            width: { ideal: 360, max: 480 },
+            height: { ideal: 480, max: 480 },
+            frameRate: { ideal: 20, max: 20 },
+            facingMode: "user",
+          };
+
     type CallMediaConstraints = {
       audio: {
         googEchoCancellation: boolean;
@@ -132,12 +187,7 @@ export async function getLocalMedia({
       };
       video:
         | false
-        | {
-            width: { ideal: number; max: number };
-            height: { ideal: number; max: number };
-            frameRate: { ideal: number; max: number };
-            facingMode: string;
-          };
+        | typeof videoConstraints;
     };
 
     const mediaConstraints: CallMediaConstraints = {
@@ -146,15 +196,7 @@ export async function getLocalMedia({
         googNoiseSuppression: true,
         googAutoGainControl: true,
       },
-      video:
-        callType === "video"
-          ? {
-              width: { ideal: 480, max: 640 },
-              height: { ideal: 360, max: 480 },
-              frameRate: { ideal: 20, max: 24 },
-              facingMode: "user",
-            }
-          : false,
+      video: callType === "video" ? videoConstraints : false,
     };
 
     const { mediaDevices } = getWebRTC();
@@ -178,6 +220,16 @@ export async function startCallAudio({
 }: {
   callType: "audio" | "video";
 }) {
+  if (!hasInCallManager) {
+    if (!warnedAboutMissingInCallManager) {
+      console.warn(
+        "Call audio routing is unavailable in this app build. Rebuild and reinstall the Android app to include react-native-incall-manager.",
+      );
+      warnedAboutMissingInCallManager = true;
+    }
+    return;
+  }
+
   try {
     InCallManager.start({
       media: callType === "video" ? "video" : "audio",
@@ -190,10 +242,23 @@ export async function startCallAudio({
 }
 
 export function setCallSpeakerphone(enabled: boolean) {
+  if (!hasInCallManager) {
+    throw new Error(
+      "Audio output controls are unavailable in this app build. Rebuild and reinstall the Android app.",
+    );
+  }
+
+  if (Platform.OS === "ios") {
+    InCallManager.setSpeakerphoneOn(enabled);
+    return;
+  }
+
   InCallManager.setForceSpeakerphoneOn(enabled);
 }
 
 export async function stopCallAudio() {
+  if (!hasInCallManager) return;
+
   try {
     InCallManager.setKeepScreenOn(false);
     InCallManager.setForceSpeakerphoneOn(false);
@@ -233,15 +298,14 @@ async function limitSenderBandwidth(
 
       for (const encoding of parameters.encodings) {
         if (kind === "video") {
-          encoding.maxBitrate = 400_000;
-          encoding.maxFramerate = 20;
+          encoding.maxBitrate = Platform.OS === "ios" ? 800_000 : 400_000;
+          encoding.maxFramerate = Platform.OS === "ios" ? 24 : 20;
         } else {
-          encoding.maxBitrate = 48_000;
+          encoding.maxBitrate = 64_000;
         }
       }
 
-      parameters.degradationPreference =
-        kind === "video" ? "maintain-framerate" : "balanced";
+      parameters.degradationPreference = "balanced";
       await sender.setParameters(parameters);
     } catch (err) {
       console.warn("Could not set sender bandwidth limits:", err);
@@ -272,18 +336,27 @@ export function closePeerConnection({
 
   if (!pc) return;
 
-  pc.close();
-
   peerConnections.delete(participantId);
   pendingIceCandidates.delete(participantId);
+  try {
+    pc.close();
+  } catch (err) {
+    console.warn("Could not close call connection:", err);
+  }
 }
 
 export function closeAllPeerConnections() {
-  for (const [, pc] of peerConnections) {
-    pc.close();
-  }
+  const connections = [...peerConnections.values()];
   peerConnections.clear();
   pendingIceCandidates.clear();
+
+  for (const pc of connections) {
+    try {
+      pc.close();
+    } catch (err) {
+      console.warn("Could not close call connection:", err);
+    }
+  }
 }
 
 export async function stopLocalMedia({ stream }: { stream: MediaStream }) {

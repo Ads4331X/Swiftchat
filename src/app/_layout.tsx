@@ -104,9 +104,9 @@ function AppNavigator() {
         }}
       >
         <Stack.Screen name="index" />
-        <Stack.Screen name="auth" />
+        <Stack.Screen name="(auth)" />
         <Stack.Screen name="chat/index" />
-        <Stack.Screen name="chat/[id]" />
+        <Stack.Screen name="chat/[id]/index" />
       </Stack>
 
       <ToastProvider />

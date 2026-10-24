@@ -1,8 +1,11 @@
 import Feather from "@expo/vector-icons/Feather";
+import { router } from "expo-router";
+import { useEffect, useState } from "react";
 import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -15,12 +18,13 @@ import type { OngoingCall } from "../types";
 import { useCall } from "../use-call";
 import CallAudio from "./CallAudio";
 import CallVideo from "./CallVideo";
+import CallWhiteboard from "./CallWhiteboard";
 
 export default function CallOverlay() {
   const {
     call,
     localStream,
-    remoteStream,
+    remoteStreams,
     isMuted,
     isSpeakerOn,
     isCameraOn,
@@ -31,11 +35,55 @@ export default function CallOverlay() {
     toggleSpeaker,
     toggleVideo,
   } = useCall();
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [isMinimized, setIsMinimized] = useState(false);
+  const [isWhiteboardVisible, setIsWhiteboardVisible] = useState(false);
+
+  useEffect(() => {
+    setIsMinimized(false);
+    setIsWhiteboardVisible(false);
+  }, [call?.callId]);
+
+  useEffect(() => {
+    if (!call?.connectedAt) {
+      setElapsedSeconds(0);
+      return;
+    }
+
+    const updateElapsed = () => {
+      setElapsedSeconds(
+        Math.max(0, Math.floor((Date.now() - call.connectedAt!) / 1000)),
+      );
+    };
+    updateElapsed();
+    const timer = setInterval(updateElapsed, 1000);
+    return () => clearInterval(timer);
+  }, [call?.callId, call?.connectedAt]);
 
   if (!call) return null;
 
+  if (isMinimized) {
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Return to call"
+        onPress={() => setIsMinimized(false)}
+        style={styles.minimizedCall}
+      >
+        <Feather name={call.callType === "video" ? "video" : "phone"} size={18} color="#fff" />
+        <Text style={styles.minimizedCallText}>
+          {call.participantName} · {statusText(call, elapsedSeconds)}
+        </Text>
+        <Feather name="maximize-2" size={16} color="#fff" />
+      </Pressable>
+    );
+  }
+
   const isVideo = call.callType === "video";
   const isIncoming = call.direction === "incoming" && call.status === "incoming";
+  const showLocalVideo = isVideo && localStream && isCameraOn;
+  const showRemoteVideo = isVideo && remoteStreams.length > 0;
+  const showVideoGrid = isVideo && remoteStreams.length > 1;
 
   return (
     <Modal
@@ -51,15 +99,55 @@ export default function CallOverlay() {
       }}
     >
       <View className="flex-1 bg-[#0B0F10]">
-        {isVideo && remoteStream ? (
+        {showVideoGrid ? (
+          <ScrollView
+            style={styles.videoGrid}
+            contentContainerStyle={styles.videoGridContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {remoteStreams.map(({ participantId, stream }) => (
+              <View key={participantId} style={styles.participantTile}>
+                <CallVideo
+                  stream={stream}
+                  style={StyleSheet.absoluteFill}
+                  objectFit="cover"
+                />
+                <Text style={styles.participantLabel}>
+                  Participant {participantId}
+                </Text>
+              </View>
+            ))}
+            {showLocalVideo ? (
+              <View style={styles.participantTile}>
+                <CallVideo
+                  stream={localStream}
+                  style={StyleSheet.absoluteFill}
+                  objectFit="cover"
+                  mirror
+                  muted
+                />
+                <Text style={styles.participantLabel}>You</Text>
+              </View>
+            ) : null}
+          </ScrollView>
+        ) : showRemoteVideo ? (
           <CallVideo
-            stream={remoteStream}
+            stream={remoteStreams[0].stream}
             style={StyleSheet.absoluteFill}
             objectFit="cover"
           />
+        ) : showLocalVideo ? (
+          <CallVideo
+            stream={localStream}
+            style={StyleSheet.absoluteFill}
+            objectFit="cover"
+            mirror
+          />
         ) : (
           <View className="absolute inset-0 items-center justify-center">
-            {remoteStream ? <CallAudio stream={remoteStream} /> : null}
+            {remoteStreams.map(({ participantId, stream }) => (
+              <CallAudio key={participantId} stream={stream} />
+            ))}
             <View
               className="h-28 w-28 items-center justify-center rounded-full"
               style={{ backgroundColor: BRAND_COLOR + "33" }}
@@ -74,20 +162,20 @@ export default function CallOverlay() {
         )}
 
         <SafeAreaView className="absolute inset-x-0 top-0" edges={["top"]}>
-          <View className="items-center px-6 pt-4">
+          <View style={styles.header}>
             <Text
               numberOfLines={1}
-              className="text-[22px] font-bold text-white"
+              style={styles.participantName}
             >
-              {call.participantName}
+              {call.participantCount > 2 ? "Group call" : call.participantName}
             </Text>
-            <Text className="mt-1 text-sm text-white/70">
-              {statusText(call)}
+            <Text style={styles.callStatus}>
+              {statusText(call, elapsedSeconds)}
             </Text>
           </View>
         </SafeAreaView>
 
-        {isVideo && localStream && isCameraOn ? (
+        {showRemoteVideo && !showVideoGrid && showLocalVideo ? (
           <View className="absolute right-4 top-24 h-[148px] w-[104px] overflow-hidden rounded-[14px] border border-white/35 bg-[#111]">
             <CallVideo
               stream={localStream}
@@ -97,11 +185,12 @@ export default function CallOverlay() {
               muted
               zOrder={1}
             />
+            <Text style={styles.participantLabel}>You</Text>
           </View>
         ) : null}
 
         <SafeAreaView className="absolute inset-x-0 bottom-0" edges={["bottom"]}>
-          <View className="flex-row items-center justify-center gap-5 px-6 py-5">
+          <View style={styles.controlDock}>
             {isIncoming ? (
               <>
                 <CallButton
@@ -127,7 +216,7 @@ export default function CallOverlay() {
                       active={isMuted}
                       onPress={toggleMute}
                     />
-                    {!isVideo && Platform.OS !== "web" ? (
+                    {Platform.OS !== "web" ? (
                       <CallButton
                         icon={isSpeakerOn ? "volume-2" : "volume-1"}
                         label={isSpeakerOn ? "Speaker on" : "Speaker"}
@@ -143,6 +232,22 @@ export default function CallOverlay() {
                         onPress={toggleVideo}
                       />
                     ) : null}
+                    <CallButton
+                      icon="message-circle"
+                      label="Chat"
+                      onPress={() => {
+                        setIsMinimized(true);
+                        router.push({
+                          pathname: "/chat/[id]",
+                          params: { id: String(call.conversationId) },
+                        });
+                      }}
+                    />
+                    <CallButton
+                      icon="edit-3"
+                      label="Board"
+                      onPress={() => setIsWhiteboardVisible(true)}
+                    />
                   </>
                 ) : null}
                 <CallButton
@@ -155,12 +260,17 @@ export default function CallOverlay() {
             )}
           </View>
         </SafeAreaView>
+        <CallWhiteboard
+          callId={call.callId}
+          visible={isWhiteboardVisible}
+          onClose={() => setIsWhiteboardVisible(false)}
+        />
       </View>
     </Modal>
   );
 }
 
-function statusText(call: OngoingCall) {
+function statusText(call: OngoingCall, elapsedSeconds: number) {
   switch (call.status) {
     case "outgoing":
       return "Ringing…";
@@ -169,7 +279,7 @@ function statusText(call: OngoingCall) {
     case "connecting":
       return "Connecting…";
     case "active":
-      return "Connected";
+      return `${call.participantIds.length + 1} participants · ${formatElapsedTime(elapsedSeconds)}`;
     case "ended":
       return "Call ended";
     case "failed":
@@ -177,6 +287,12 @@ function statusText(call: OngoingCall) {
     default:
       return "";
   }
+}
+
+function formatElapsedTime(totalSeconds: number) {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
 function CallButton({
@@ -207,7 +323,7 @@ function CallButton({
       })}
     >
       <Feather name={icon} size={24} color={foregroundColor} />
-      <Text className="text-xs font-semibold" style={{ color: foregroundColor }}>
+      <Text style={[styles.buttonLabel, { color: foregroundColor }]}>
         {label}
       </Text>
     </Pressable>
@@ -217,5 +333,106 @@ function CallButton({
 const styles = StyleSheet.create({
   localVideo: {
     flex: 1,
+  },
+  header: {
+    alignItems: "center",
+    alignSelf: "center",
+    backgroundColor: "rgba(10, 15, 18, 0.72)",
+    borderRadius: 20,
+    marginTop: 12,
+    maxWidth: "84%",
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+  },
+  participantName: {
+    color: "#fff",
+    fontSize: 20,
+    fontWeight: "700",
+  },
+  callStatus: {
+    color: "rgba(255, 255, 255, 0.78)",
+    fontSize: 14,
+    marginTop: 3,
+  },
+  controlDock: {
+    alignItems: "center",
+    alignSelf: "center",
+    backgroundColor: "rgba(10, 15, 18, 0.82)",
+    borderColor: "rgba(255, 255, 255, 0.12)",
+    borderRadius: 28,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    marginHorizontal: 16,
+    marginBottom: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 12,
+    maxWidth: "94%",
+  },
+  buttonLabel: {
+    fontSize: 11,
+    fontWeight: "600",
+    marginTop: 6,
+    textAlign: "center",
+  },
+  videoGrid: {
+    ...StyleSheet.absoluteFillObject,
+    paddingTop: 100,
+    paddingBottom: 120,
+  },
+  videoGridContent: {
+    alignContent: "center",
+    alignItems: "stretch",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    paddingHorizontal: 8,
+  },
+  participantTile: {
+    backgroundColor: "#11181C",
+    borderColor: "rgba(255,255,255,0.2)",
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexBasis: "48%",
+    flexGrow: 1,
+    margin: 3,
+    overflow: "hidden",
+    aspectRatio: 0.75,
+  },
+  participantLabel: {
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(10,15,18,0.72)",
+    borderRadius: 10,
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "600",
+    margin: 8,
+    overflow: "hidden",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  minimizedCall: {
+    alignItems: "center",
+    alignSelf: "center",
+    backgroundColor: "#142126",
+    borderColor: "rgba(255,255,255,0.24)",
+    borderRadius: 24,
+    borderWidth: StyleSheet.hairlineWidth,
+    bottom: 20,
+    flexDirection: "row",
+    gap: 10,
+    left: 16,
+    maxWidth: "92%",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    position: "absolute",
+    right: 16,
+  },
+  minimizedCallText: {
+    color: "#fff",
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "600",
   },
 });

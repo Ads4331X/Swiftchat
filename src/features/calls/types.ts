@@ -16,6 +16,9 @@ export type OngoingCall = {
   participantName: string;
   direction: "incoming" | "outgoing";
   status: CallStatus;
+  connectedAt?: number;
+  participantIds: number[];
+  participantCount: number;
 };
 
 export type Call = {

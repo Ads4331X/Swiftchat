@@ -4,6 +4,12 @@ type CallType = "audio" | "video";
 
 type CallEventData = Record<string, unknown>;
 
+export type CallWhiteboardStroke = {
+  id: string;
+  color: string;
+  points: { x: number; y: number }[];
+};
+
 type CallAcknowledgment<T = Record<string, unknown>> = {
   success: boolean;
   data?: T;
@@ -86,13 +92,16 @@ export async function sendCallOffer({
 
 export async function sendCallAnswer({
   callId,
+  receiverId,
   answer,
 }: {
   callId: string;
+  receiverId: number;
   answer: RTCSessionDescriptionInit;
 }) {
   await emitCallEvent("call:answer", {
     callId,
+    receiverId,
     answer,
   });
 }
@@ -147,9 +156,10 @@ export async function initiateCall({
 }: {
   callType: CallType;
   conversationId: number;
-}): Promise<string> {
+}): Promise<{ callId: string; participantCount: number }> {
   const result = await emitCallEventWithAck<{
     callId: string;
+    participantCount: number;
   }>("call:initiate", {
     callType,
     conversationId,
@@ -159,7 +169,10 @@ export async function initiateCall({
     throw new Error("Server did not return a call ID");
   }
 
-  return result.callId;
+  return {
+    callId: result.callId,
+    participantCount: result.participantCount,
+  };
 }
 
 export async function acceptCall({ callId }: { callId: string }) {
@@ -180,13 +193,19 @@ export function onIncomingCall(
     conversationId: number;
     callerId: number;
     callType: CallType;
+    participantCount: number;
   }) => void,
 ) {
   return listenForSocketEvent("incoming-call", callback);
 }
 
 export function onCallAccepted(
-  callback: (data: { callId: string; userId: number }) => void,
+  callback: (data: {
+    callId: string;
+    userId: number;
+    peerIds: number[];
+    offerPeerIds: number[];
+  }) => void,
 ) {
   return listenForSocketEvent("call:accepted", callback);
 }
@@ -201,4 +220,40 @@ export function onCallEnded(
   callback: (data: { callId: string; userId: number }) => void,
 ) {
   return listenForSocketEvent("call:ended", callback);
+}
+
+export function onCallParticipantLeft(
+  callback: (data: { callId: string; userId: number }) => void,
+) {
+  return listenForSocketEvent("call:participant-left", callback);
+}
+
+export async function publishCallWhiteboardStroke({
+  callId,
+  stroke,
+}: {
+  callId: string;
+  stroke: CallWhiteboardStroke;
+}) {
+  await emitCallEvent("call:whiteboard:stroke", { callId, stroke });
+}
+
+export async function clearCallWhiteboard({ callId }: { callId: string }) {
+  await emitCallEvent("call:whiteboard:clear", { callId });
+}
+
+export function onCallWhiteboardStroke(
+  callback: (data: {
+    callId: string;
+    userId: number;
+    stroke: CallWhiteboardStroke;
+  }) => void,
+) {
+  return listenForSocketEvent("call:whiteboard:stroke", callback);
+}
+
+export function onCallWhiteboardCleared(
+  callback: (data: { callId: string; userId: number }) => void,
+) {
+  return listenForSocketEvent("call:whiteboard:clear", callback);
 }

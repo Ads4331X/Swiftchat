@@ -12,9 +12,9 @@ const audioConstraints: MediaTrackConstraints = {
 };
 
 const videoConstraints: MediaTrackConstraints = {
-  width: { ideal: 480, max: 640 },
-  height: { ideal: 360, max: 480 },
-  frameRate: { ideal: 20, max: 24 },
+  width: { ideal: 720, max: 1280 },
+  height: { ideal: 1280, max: 1280 },
+  frameRate: { ideal: 30, max: 30 },
   facingMode: "user",
 };
 
@@ -69,8 +69,12 @@ export function createPeerConnection({
 }: {
   participantId: number;
   callId: string;
-  onConnectionStateChange: (state: RTCPeerConnectionState) => void;
-  onRemoteStream: (stream: RNMediaStream) => void;
+  onConnectionStateChange: (
+    state: RTCPeerConnectionState,
+    iceState: RTCIceConnectionState,
+    participantId: number,
+  ) => void;
+  onRemoteStream: (participantId: number, stream: RNMediaStream) => void;
 }) {
   if (peerConnections.has(participantId)) {
     return peerConnections.get(participantId);
@@ -81,7 +85,27 @@ export function createPeerConnection({
   peerConnections.set(participantId, participantPeer);
 
   participantPeer.onconnectionstatechange = () => {
-    onConnectionStateChange(participantPeer.connectionState);
+    onConnectionStateChange(
+      participantPeer.connectionState,
+      participantPeer.iceConnectionState,
+      participantId,
+    );
+  };
+
+  participantPeer.oniceconnectionstatechange = () => {
+    onConnectionStateChange(
+      participantPeer.connectionState,
+      participantPeer.iceConnectionState,
+      participantId,
+    );
+  };
+
+  participantPeer.onicecandidateerror = (event) => {
+    console.warn("WebRTC ICE candidate error:", {
+      code: event.errorCode,
+      message: event.errorText,
+      server: event.url,
+    });
   };
 
   participantPeer.ontrack = (event) => {
@@ -89,7 +113,7 @@ export function createPeerConnection({
       const stream = handleRemoteTrack({
         event: event as unknown as { streams: readonly RNMediaStream[] },
       });
-      onRemoteStream(stream);
+      onRemoteStream(participantId, stream);
     } catch (err) {
       console.error("Failed to handle remote track:", err);
     }
@@ -105,6 +129,13 @@ export function createPeerConnection({
   };
 
   return participantPeer;
+}
+
+export function hasTurnCredentials() {
+  return Boolean(
+    process.env.EXPO_PUBLIC_TURN_USERNAME?.trim() &&
+      process.env.EXPO_PUBLIC_TURN_CREDENTIAL?.trim(),
+  );
 }
 
 function mediaErrorMessage(error: unknown) {
@@ -202,15 +233,14 @@ async function limitSenderBandwidth(peerConnection: RTCPeerConnection) {
 
       for (const encoding of parameters.encodings) {
         if (kind === "video") {
-          encoding.maxBitrate = 400_000;
-          encoding.maxFramerate = 20;
+          encoding.maxBitrate = 1_200_000;
+          encoding.maxFramerate = 30;
         } else {
-          encoding.maxBitrate = 48_000;
+          encoding.maxBitrate = 64_000;
         }
       }
 
-      parameters.degradationPreference =
-        kind === "video" ? "maintain-framerate" : "balanced";
+      parameters.degradationPreference = "balanced";
       await sender.setParameters(parameters);
     } catch (err) {
       console.warn("Could not set sender bandwidth limits:", err);
