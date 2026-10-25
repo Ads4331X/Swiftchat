@@ -79,7 +79,7 @@ export default function DisplayPickedAvatar() {
       }
 
       setLoading(false);
-      router.dismissTo("/settings/index" as any);
+      router.dismissTo("/settings");
     } catch (error) {
       console.log("UPLOAD ERROR:", error);
       setLoading(false);

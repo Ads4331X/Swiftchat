@@ -7,5 +7,11 @@ export default function CallVideo({
   muted: _muted,
   ...props
 }: CallVideoProps) {
-  return <RTCView streamURL={stream.toURL()} {...props} />;
+  return (
+    <RTCView
+      streamURL={stream.toURL()}
+      pointerEvents="none"
+      {...props}
+    />
+  );
 }

@@ -18,6 +18,7 @@ import type { MediaStream } from "react-native-webrtc";
 import {
   addIceCandidate,
   addLocalTracks,
+  addLocalTracksToPeerConnection,
   closePeerConnection,
   createAnswer,
   createOffer,
@@ -248,6 +249,30 @@ export async function createOutgoingOffer({
     if (ownsStream && stream) await stopLocalMedia({ stream });
     throw err;
   }
+}
+
+export async function renegotiateCallVideo({
+  callId,
+  participantIds,
+  localStream,
+}: {
+  callId: string;
+  participantIds: number[];
+  localStream: MediaStream;
+}) {
+  await Promise.all(
+    participantIds.map(async (participantId) => {
+      await addLocalTracksToPeerConnection({ participantId, stream: localStream });
+      const offer = await createOffer({ participantId });
+      if (!offer) return;
+
+      await sendCallOffer({
+        callId,
+        receiverId: participantId,
+        offer,
+      });
+    }),
+  );
 }
 
 export async function handleCallAnswer({

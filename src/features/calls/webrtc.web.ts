@@ -206,6 +206,113 @@ export async function getLocalMedia({
   }
 }
 
+export async function getLocalVideoMedia() {
+  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+    throw new Error(
+      "Camera access requires a secure context. Open the app on https:// or http://localhost.",
+    );
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: videoConstraints,
+    });
+    return stream as unknown as RNMediaStream;
+  } catch (err) {
+    console.error("Camera getUserMedia failed:", err);
+    throw new Error(mediaErrorMessage(err));
+  }
+}
+
+export async function switchCamera({ stream }: { stream: RNMediaStream }) {
+  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+    throw new Error(
+      "Camera access requires a secure context. Open the app on https:// or http://localhost.",
+    );
+  }
+
+  const localStream = stream as unknown as MediaStream;
+  const [currentTrack, ...duplicateTracks] = localStream.getVideoTracks();
+  if (!currentTrack) {
+    throw new Error("Enable your camera before switching cameras.");
+  }
+  if (duplicateTracks.length > 0) {
+    throw new Error("More than one local video track is active. Restart the call before switching cameras.");
+  }
+
+  const cameras = (await navigator.mediaDevices.enumerateDevices()).filter(
+    (device) => device.kind === "videoinput",
+  );
+  if (cameras.length < 2) {
+    throw new Error("This device does not have both front and rear cameras.");
+  }
+
+  const settings = currentTrack.getSettings();
+  const targetFacingMode =
+    settings.facingMode === "environment" ? "user" : "environment";
+  const constraints: MediaStreamConstraints = {
+    audio: false,
+    video: { facingMode: { exact: targetFacingMode } },
+  };
+
+  let replacementStream: MediaStream;
+  try {
+    replacementStream =
+      await navigator.mediaDevices.getUserMedia(constraints);
+  } catch (err) {
+    throw new Error(
+      `Could not access the other camera. ${mediaErrorMessage(err)}`,
+    );
+  }
+
+  const replacementTrack = replacementStream.getVideoTracks()[0];
+  if (!replacementTrack) {
+    replacementStream.getTracks().forEach((track) => track.stop());
+    throw new Error("The other camera did not provide a video track.");
+  }
+
+  replacementTrack.enabled = currentTrack.enabled;
+  const replacedSenders: RTCRtpSender[] = [];
+
+  try {
+    for (const peerConnection of peerConnections.values()) {
+      for (const sender of peerConnection.getSenders()) {
+        if (sender.track?.id !== currentTrack.id) continue;
+        await sender.replaceTrack(replacementTrack);
+        replacedSenders.push(sender);
+      }
+    }
+  } catch (err) {
+    const rollbackErrors: string[] = [];
+    for (const sender of replacedSenders) {
+      try {
+        await sender.replaceTrack(currentTrack);
+      } catch (rollbackError) {
+        rollbackErrors.push(
+          rollbackError instanceof Error
+            ? rollbackError.message
+            : "Could not restore a peer connection.",
+        );
+      }
+    }
+    replacementStream.getTracks().forEach((track) => track.stop());
+    const rollbackMessage =
+      rollbackErrors.length > 0
+        ? ` Previous camera restoration failed: ${rollbackErrors.join("; ")}`
+        : "";
+    throw new Error(
+      `Could not switch the camera without interrupting the call. ${
+        err instanceof Error ? err.message : "Please try again."
+      }${rollbackMessage}`,
+    );
+  }
+
+  localStream.removeTrack(currentTrack);
+  localStream.addTrack(replacementTrack);
+  currentTrack.stop();
+}
+
 export async function addLocalTracks({
   stream,
   peerConnection,
@@ -216,10 +323,31 @@ export async function addLocalTracks({
   const webStream = stream as unknown as MediaStream;
 
   for (const track of webStream.getTracks()) {
+    if (
+      peerConnection
+        .getSenders()
+        .some((sender) => sender.track?.id === track.id)
+    ) {
+      continue;
+    }
+
     peerConnection.addTrack(track, webStream);
   }
 
   await limitSenderBandwidth(peerConnection);
+}
+
+export async function addLocalTracksToPeerConnection({
+  participantId,
+  stream,
+}: {
+  participantId: number;
+  stream: RNMediaStream;
+}) {
+  const peerConnection = peerConnections.get(participantId);
+  if (!peerConnection) return;
+
+  await addLocalTracks({ stream, peerConnection });
 }
 
 async function limitSenderBandwidth(peerConnection: RTCPeerConnection) {
@@ -233,7 +361,7 @@ async function limitSenderBandwidth(peerConnection: RTCPeerConnection) {
 
       for (const encoding of parameters.encodings) {
         if (kind === "video") {
-          encoding.maxBitrate = 1_200_000;
+          delete encoding.maxBitrate;
           encoding.maxFramerate = 30;
         } else {
           encoding.maxBitrate = 64_000;

@@ -22,16 +22,20 @@ import {
   handleIncomingOffer,
   handleParticipantLeft as closeCallParticipant,
   prepareCall,
+  renegotiateCallVideo,
   rejectIncomingCall,
   setupCallListeners,
   startCall as signalStartCall,
 } from "./call-manager";
 import {
   closeAllPeerConnections,
+  getLocalVideoMedia,
   hasTurnCredentials,
+  requestPermissions,
   setCallSpeakerphone,
   stopCallAudio,
   stopLocalMedia,
+  switchCamera,
   toggleCamera,
   toggleMicrophone,
 } from "./webrtc";
@@ -59,13 +63,15 @@ type CallContextValue = {
   isMuted: boolean;
   isSpeakerOn: boolean;
   isCameraOn: boolean;
+  isCameraBusy: boolean;
   startCall: (args: StartCallArgs) => Promise<void>;
   acceptCall: () => Promise<void>;
   declineCall: () => Promise<void>;
   endCall: () => Promise<void>;
   toggleMute: () => void;
   toggleSpeaker: () => void;
-  toggleVideo: () => void;
+  toggleVideo: () => Promise<void>;
+  flipCamera: () => Promise<void>;
 };
 
 const CallContext = createContext<CallContextValue | null>(null);
@@ -79,9 +85,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeakerOn, setIsSpeakerOn] = useState(false);
   const [isCameraOn, setIsCameraOn] = useState(true);
+  const [isCameraBusy, setIsCameraBusy] = useState(false);
 
   const callRef = useRef<OngoingCall | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
+  const cameraOperationRef = useRef(false);
 
   const commitCall = useCallback((next: OngoingCall | null) => {
     callRef.current = next;
@@ -287,7 +295,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
       setIsMuted(false);
       setIsSpeakerOn(callType === "video");
-      setIsCameraOn(callType === "video");
+      setIsCameraOn(
+        stream.getVideoTracks().some((track) => track.enabled),
+      );
       commitLocalStream(stream);
       commitCall({
         callId,
@@ -319,6 +329,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     try {
       stream = await prepareCall({ callType: current.callType });
       commitLocalStream(stream);
+      setIsCameraOn(stream.getVideoTracks().some((track) => track.enabled));
       patchCall({ status: "connecting" });
       await acceptIncomingCall({ callId: current.callId });
     } catch (err) {
@@ -435,7 +446,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
       if (!current || current.callId !== data.callId) return;
 
-      patchCall({ status: "connecting" });
+      if (current.status !== "active") {
+        patchCall({ status: "connecting" });
+      }
 
       try {
         const { stream } = await handleIncomingOffer({
@@ -453,7 +466,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        if (!localStreamRef.current) commitLocalStream(stream);
+        if (!localStreamRef.current) {
+          commitLocalStream(stream);
+          setIsCameraOn(stream.getVideoTracks().some((track) => track.enabled));
+        }
       } catch (err) {
         closeCallParticipant({ participantId: data.senderId });
         setRemoteStreams((entries) =>
@@ -647,13 +663,110 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     }
   }, [isSpeakerOn]);
 
-  const toggleVideo = useCallback(() => {
+  const toggleVideo = useCallback(async () => {
     const stream = localStreamRef.current;
-
     if (!stream) return;
 
-    const enabled = toggleCamera({ stream });
-    setIsCameraOn(enabled);
+    if (stream.getVideoTracks().length > 0) {
+      const enabled = toggleCamera({ stream });
+      setIsCameraOn(enabled);
+      return;
+    }
+
+    const currentCall = callRef.current;
+    if (!currentCall || cameraOperationRef.current) return;
+
+    cameraOperationRef.current = true;
+    setIsCameraBusy(true);
+    let captureStream: MediaStream | null = null;
+    let videoTrack: ReturnType<MediaStream["getVideoTracks"]>[number] | undefined;
+    let addedToCallStream = false;
+
+    try {
+      const granted = await requestPermissions({ callType: "video" });
+      if (!granted) {
+        throw new Error("Camera permission denied.");
+      }
+      if (
+        callRef.current?.callId !== currentCall.callId ||
+        localStreamRef.current !== stream
+      ) {
+        return;
+      }
+
+      captureStream = await getLocalVideoMedia();
+      if (
+        callRef.current?.callId !== currentCall.callId ||
+        localStreamRef.current !== stream
+      ) {
+        captureStream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+
+      videoTrack = captureStream.getVideoTracks()[0];
+      if (!videoTrack) {
+        throw new Error("No camera is available on this device.");
+      }
+
+      for (const audioTrack of captureStream.getAudioTracks()) {
+        audioTrack.stop();
+      }
+
+      videoTrack.enabled = true;
+      stream.addTrack(videoTrack);
+      captureStream.removeTrack(videoTrack);
+      addedToCallStream = true;
+
+      await renegotiateCallVideo({
+        callId: currentCall.callId,
+        participantIds: currentCall.participantIds,
+        localStream: stream,
+      });
+      if (callRef.current?.callId !== currentCall.callId) {
+        await stopLocalMedia({ stream });
+        return;
+      }
+      setIsCameraOn(true);
+    } catch (err) {
+      if (!addedToCallStream && videoTrack) {
+        videoTrack.stop();
+      }
+      if (addedToCallStream) {
+        setIsCameraOn(true);
+      }
+      Toast.show({
+        type: "error",
+        text1: "Could not enable camera",
+        text2: err instanceof Error ? err.message : "Please try again.",
+      });
+    } finally {
+      cameraOperationRef.current = false;
+      setIsCameraBusy(false);
+    }
+  }, []);
+
+  const flipCamera = useCallback(async () => {
+    const stream = localStreamRef.current;
+    const callId = callRef.current?.callId;
+    if (!stream || !callId || cameraOperationRef.current) return;
+
+    cameraOperationRef.current = true;
+    setIsCameraBusy(true);
+    try {
+      await switchCamera({ stream });
+      if (callRef.current?.callId !== callId) {
+        await stopLocalMedia({ stream });
+      }
+    } catch (err) {
+      Toast.show({
+        type: "error",
+        text1: "Could not switch camera",
+        text2: err instanceof Error ? err.message : "Please try again.",
+      });
+    } finally {
+      cameraOperationRef.current = false;
+      setIsCameraBusy(false);
+    }
   }, []);
 
   const value = useMemo<CallContextValue>(
@@ -664,6 +777,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       isMuted,
       isSpeakerOn,
       isCameraOn,
+      isCameraBusy,
       startCall,
       acceptCall,
       declineCall,
@@ -671,6 +785,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       toggleMute,
       toggleSpeaker,
       toggleVideo,
+      flipCamera,
     }),
     [
       acceptCall,
@@ -678,6 +793,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       declineCall,
       finishCall,
       isCameraOn,
+      isCameraBusy,
       isMuted,
       isSpeakerOn,
       localStream,
@@ -686,6 +802,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       toggleMute,
       toggleSpeaker,
       toggleVideo,
+      flipCamera,
     ],
   );
 

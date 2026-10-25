@@ -1,6 +1,6 @@
 import Feather from "@expo/vector-icons/Feather";
 import { router } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Modal,
   Platform,
@@ -16,6 +16,7 @@ import { BRAND_COLOR } from "@/shared/theme/theme";
 
 import type { OngoingCall } from "../types";
 import { useCall } from "../use-call";
+import type { CallVideoProps } from "./call-video-types";
 import CallAudio from "./CallAudio";
 import CallVideo from "./CallVideo";
 import CallWhiteboard from "./CallWhiteboard";
@@ -28,21 +29,35 @@ export default function CallOverlay() {
     isMuted,
     isSpeakerOn,
     isCameraOn,
+    isCameraBusy,
     acceptCall,
     declineCall,
     endCall,
     toggleMute,
     toggleSpeaker,
     toggleVideo,
+    flipCamera,
   } = useCall();
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [isMinimized, setIsMinimized] = useState(false);
   const [isWhiteboardVisible, setIsWhiteboardVisible] = useState(false);
+  const pendingChatConversationId = useRef<number | null>(null);
 
   useEffect(() => {
     setIsMinimized(false);
     setIsWhiteboardVisible(false);
   }, [call?.callId]);
+
+  useEffect(() => {
+    if (!isMinimized || pendingChatConversationId.current === null) return;
+
+    const conversationId = pendingChatConversationId.current;
+    pendingChatConversationId.current = null;
+    router.navigate({
+      pathname: "/chat/[id]",
+      params: { id: String(conversationId) },
+    });
+  }, [isMinimized]);
 
   useEffect(() => {
     if (!call?.connectedAt) {
@@ -74,16 +89,24 @@ export default function CallOverlay() {
         <Text style={styles.minimizedCallText}>
           {call.participantName} · {statusText(call, elapsedSeconds)}
         </Text>
-        <Feather name="maximize-2" size={16} color="#fff" />
+        <Feather name="chevron-up" size={20} color="#fff" />
       </Pressable>
     );
   }
 
-  const isVideo = call.callType === "video";
+  const remoteVideoStreams = remoteStreams.filter(
+    ({ stream }) => stream.getVideoTracks().length > 0,
+  );
+  const hasLocalVideoTrack = Boolean(localStream?.getVideoTracks().length);
+  const isVideo =
+    call.callType === "video" ||
+    hasLocalVideoTrack ||
+    remoteVideoStreams.length > 0;
   const isIncoming = call.direction === "incoming" && call.status === "incoming";
-  const showLocalVideo = isVideo && localStream && isCameraOn;
-  const showRemoteVideo = isVideo && remoteStreams.length > 0;
-  const showVideoGrid = isVideo && remoteStreams.length > 1;
+  const showLocalVideo =
+    isVideo && hasLocalVideoTrack && localStream && isCameraOn;
+  const showRemoteVideo = isVideo && remoteVideoStreams.length > 0;
+  const showVideoGrid = isVideo && remoteVideoStreams.length > 1;
 
   return (
     <Modal
@@ -105,7 +128,7 @@ export default function CallOverlay() {
             contentContainerStyle={styles.videoGridContent}
             showsVerticalScrollIndicator={false}
           >
-            {remoteStreams.map(({ participantId, stream }) => (
+            {remoteVideoStreams.map(({ participantId, stream }) => (
               <View key={participantId} style={styles.participantTile}>
                 <CallVideo
                   stream={stream}
@@ -119,12 +142,13 @@ export default function CallOverlay() {
             ))}
             {showLocalVideo ? (
               <View style={styles.participantTile}>
-                <CallVideo
+                <DoubleTapCallVideo
                   stream={localStream}
                   style={StyleSheet.absoluteFill}
                   objectFit="cover"
                   mirror
                   muted
+                  onDoubleTap={flipCamera}
                 />
                 <Text style={styles.participantLabel}>You</Text>
               </View>
@@ -132,16 +156,18 @@ export default function CallOverlay() {
           </ScrollView>
         ) : showRemoteVideo ? (
           <CallVideo
-            stream={remoteStreams[0].stream}
+            stream={remoteVideoStreams[0].stream}
             style={StyleSheet.absoluteFill}
             objectFit="cover"
           />
         ) : showLocalVideo ? (
-          <CallVideo
+          <DoubleTapCallVideo
             stream={localStream}
             style={StyleSheet.absoluteFill}
             objectFit="cover"
             mirror
+            muted
+            onDoubleTap={flipCamera}
           />
         ) : (
           <View className="absolute inset-0 items-center justify-center">
@@ -161,7 +187,10 @@ export default function CallOverlay() {
           </View>
         )}
 
-        <SafeAreaView className="absolute inset-x-0 top-0" edges={["top"]}>
+        <SafeAreaView
+          className="absolute inset-x-0 top-0"
+          edges={["top", "left", "right"]}
+        >
           <View style={styles.header}>
             <Text
               numberOfLines={1}
@@ -173,17 +202,26 @@ export default function CallOverlay() {
               {statusText(call, elapsedSeconds)}
             </Text>
           </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Minimize call"
+            onPress={() => setIsMinimized(true)}
+            style={styles.minimizeButton}
+          >
+            <Feather name="chevron-down" size={24} color="#fff" />
+          </Pressable>
         </SafeAreaView>
 
         {showRemoteVideo && !showVideoGrid && showLocalVideo ? (
           <View className="absolute right-4 top-24 h-[148px] w-[104px] overflow-hidden rounded-[14px] border border-white/35 bg-[#111]">
-            <CallVideo
+            <DoubleTapCallVideo
               stream={localStream}
               style={styles.localVideo}
               objectFit="cover"
               mirror
               muted
               zOrder={1}
+              onDoubleTap={flipCamera}
             />
             <Text style={styles.participantLabel}>You</Text>
           </View>
@@ -214,33 +252,40 @@ export default function CallOverlay() {
                       icon={isMuted ? "mic-off" : "mic"}
                       label={isMuted ? "Unmute" : "Mute"}
                       active={isMuted}
+                      slashed={isMuted}
                       onPress={toggleMute}
                     />
                     {Platform.OS !== "web" ? (
                       <CallButton
-                        icon={isSpeakerOn ? "volume-2" : "volume-1"}
-                        label={isSpeakerOn ? "Speaker on" : "Speaker"}
+                        icon={isSpeakerOn ? "volume-2" : "volume-x"}
+                        label={isSpeakerOn ? "Speaker on" : "Speaker off"}
                         active={isSpeakerOn}
+                        slashed={!isSpeakerOn}
                         onPress={toggleSpeaker}
                       />
                     ) : null}
-                    {isVideo ? (
+                    <CallButton
+                      icon={isCameraOn ? "video" : "video-off"}
+                      label={isCameraOn ? "Camera off" : "Enable camera"}
+                      active={!isCameraOn}
+                      slashed={!isCameraOn}
+                      onPress={() => void toggleVideo()}
+                      disabled={isCameraBusy}
+                    />
+                    {hasLocalVideoTrack ? (
                       <CallButton
-                        icon={isCameraOn ? "video" : "video-off"}
-                        label={isCameraOn ? "Camera off" : "Camera on"}
-                        active={!isCameraOn}
-                        onPress={toggleVideo}
+                        icon="refresh-cw"
+                        label="Switch camera"
+                        onPress={() => void flipCamera()}
+                        disabled={isCameraBusy}
                       />
                     ) : null}
                     <CallButton
                       icon="message-circle"
                       label="Chat"
                       onPress={() => {
+                        pendingChatConversationId.current = call.conversationId;
                         setIsMinimized(true);
-                        router.push({
-                          pathname: "/chat/[id]",
-                          params: { id: String(call.conversationId) },
-                        });
                       }}
                     />
                     <CallButton
@@ -295,17 +340,59 @@ function formatElapsedTime(totalSeconds: number) {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
+function DoubleTapCallVideo({
+  onDoubleTap,
+  ...videoProps
+}: CallVideoProps & { onDoubleTap: () => void }) {
+  const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (tapTimer.current) clearTimeout(tapTimer.current);
+    },
+    [],
+  );
+
+  const handlePress = () => {
+    if (tapTimer.current) {
+      clearTimeout(tapTimer.current);
+      tapTimer.current = null;
+      onDoubleTap();
+      return;
+    }
+
+    tapTimer.current = setTimeout(() => {
+      tapTimer.current = null;
+    }, 300);
+  };
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Double tap to switch camera"
+      onPress={handlePress}
+      style={StyleSheet.absoluteFill}
+    >
+      <CallVideo {...videoProps} style={StyleSheet.absoluteFill} />
+    </Pressable>
+  );
+}
+
 function CallButton({
   icon,
   label,
   color,
   active = false,
+  slashed = false,
+  disabled = false,
   onPress,
 }: {
   icon: React.ComponentProps<typeof Feather>["name"];
   label: string;
   color?: string;
   active?: boolean;
+  slashed?: boolean;
+  disabled?: boolean;
   onPress: () => void;
 }) {
   const backgroundColor = color ?? (active ? "#fff" : "rgba(255,255,255,0.18)");
@@ -315,14 +402,24 @@ function CallButton({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{ disabled, selected: active }}
       onPress={onPress}
+      disabled={disabled}
       className="min-w-[76px] items-center justify-center gap-1.5 rounded-2xl px-3 py-3"
       style={({ pressed }) => ({
         backgroundColor,
-        opacity: pressed ? 0.7 : 1,
+        opacity: disabled ? 0.45 : pressed ? 0.7 : 1,
       })}
     >
-      <Feather name={icon} size={24} color={foregroundColor} />
+      <View style={styles.iconContainer}>
+        <Feather name={icon} size={24} color={foregroundColor} />
+        {slashed ? (
+          <View
+            pointerEvents="none"
+            style={[styles.iconSlash, { backgroundColor: foregroundColor }]}
+          />
+        ) : null}
+      </View>
       <Text style={[styles.buttonLabel, { color: foregroundColor }]}>
         {label}
       </Text>
@@ -331,6 +428,18 @@ function CallButton({
 }
 
 const styles = StyleSheet.create({
+  iconContainer: {
+    alignItems: "center",
+    height: 26,
+    justifyContent: "center",
+    width: 28,
+  },
+  iconSlash: {
+    height: 2,
+    position: "absolute",
+    transform: [{ rotate: "45deg" }],
+    width: 30,
+  },
   localVideo: {
     flex: 1,
   },
@@ -343,6 +452,18 @@ const styles = StyleSheet.create({
     maxWidth: "84%",
     paddingHorizontal: 20,
     paddingVertical: 10,
+  },
+  minimizeButton: {
+    alignItems: "center",
+    backgroundColor: "rgba(10, 15, 18, 0.72)",
+    borderRadius: 22,
+    height: 44,
+    justifyContent: "center",
+    left: 12,
+    marginTop: 10,
+    position: "absolute",
+    top: 0,
+    width: 44,
   },
   participantName: {
     color: "#fff",

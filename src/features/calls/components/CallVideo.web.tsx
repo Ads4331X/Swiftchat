@@ -39,7 +39,7 @@ export default function CallVideo({
   }, [muted, stream]);
 
   return (
-    <View style={style}>
+    <View pointerEvents="none" style={style}>
       {createElement("video", {
         ref: videoRef,
         autoPlay: true,

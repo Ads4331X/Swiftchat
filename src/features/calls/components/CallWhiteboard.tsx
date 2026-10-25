@@ -1,8 +1,10 @@
 import Feather from "@expo/vector-icons/Feather";
+import * as ScreenOrientation from "expo-screen-orientation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   PanResponder,
   Pressable,
+  Platform,
   StyleSheet,
   Text,
   View,
@@ -33,8 +35,64 @@ export default function CallWhiteboard({
 }) {
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [draft, setDraft] = useState<Stroke | null>(null);
+  const [isLandscape, setIsLandscape] = useState(false);
   const boardSize = useRef({ width: 1, height: 1 });
   const currentStroke = useRef<Stroke | null>(null);
+
+  useEffect(() => {
+    if (!visible || Platform.OS === "web") return;
+    setIsLandscape(false);
+
+    let cancelled = false;
+    let previousLock: ScreenOrientation.OrientationLock | undefined;
+    const orientationSubscription =
+      ScreenOrientation.addOrientationChangeListener(({ orientationInfo }) => {
+        setIsLandscape(
+          orientationInfo.orientation ===
+            ScreenOrientation.Orientation.LANDSCAPE_LEFT ||
+            orientationInfo.orientation ===
+              ScreenOrientation.Orientation.LANDSCAPE_RIGHT,
+        );
+      });
+
+    void (async () => {
+      try {
+        previousLock = await ScreenOrientation.getOrientationLockAsync();
+        if (!cancelled) {
+          await ScreenOrientation.lockAsync(
+            ScreenOrientation.OrientationLock.PORTRAIT_UP,
+          );
+        }
+      } catch (error) {
+        console.warn("Could not set whiteboard orientation:", error);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      orientationSubscription.remove();
+      if (previousLock !== undefined) {
+        void ScreenOrientation.lockAsync(previousLock).catch((error: unknown) => {
+          console.warn("Could not restore screen orientation:", error);
+        });
+      }
+    };
+  }, [visible]);
+
+  const toggleBoardOrientation = async () => {
+    if (Platform.OS === "web") return;
+
+    const nextOrientation = isLandscape
+      ? ScreenOrientation.OrientationLock.PORTRAIT_UP
+      : ScreenOrientation.OrientationLock.LANDSCAPE;
+
+    try {
+      await ScreenOrientation.lockAsync(nextOrientation);
+      setIsLandscape(!isLandscape);
+    } catch (error) {
+      console.warn("Could not rotate whiteboard:", error);
+    }
+  };
 
   useEffect(() => {
     const unsubscribeStroke = onCallWhiteboardStroke((data) => {
@@ -137,6 +195,23 @@ export default function CallWhiteboard({
     >
       <View style={styles.toolbar}>
         <Text style={styles.title}>Call whiteboard</Text>
+        {Platform.OS !== "web" ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={
+              isLandscape
+                ? "Switch to portrait board"
+                : "Switch to landscape board"
+            }
+            onPress={() => void toggleBoardOrientation()}
+            style={styles.toolbarButton}
+          >
+            <Feather name="rotate-cw" size={18} color="#17212B" />
+            <Text style={styles.toolbarButtonLabel}>
+              {isLandscape ? "Portrait" : "Landscape"}
+            </Text>
+          </Pressable>
+        ) : null}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Clear whiteboard"

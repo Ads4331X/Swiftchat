@@ -158,26 +158,22 @@ export function hasTurnCredentials() {
   );
 }
 
+function getVideoConstraints() {
+  return {
+    width: { ideal: 720, max: 1280 },
+    height: { ideal: 1280, max: 1280 },
+    frameRate: { ideal: 30, max: 30 },
+    facingMode: "user",
+  };
+}
+
 export async function getLocalMedia({
   callType,
 }: {
   callType: "audio" | "video";
 }) {
   try {
-    const videoConstraints =
-      Platform.OS === "ios"
-        ? {
-            width: { ideal: 540, max: 720 },
-            height: { ideal: 960, max: 960 },
-            frameRate: { ideal: 24, max: 24 },
-            facingMode: "user",
-          }
-        : {
-            width: { ideal: 360, max: 480 },
-            height: { ideal: 480, max: 480 },
-            frameRate: { ideal: 20, max: 20 },
-            facingMode: "user",
-          };
+    const videoConstraints = getVideoConstraints();
 
     type CallMediaConstraints = {
       audio: {
@@ -215,6 +211,86 @@ export async function getLocalMedia({
   }
 }
 
+export async function getLocalVideoMedia() {
+  try {
+    const { mediaDevices } = getWebRTC();
+    const stream = await mediaDevices.getUserMedia({
+      audio: false,
+      video: getVideoConstraints(),
+    });
+    return stream;
+  } catch (err) {
+    console.error("Camera getUserMedia failed:", err);
+    throw err instanceof Error ? err : new Error("Failed to access the camera");
+  }
+}
+
+export async function switchCamera({ stream }: { stream: MediaStream }) {
+  const videoTracks = stream.getVideoTracks();
+  const track = videoTracks[0];
+
+  if (!track) {
+    throw new Error("Enable your camera before switching cameras.");
+  }
+  if (videoTracks.length > 1) {
+    throw new Error(
+      "More than one local video track is active. Restart the call before switching cameras.",
+    );
+  }
+
+  let devices: unknown;
+  try {
+    devices = await getWebRTC().mediaDevices.enumerateDevices();
+  } catch (err) {
+    throw new Error(
+      `Could not check camera availability. ${
+        err instanceof Error ? err.message : "Please try again."
+      }`,
+    );
+  }
+
+  const cameraDevices = Array.isArray(devices)
+    ? devices.filter(
+        (device): device is { kind: string; facing: string } =>
+          typeof device === "object" &&
+          device !== null &&
+          "kind" in device &&
+          device.kind === "videoinput" &&
+          "facing" in device &&
+          typeof device.facing === "string",
+      )
+    : [];
+  const hasFrontCamera = cameraDevices.some(
+    (device) => device.facing === "front" || device.facing === "user",
+  );
+  const hasRearCamera = cameraDevices.some(
+    (device) => device.facing === "environment" || device.facing === "back",
+  );
+
+  if (!hasFrontCamera || !hasRearCamera) {
+    throw new Error("This device does not have both front and rear cameras.");
+  }
+
+  const settings = track.getSettings();
+  const targetFacingMode =
+    settings.facingMode === "environment" ? "user" : "environment";
+
+  try {
+    await track.applyConstraints({
+      facingMode: targetFacingMode,
+      ...(settings.width ? { width: settings.width } : {}),
+      ...(settings.height ? { height: settings.height } : {}),
+      ...(settings.frameRate ? { frameRate: settings.frameRate } : {}),
+    });
+  } catch (err) {
+    console.warn("Could not switch camera:", err);
+    const detail = err instanceof Error ? err.message : "Please try again.";
+    throw new Error(
+      `Could not switch to the other camera. This device may not have both front and rear cameras. ${detail}`,
+    );
+  }
+}
+
 export async function startCallAudio({
   callType,
 }: {
@@ -236,6 +312,7 @@ export async function startCallAudio({
       auto: true,
     });
     InCallManager.setKeepScreenOn(true);
+    setCallSpeakerphone(callType === "video");
   } catch (err) {
     console.warn("Could not configure call audio:", err);
   }
@@ -275,12 +352,32 @@ export async function addLocalTracks({
   stream: MediaStream;
   peerConnection: RTCPeerConnectionType;
 }) {
-  // loop through all the stream tracks
   for (const track of stream.getTracks()) {
-    peerConnection.addTrack(track, stream); // adds each track to the peerconnection (with its stream so the other side gets it)
+    if (
+      peerConnection
+        .getSenders()
+        .some((sender) => sender.track?.id === track.id)
+    ) {
+      continue;
+    }
+
+    peerConnection.addTrack(track, stream);
   }
 
   await limitSenderBandwidth(peerConnection);
+}
+
+export async function addLocalTracksToPeerConnection({
+  participantId,
+  stream,
+}: {
+  participantId: number;
+  stream: MediaStream;
+}) {
+  const peerConnection = peerConnections.get(participantId);
+  if (!peerConnection) return;
+
+  await addLocalTracks({ stream, peerConnection });
 }
 
 async function limitSenderBandwidth(
@@ -298,8 +395,8 @@ async function limitSenderBandwidth(
 
       for (const encoding of parameters.encodings) {
         if (kind === "video") {
-          encoding.maxBitrate = Platform.OS === "ios" ? 800_000 : 400_000;
-          encoding.maxFramerate = Platform.OS === "ios" ? 24 : 20;
+          delete encoding.maxBitrate;
+          encoding.maxFramerate = 30;
         } else {
           encoding.maxBitrate = 64_000;
         }

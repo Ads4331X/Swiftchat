@@ -6,10 +6,11 @@ import {
   ThemeProvider,
 } from "@react-navigation/native";
 
-import { View, Easing } from "react-native";
+import { View, Easing, Platform } from "react-native";
 
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import * as ScreenOrientation from "expo-screen-orientation";
 import * as SystemUI from "expo-system-ui";
 import "react-native-reanimated";
 
@@ -74,6 +75,16 @@ function AppNavigator() {
     } catch (err) {
       console.warn("Pending sync failed to start; continuing offline:", err);
     }
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+
+    void ScreenOrientation.lockAsync(
+      ScreenOrientation.OrientationLock.PORTRAIT_UP,
+    ).catch((error: unknown) => {
+      console.warn("Could not set the default screen orientation:", error);
+    });
   }, []);
 
   useEffect(() => {
