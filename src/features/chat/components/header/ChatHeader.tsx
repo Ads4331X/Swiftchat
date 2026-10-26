@@ -42,12 +42,27 @@ export default function ChatHeader({
   };
 
   const handleCall = (callType: "audio" | "video") => {
-    if (isGroup || userId == null) return;
+    const participantId = isGroup
+      ? Number(memberIds?.split(",")[0])
+      : userId;
+
+    if (
+      !Number.isSafeInteger(participantId) ||
+      participantId == null ||
+      participantId <= 0
+    ) {
+      Toast.show({
+        type: "error",
+        text1: "Could not start call",
+        text2: "This conversation has no valid participants.",
+      });
+      return;
+    }
 
     void startCall({
       callType,
       conversationId: Number(chatId),
-      participantId: userId,
+      participantId,
       participantName: username,
     }).catch((err) => {
       Toast.show({
@@ -154,23 +169,23 @@ export default function ChatHeader({
           <Feather name="search" size={22} color={BRAND_COLOR} />
         </Pressable>
 
-        {!isGroup ? (
-          <>
-            <Pressable
-              onPress={() => handleCall("audio")}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Feather name="phone" size={22} color={BRAND_COLOR} />
-            </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={isGroup ? "Start group audio call" : "Start audio call"}
+          onPress={() => handleCall("audio")}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Feather name="phone" size={22} color={BRAND_COLOR} />
+        </Pressable>
 
-            <Pressable
-              onPress={() => handleCall("video")}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Feather name="video" size={24} color={BRAND_COLOR} />
-            </Pressable>
-          </>
-        ) : null}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={isGroup ? "Start group video call" : "Start video call"}
+          onPress={() => handleCall("video")}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Feather name="video" size={24} color={BRAND_COLOR} />
+        </Pressable>
       </View>
     </View>
   );

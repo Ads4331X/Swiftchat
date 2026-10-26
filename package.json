@@ -11,6 +11,7 @@
     "web": "expo start --web",
     "reverse": "bash scripts/adb-reverse.sh",
     "lint": "expo lint",
+    "test": "jest",
     "postinstall": "patch-package"
   },
   "dependencies": {
@@ -92,11 +93,14 @@
     "tweetnacl-util": "^0.15.1"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/react": "~19.1.0",
     "babel-preset-expo": "~54.0.12",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~10.0.0",
+    "jest": "^30.5.2",
     "patch-package": "^8.0.1",
+    "ts-jest": "^29.4.15",
     "typescript": "~5.9.2"
   },
   "private": true

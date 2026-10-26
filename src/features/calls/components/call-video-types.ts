@@ -8,4 +8,5 @@ export type CallVideoProps = {
   muted?: boolean;
   objectFit?: "cover" | "contain";
   zOrder?: number;
+  onDimensionsChange?: (dimensions: { width: number; height: number }) => void;
 };

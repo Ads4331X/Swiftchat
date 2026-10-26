@@ -8,6 +8,7 @@ export default function CallVideo({
   mirror,
   muted,
   objectFit = "cover",
+  onDimensionsChange,
 }: CallVideoProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -24,19 +25,31 @@ export default function CallVideo({
         console.warn("Remote video playback was blocked:", err);
       });
     };
+    const reportDimensions = () => {
+      if (video.videoWidth > 0 && video.videoHeight > 0) {
+        onDimensionsChange?.({
+          width: video.videoWidth,
+          height: video.videoHeight,
+        });
+      }
+    };
 
     tryPlay();
     video.addEventListener("loadedmetadata", tryPlay);
+    video.addEventListener("loadedmetadata", reportDimensions);
+    video.addEventListener("resize", reportDimensions);
 
     const retryOnGesture = () => tryPlay();
     document.addEventListener("pointerdown", retryOnGesture, { once: true });
 
     return () => {
       video.removeEventListener("loadedmetadata", tryPlay);
+      video.removeEventListener("loadedmetadata", reportDimensions);
+      video.removeEventListener("resize", reportDimensions);
       document.removeEventListener("pointerdown", retryOnGesture);
       video.srcObject = null;
     };
-  }, [muted, stream]);
+  }, [muted, onDimensionsChange, stream]);
 
   return (
     <View pointerEvents="none" style={style}>

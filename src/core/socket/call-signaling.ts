@@ -1,6 +1,11 @@
 import { connectSocket, getSocket, listenForSocketEvent } from "./client";
 
 type CallType = "audio" | "video";
+export type ParticipantCallStatus =
+  | "ringing"
+  | "accepted"
+  | "declined"
+  | "disconnected";
 
 type CallEventData = Record<string, unknown>;
 
@@ -156,10 +161,15 @@ export async function initiateCall({
 }: {
   callType: CallType;
   conversationId: number;
-}): Promise<{ callId: string; participantCount: number }> {
+}): Promise<{
+  callId: string;
+  participantCount: number;
+  participantStatuses: Record<number, ParticipantCallStatus>;
+}> {
   const result = await emitCallEventWithAck<{
     callId: string;
     participantCount: number;
+    participantStatuses: Record<number, ParticipantCallStatus>;
   }>("call:initiate", {
     callType,
     conversationId,
@@ -172,6 +182,7 @@ export async function initiateCall({
   return {
     callId: result.callId,
     participantCount: result.participantCount,
+    participantStatuses: result.participantStatuses,
   };
 }
 
@@ -187,6 +198,46 @@ export async function endCall({ callId }: { callId: string }) {
   await emitCallEvent("call:end", { callId });
 }
 
+export async function sendCallCameraState({
+  callId,
+  cameraOn,
+}: {
+  callId: string;
+  cameraOn: boolean;
+}) {
+  await emitCallEvent("call:camera-state", { callId, cameraOn });
+}
+
+export async function sendCallScreenShareState({
+  callId,
+  isSharing,
+}: {
+  callId: string;
+  isSharing: boolean;
+}) {
+  await emitCallEvent("call:screen-share-state", { callId, isSharing });
+}
+
+export function onCallCameraState(
+  callback: (data: {
+    callId: string;
+    userId: number;
+    cameraOn: boolean;
+  }) => void,
+) {
+  return listenForSocketEvent("call:camera-state", callback);
+}
+
+export function onCallScreenShareState(
+  callback: (data: {
+    callId: string;
+    userId: number;
+    isSharing: boolean;
+  }) => void,
+) {
+  return listenForSocketEvent("call:screen-share-state", callback);
+}
+
 export function onIncomingCall(
   callback: (data: {
     callId: string;
@@ -194,6 +245,7 @@ export function onIncomingCall(
     callerId: number;
     callType: CallType;
     participantCount: number;
+    participantStatuses: Record<number, ParticipantCallStatus>;
   }) => void,
 ) {
   return listenForSocketEvent("incoming-call", callback);
@@ -226,6 +278,16 @@ export function onCallParticipantLeft(
   callback: (data: { callId: string; userId: number }) => void,
 ) {
   return listenForSocketEvent("call:participant-left", callback);
+}
+
+export function onCallParticipantStatus(
+  callback: (data: {
+    callId: string;
+    userId: number;
+    status: ParticipantCallStatus;
+  }) => void,
+) {
+  return listenForSocketEvent("call:participant-status", callback);
 }
 
 export async function publishCallWhiteboardStroke({

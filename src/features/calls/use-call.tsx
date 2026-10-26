@@ -12,6 +12,10 @@ import type { MediaStream } from "react-native-webrtc";
 
 import { api } from "@/core/api";
 import { getUser } from "@/core/db";
+import {
+  sendCallCameraState,
+  sendCallScreenShareState,
+} from "@/core/socket/call-signaling";
 
 import {
   acceptIncomingCall,
@@ -30,16 +34,28 @@ import {
 import {
   closeAllPeerConnections,
   getLocalVideoMedia,
+  getPeerConnections,
   hasTurnCredentials,
+  isScreenSharing as checkScreenSharing,
   requestPermissions,
   setCallSpeakerphone,
+  startScreenShare,
   stopCallAudio,
   stopLocalMedia,
+  stopScreenShare,
   switchCamera,
   toggleCamera,
   toggleMicrophone,
 } from "./webrtc";
-import type { CallType, OngoingCall } from "./types";
+import {
+  collectDiagnostics,
+  formatDiagnostics,
+} from "./call-diagnostics";
+import type {
+  CallType,
+  OngoingCall,
+  ParticipantCallStatus,
+} from "./types";
 
 type IncomingCallData = {
   callId: string;
@@ -47,6 +63,7 @@ type IncomingCallData = {
   callerId: number;
   callType: CallType;
   participantCount: number;
+  participantStatuses: Record<number, ParticipantCallStatus>;
 };
 
 type StartCallArgs = {
@@ -60,10 +77,13 @@ type CallContextValue = {
   call: OngoingCall | null;
   localStream: MediaStream | null;
   remoteStreams: { participantId: number; stream: MediaStream }[];
+  remoteCameraStates: Record<number, boolean>;
+  remoteScreenShareStates: Record<number, boolean>;
   isMuted: boolean;
   isSpeakerOn: boolean;
   isCameraOn: boolean;
   isCameraBusy: boolean;
+  isSharingScreen: boolean;
   startCall: (args: StartCallArgs) => Promise<void>;
   acceptCall: () => Promise<void>;
   declineCall: () => Promise<void>;
@@ -72,6 +92,8 @@ type CallContextValue = {
   toggleSpeaker: () => void;
   toggleVideo: () => Promise<void>;
   flipCamera: () => Promise<void>;
+  toggleScreenShare: () => Promise<void>;
+  getStats: () => Promise<string>;
 };
 
 const CallContext = createContext<CallContextValue | null>(null);
@@ -82,10 +104,17 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [remoteStreams, setRemoteStreams] = useState<
     { participantId: number; stream: MediaStream }[]
   >([]);
+  const [remoteCameraStates, setRemoteCameraStates] = useState<
+    Record<number, boolean>
+  >({});
+  const [remoteScreenShareStates, setRemoteScreenShareStates] = useState<
+    Record<number, boolean>
+  >({});
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeakerOn, setIsSpeakerOn] = useState(false);
   const [isCameraOn, setIsCameraOn] = useState(true);
   const [isCameraBusy, setIsCameraBusy] = useState(false);
+  const [isSharingScreen, setIsSharingScreen] = useState(false);
 
   const callRef = useRef<OngoingCall | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -125,9 +154,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       void stopCallAudio();
       commitLocalStream(null);
       setRemoteStreams([]);
+      setRemoteCameraStates({});
+      setRemoteScreenShareStates({});
       setIsMuted(false);
       setIsSpeakerOn(false);
       setIsCameraOn(true);
+      setIsSharingScreen(false);
       commitCall(null);
     }
   }, [commitCall, commitLocalStream]);
@@ -161,6 +193,26 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
+  const publishCameraState = useCallback(
+    (callId: string, cameraOn: boolean) => {
+      void sendCallCameraState({ callId, cameraOn }).catch((err: unknown) => {
+        console.warn("Could not publish camera state:", err);
+      });
+    },
+    [],
+  );
+
+  const publishScreenShareState = useCallback(
+    (callId: string, isSharing: boolean) => {
+      void sendCallScreenShareState({ callId, isSharing }).catch(
+        (err: unknown) => {
+          console.warn("Could not publish screen-share state:", err);
+        },
+      );
+    },
+    [],
+  );
+
   const handleConnectionStateChange = useCallback(
     (
       state: RTCPeerConnectionState,
@@ -189,6 +241,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           setRemoteStreams((entries) =>
             entries.filter((entry) => entry.participantId !== participantId),
           );
+          setRemoteScreenShareStates((states) => {
+            const next = { ...states };
+            delete next[participantId];
+            return next;
+          });
           patchCall({
             participantIds: current.participantIds.filter(
               (id) => id !== participantId,
@@ -233,6 +290,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       setIsMuted(false);
       setIsSpeakerOn(data.callType === "video");
       setIsCameraOn(data.callType === "video");
+      setRemoteCameraStates({
+        [data.callerId]: data.callType === "video",
+      });
+      setRemoteScreenShareStates({});
       commitCall({
         callId: data.callId,
         callType: data.callType,
@@ -243,6 +304,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         status: "incoming",
         participantIds: [data.callerId],
         participantCount: data.participantCount,
+        participantStatuses: data.participantStatuses,
       });
 
       void (async () => {
@@ -283,10 +345,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       const stream = await prepareCall({ callType });
       let callId: string;
       let participantCount: number;
+      let participantStatuses: Record<number, ParticipantCallStatus>;
       try {
         const result = await signalStartCall({ callType, conversationId });
         callId = result.callId;
         participantCount = result.participantCount;
+        participantStatuses = result.participantStatuses;
       } catch (err) {
         await stopLocalMedia({ stream });
         await stopCallAudio();
@@ -295,9 +359,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
       setIsMuted(false);
       setIsSpeakerOn(callType === "video");
-      setIsCameraOn(
-        stream.getVideoTracks().some((track) => track.enabled),
-      );
+      setRemoteScreenShareStates({});
+      const cameraOn = stream.getVideoTracks().some((track) => track.enabled);
+      setIsCameraOn(cameraOn);
       commitLocalStream(stream);
       commitCall({
         callId,
@@ -309,9 +373,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         status: "outgoing",
         participantIds: [],
         participantCount,
+        participantStatuses,
       });
+      publishCameraState(callId, cameraOn);
     },
-    [commitCall, commitLocalStream],
+    [commitCall, commitLocalStream, publishCameraState],
   );
 
   const acceptCall = useCallback(async () => {
@@ -332,6 +398,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       setIsCameraOn(stream.getVideoTracks().some((track) => track.enabled));
       patchCall({ status: "connecting" });
       await acceptIncomingCall({ callId: current.callId });
+      publishCameraState(
+        current.callId,
+        stream.getVideoTracks().some((track) => track.enabled),
+      );
     } catch (err) {
       if (stream) {
         await stopLocalMedia({ stream });
@@ -348,6 +418,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   }, [
     commitLocalStream,
     patchCall,
+    publishCameraState,
     resetCall,
   ]);
 
@@ -386,6 +457,13 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       patchCall({
         status: current.status === "active" ? "active" : "connecting",
         participantIds: [...participantIds],
+        participantStatuses: {
+          ...current.participantStatuses,
+          [userId]: "accepted",
+          ...Object.fromEntries(
+            peerIds.map((peerId) => [peerId, "accepted" as const]),
+          ),
+        },
       });
 
       const stream = localStreamRef.current;
@@ -475,6 +553,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         setRemoteStreams((entries) =>
           entries.filter((entry) => entry.participantId !== data.senderId),
         );
+        setRemoteScreenShareStates((states) => {
+          const next = { ...states };
+          delete next[data.senderId];
+          return next;
+        });
         patchCall({
           participantIds: callRef.current?.participantIds.filter(
             (id) => id !== data.senderId,
@@ -547,17 +630,64 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
+  const handleCameraState = useCallback(
+    (data: { callId: string; userId: number; cameraOn: boolean }) => {
+      if (
+        callRef.current?.callId !== data.callId ||
+        !Number.isSafeInteger(data.userId) ||
+        typeof data.cameraOn !== "boolean"
+      ) {
+        return;
+      }
+
+      setRemoteCameraStates((current) => ({
+        ...current,
+        [data.userId]: data.cameraOn,
+      }));
+    },
+    [],
+  );
+
+  const handleScreenShareState = useCallback(
+    (data: { callId: string; userId: number; isSharing: boolean }) => {
+      if (
+        callRef.current?.callId !== data.callId ||
+        !Number.isSafeInteger(data.userId) ||
+        typeof data.isSharing !== "boolean"
+      ) {
+        return;
+      }
+
+      setRemoteScreenShareStates((current) => ({
+        ...current,
+        [data.userId]: data.isSharing,
+      }));
+    },
+    [],
+  );
+
   const handleDeclined = useCallback(
     ({ callId, userId }: { callId: string; userId: number }) => {
       const current = callRef.current;
 
       if (!current || current.callId !== callId) return;
+      patchCall({
+        participantStatuses: {
+          ...current.participantStatuses,
+          [userId]: "declined",
+        },
+      });
 
       if (current.participantCount > 2) {
         closeCallParticipant({ participantId: userId });
         setRemoteStreams((entries) =>
           entries.filter((entry) => entry.participantId !== userId),
         );
+        setRemoteScreenShareStates((states) => {
+          const next = { ...states };
+          delete next[userId];
+          return next;
+        });
         patchCall({
           participantIds: current.participantIds.filter(
             (participantId) => participantId !== userId,
@@ -596,14 +726,52 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const handleParticipantLeft = useCallback(
     ({ callId, userId }: { callId: string; userId: number }) => {
       if (callRef.current?.callId !== callId) return;
+      patchCall({
+        participantStatuses: {
+          ...callRef.current.participantStatuses,
+          [userId]: "disconnected",
+        },
+      });
       closeCallParticipant({ participantId: userId });
       setRemoteStreams((entries) =>
         entries.filter((entry) => entry.participantId !== userId),
       );
+      setRemoteScreenShareStates((states) => {
+        const next = { ...states };
+        delete next[userId];
+        return next;
+      });
       patchCall({
         participantIds: callRef.current.participantIds.filter(
           (participantId) => participantId !== userId,
         ),
+      });
+    },
+    [patchCall],
+  );
+
+  const handleParticipantStatus = useCallback(
+    (data: {
+      callId: string;
+      userId: number;
+      status: ParticipantCallStatus;
+    }) => {
+      const current = callRef.current;
+      if (
+        !current ||
+        current.callId !== data.callId ||
+        !Number.isSafeInteger(data.userId)
+      ) {
+        return;
+      }
+      patchCall({
+        participantStatuses: {
+          ...current.participantStatuses,
+          [data.userId]: data.status,
+        },
+        ...(data.status === "accepted" && current.status === "outgoing"
+          ? { status: "connecting" }
+          : {}),
       });
     },
     [patchCall],
@@ -616,16 +784,22 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       onDeclined: handleDeclined,
       onEnded: handleEnded,
       onParticipantLeft: handleParticipantLeft,
+      onParticipantStatus: handleParticipantStatus,
       onOffer: handleOffer,
       onAnswer: handleAnswer,
       onIce: handleIce,
+      onCameraState: handleCameraState,
+      onScreenShareState: handleScreenShareState,
     });
   }, [
     handleAccepted,
     handleAnswer,
+    handleCameraState,
+    handleScreenShareState,
     handleDeclined,
     handleEnded,
     handleParticipantLeft,
+    handleParticipantStatus,
     handleIce,
     handleIncoming,
     handleOffer,
@@ -665,11 +839,13 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
   const toggleVideo = useCallback(async () => {
     const stream = localStreamRef.current;
-    if (!stream) return;
+    if (!stream || checkScreenSharing()) return;
 
     if (stream.getVideoTracks().length > 0) {
       const enabled = toggleCamera({ stream });
       setIsCameraOn(enabled);
+      const currentCall = callRef.current;
+      if (currentCall) publishCameraState(currentCall.callId, enabled);
       return;
     }
 
@@ -727,6 +903,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       setIsCameraOn(true);
+      publishCameraState(currentCall.callId, true);
     } catch (err) {
       if (!addedToCallStream && videoTrack) {
         videoTrack.stop();
@@ -743,12 +920,19 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       cameraOperationRef.current = false;
       setIsCameraBusy(false);
     }
-  }, []);
+  }, [publishCameraState]);
 
   const flipCamera = useCallback(async () => {
     const stream = localStreamRef.current;
     const callId = callRef.current?.callId;
-    if (!stream || !callId || cameraOperationRef.current) return;
+    if (
+      !stream ||
+      !callId ||
+      cameraOperationRef.current ||
+      checkScreenSharing()
+    ) {
+      return;
+    }
 
     cameraOperationRef.current = true;
     setIsCameraBusy(true);
@@ -769,15 +953,86 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const toggleScreenShare = useCallback(async () => {
+    const stream = localStreamRef.current;
+    const currentCall = callRef.current;
+    if (!stream || !currentCall || cameraOperationRef.current) return;
+
+    cameraOperationRef.current = true;
+    setIsCameraBusy(true);
+    try {
+      if (checkScreenSharing()) {
+        await stopScreenShare({ localStream: stream });
+        setIsSharingScreen(false);
+        const cameraOn = stream.getVideoTracks().some((track) => track.enabled);
+        setIsCameraOn(cameraOn);
+        publishCameraState(currentCall.callId, cameraOn);
+        publishScreenShareState(currentCall.callId, false);
+      } else {
+        await startScreenShare({
+          localStream: stream,
+          onStopped: () => {
+            if (callRef.current?.callId !== currentCall.callId) return;
+            setIsSharingScreen(false);
+            const cameraOn = stream.getVideoTracks().some((track) => track.enabled);
+            setIsCameraOn(cameraOn);
+            publishCameraState(currentCall.callId, cameraOn);
+            publishScreenShareState(currentCall.callId, false);
+          },
+        });
+        if (callRef.current?.callId !== currentCall.callId) {
+          await stopScreenShare({ localStream: stream });
+          return;
+        }
+        if (!checkScreenSharing()) {
+          setIsSharingScreen(false);
+          return;
+        }
+        setIsSharingScreen(true);
+        publishScreenShareState(currentCall.callId, true);
+      }
+    } catch (err) {
+      setIsSharingScreen(checkScreenSharing());
+      if (
+        err instanceof Error &&
+        err.name === "AbortError"
+      ) {
+        return;
+      }
+      Toast.show({
+        type: "error",
+        text1: "Screen sharing",
+        text2: err instanceof Error ? err.message : "Please try again.",
+      });
+    } finally {
+      cameraOperationRef.current = false;
+      setIsCameraBusy(false);
+    }
+  }, [publishCameraState, publishScreenShareState]);
+
+  const getStats = useCallback(async () => {
+    const connections = getPeerConnections();
+    if (connections.size === 0) return "No active peer connections.";
+    const diag = await collectDiagnostics(
+      connections as unknown as Map<number, RTCPeerConnection>,
+    );
+    const text = formatDiagnostics(diag);
+    console.log(text);
+    return text;
+  }, []);
+
   const value = useMemo<CallContextValue>(
     () => ({
       call,
       localStream,
       remoteStreams,
+      remoteCameraStates,
+      remoteScreenShareStates,
       isMuted,
       isSpeakerOn,
       isCameraOn,
       isCameraBusy,
+      isSharingScreen,
       startCall,
       acceptCall,
       declineCall,
@@ -786,20 +1041,27 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       toggleSpeaker,
       toggleVideo,
       flipCamera,
+      toggleScreenShare,
+      getStats,
     }),
     [
       acceptCall,
       call,
       declineCall,
       finishCall,
+      getStats,
       isCameraOn,
       isCameraBusy,
       isMuted,
+      isSharingScreen,
       isSpeakerOn,
       localStream,
       remoteStreams,
+      remoteCameraStates,
+      remoteScreenShareStates,
       startCall,
       toggleMute,
+      toggleScreenShare,
       toggleSpeaker,
       toggleVideo,
       flipCamera,

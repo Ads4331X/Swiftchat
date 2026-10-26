@@ -1,7 +1,13 @@
 import Feather from "@expo/vector-icons/Feather";
+import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import Toast from "react-native-toast-message";
 import {
+  AccessibilityInfo,
+  ActivityIndicator,
+  Animated,
+  InteractionManager,
   Modal,
   Platform,
   Pressable,
@@ -9,27 +15,135 @@ import {
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 
 import { BRAND_COLOR } from "@/shared/theme/theme";
+import Avatar from "@/features/profile/components/Avatar";
+import { getConversationOtherUser, getUser } from "@/core/db";
+import { getCurrentUserId } from "@/features/auth/services";
 
 import type { OngoingCall } from "../types";
 import { useCall } from "../use-call";
 import type { CallVideoProps } from "./call-video-types";
 import CallAudio from "./CallAudio";
 import CallVideo from "./CallVideo";
+import CallScreenShareViewer from "./CallScreenShareViewer";
 import CallWhiteboard from "./CallWhiteboard";
 
+type CallAvatarData = {
+  username: string;
+  avatarUrl?: string | null;
+  localAvatarUrlPath: string | null;
+};
+
+// --- Pulse animation for ringing/connecting states ---
+
+function PulseRing({ color = BRAND_COLOR }: { color?: string }) {
+  const scale = useRef(new Animated.Value(1)).current;
+  const opacity = useRef(new Animated.Value(0.5)).current;
+  const [reduceMotion, setReduceMotion] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
+      setReduceMotion(preference.matches);
+      const onPreferenceChange = (event: MediaQueryListEvent) =>
+        setReduceMotion(event.matches);
+      preference.addEventListener("change", onPreferenceChange);
+      return () =>
+        preference.removeEventListener("change", onPreferenceChange);
+    }
+
+    void AccessibilityInfo.isReduceMotionEnabled()
+      .then((enabled) => {
+        if (active) setReduceMotion(enabled);
+      })
+      .catch((error: unknown) => {
+        console.warn("Could not read reduced-motion preference:", error);
+      });
+    const subscription = AccessibilityInfo.addEventListener(
+      "reduceMotionChanged",
+      setReduceMotion,
+    );
+    return () => {
+      active = false;
+      subscription.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (reduceMotion) {
+      scale.setValue(1);
+      opacity.setValue(0.45);
+      return;
+    }
+
+    const animation = Animated.loop(
+      Animated.parallel([
+        Animated.sequence([
+          Animated.timing(scale, {
+            toValue: 1.6,
+            duration: 1200,
+            useNativeDriver: true,
+          }),
+          Animated.timing(scale, {
+            toValue: 1,
+            duration: 0,
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.sequence([
+          Animated.timing(opacity, {
+            toValue: 0,
+            duration: 1200,
+            useNativeDriver: true,
+          }),
+          Animated.timing(opacity, {
+            toValue: 0.5,
+            duration: 0,
+            useNativeDriver: true,
+          }),
+        ]),
+      ]),
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [opacity, reduceMotion, scale]);
+
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[StyleSheet.absoluteFill, {
+        borderRadius: 80,
+        borderWidth: 2.5,
+        borderColor: color,
+        transform: [{ scale }],
+        opacity,
+      }]}
+    />
+  );
+}
+
 export default function CallOverlay() {
+  const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
   const {
     call,
     localStream,
     remoteStreams,
+    remoteCameraStates,
+    remoteScreenShareStates,
     isMuted,
     isSpeakerOn,
     isCameraOn,
     isCameraBusy,
+    isSharingScreen,
     acceptCall,
     declineCall,
     endCall,
@@ -37,27 +151,167 @@ export default function CallOverlay() {
     toggleSpeaker,
     toggleVideo,
     flipCamera,
+    toggleScreenShare,
   } = useCall();
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [isMinimized, setIsMinimized] = useState(false);
   const [isWhiteboardVisible, setIsWhiteboardVisible] = useState(false);
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const [moreControlsVisible, setMoreControlsVisible] = useState(false);
+  const [controlActivity, setControlActivity] = useState(0);
   const pendingChatConversationId = useRef<number | null>(null);
+  const controlsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [localAvatar, setLocalAvatar] = useState<CallAvatarData>({
+    username: "You",
+    localAvatarUrlPath: null,
+  });
+  const [participantAvatars, setParticipantAvatars] = useState<
+    Record<number, CallAvatarData>
+  >({});
+  const callId = call?.callId;
+  const conversationId = call?.conversationId;
+  const callParticipantId = call?.participantId;
+  const callParticipantName = call?.participantName;
+
+  const revealControls = useCallback(() => {
+    setControlsVisible(true);
+    setControlActivity((activity) => activity + 1);
+  }, []);
+
+  const toggleCallControls = useCallback(() => {
+    setControlsVisible((visible) => !visible);
+    setMoreControlsVisible(false);
+    setControlActivity((activity) => activity + 1);
+  }, []);
 
   useEffect(() => {
     setIsMinimized(false);
     setIsWhiteboardVisible(false);
+    setControlsVisible(true);
+    setMoreControlsVisible(false);
   }, [call?.callId]);
+
+  useEffect(() => {
+    if (call?.status !== "active") {
+      setControlsVisible(true);
+      setMoreControlsVisible(false);
+    }
+  }, [call?.status]);
+
+  useEffect(() => {
+    if (
+      call?.status !== "active" ||
+      !controlsVisible ||
+      moreControlsVisible ||
+      isWhiteboardVisible
+    ) {
+      if (controlsTimer.current) clearTimeout(controlsTimer.current);
+      controlsTimer.current = null;
+      return;
+    }
+
+    controlsTimer.current = setTimeout(() => {
+      setControlsVisible(false);
+      controlsTimer.current = null;
+    }, 4000);
+
+    return () => {
+      if (controlsTimer.current) clearTimeout(controlsTimer.current);
+      controlsTimer.current = null;
+    };
+  }, [
+    call?.callId,
+    call?.status,
+    controlsVisible,
+    controlActivity,
+    isWhiteboardVisible,
+    moreControlsVisible,
+  ]);
 
   useEffect(() => {
     if (!isMinimized || pendingChatConversationId.current === null) return;
 
     const conversationId = pendingChatConversationId.current;
     pendingChatConversationId.current = null;
-    router.navigate({
-      pathname: "/chat/[id]",
-      params: { id: String(conversationId) },
+    const task = InteractionManager.runAfterInteractions(() => {
+      router.navigate({
+        pathname: "/chat/[id]",
+        params: { id: String(conversationId) },
+      });
     });
+    return () => task.cancel();
   }, [isMinimized]);
+
+  useEffect(() => {
+    if (
+      callId == null ||
+      conversationId == null ||
+      callParticipantId == null
+    ) {
+      setParticipantAvatars({});
+      return;
+    }
+
+    let cancelled = false;
+    const participantIds = new Set([
+      callParticipantId,
+      ...remoteStreams.map(({ participantId }) => participantId),
+    ]);
+
+    void (async () => {
+      const currentUserId = await getCurrentUserId();
+      const currentUser = currentUserId ? await getUser(currentUserId) : null;
+      if (cancelled) return;
+      setLocalAvatar({
+        username: currentUser?.username ?? "You",
+        avatarUrl: currentUser?.avatarUrl,
+        localAvatarUrlPath: currentUser?.localAvatarUrlPath ?? null,
+      });
+
+      const conversationUser = await getConversationOtherUser(
+        conversationId,
+      );
+      const entries = await Promise.all(
+        [...participantIds].map(async (participantId) => {
+          const user = await getUser(participantId);
+          const cachedAvatar =
+            participantId === conversationUser?.otherUserId
+              ? conversationUser.otherAvatarUrl
+              : null;
+          return [
+            participantId,
+            {
+              username:
+                user?.username ??
+                (participantId === callParticipantId
+                  ? (callParticipantName ?? "Participant")
+                  : `Participant ${participantId}`),
+              avatarUrl: user?.avatarUrl ?? cachedAvatar,
+              localAvatarUrlPath: user?.localAvatarUrlPath ?? null,
+            },
+          ] as const;
+        }),
+      );
+
+      const avatars: Record<number, CallAvatarData> = {};
+      for (const [participantId, avatar] of entries) {
+        avatars[participantId] = avatar;
+      }
+      if (!cancelled) setParticipantAvatars(avatars);
+    })().catch((error: unknown) => {
+      console.warn("Could not load call participant avatars:", error);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    callId,
+    conversationId,
+    callParticipantId,
+    callParticipantName,
+    remoteStreams,
+  ]);
 
   useEffect(() => {
     if (!call?.connectedAt) {
@@ -77,25 +331,67 @@ export default function CallOverlay() {
 
   if (!call) return null;
 
+  // --- Minimized call bar ---
   if (isMinimized) {
     return (
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Return to call"
         onPress={() => setIsMinimized(false)}
-        style={styles.minimizedCall}
+        className="absolute right-3 flex-row items-center rounded-full border border-white/20 bg-[#142126] px-2 py-2"
+        style={[
+          styles.minimizedCall,
+          { top: Math.max(insets.top + 10, 16) },
+        ]}
       >
-        <Feather name={call.callType === "video" ? "video" : "phone"} size={18} color="#fff" />
-        <Text style={styles.minimizedCallText}>
-          {call.participantName} · {statusText(call, elapsedSeconds)}
+        <View
+          style={[
+            styles.minimizedIconWrap,
+            call.status === "active" && styles.minimizedIconActive,
+          ]}
+        >
+          <Feather
+            name={call.callType === "video" ? "video" : "phone"}
+            size={14}
+            color="#fff"
+          />
+        </View>
+        <Text
+          className="flex-1 text-sm font-semibold text-white"
+          numberOfLines={1}
+        >
+          {call.participantCount > 2 ? "Group call" : call.participantName}
         </Text>
-        <Feather name="chevron-up" size={20} color="#fff" />
+        <Text className="text-[13px] font-medium text-white/70">
+          {call.status === "active"
+            ? formatElapsedTime(elapsedSeconds)
+            : statusLabel(call)}
+        </Text>
+        <Feather name="chevron-up" size={18} color="rgba(255,255,255,0.7)" />
       </Pressable>
     );
   }
 
   const remoteVideoStreams = remoteStreams.filter(
-    ({ stream }) => stream.getVideoTracks().length > 0,
+    ({ participantId, stream }) =>
+      stream.getVideoTracks().length > 0 &&
+      (remoteCameraStates[participantId] !== false ||
+        remoteScreenShareStates[participantId] === true),
+  );
+  const remoteScreenShare = remoteStreams.find(
+    ({ participantId, stream }) =>
+      remoteScreenShareStates[participantId] === true &&
+      stream.getVideoTracks().length > 0,
+  );
+  const screenShareStream = remoteScreenShare?.stream ??
+    (isSharingScreen ? localStream : null);
+  const screenSharerName = remoteScreenShare
+    ? (participantAvatars[remoteScreenShare.participantId]?.username ??
+      `Participant ${remoteScreenShare.participantId}`)
+    : "You";
+  const sharingParticipantId = remoteScreenShare?.participantId;
+  const screenShareParticipantStreams = remoteVideoStreams.filter(
+    ({ participantId }) => participantId !== sharingParticipantId,
   );
   const hasLocalVideoTrack = Boolean(localStream?.getVideoTracks().length);
   const isVideo =
@@ -103,10 +399,54 @@ export default function CallOverlay() {
     hasLocalVideoTrack ||
     remoteVideoStreams.length > 0;
   const isIncoming = call.direction === "incoming" && call.status === "incoming";
+  const isRinging =
+    call.status === "outgoing" ||
+    call.status === "incoming" ||
+    call.status === "connecting";
   const showLocalVideo =
-    isVideo && hasLocalVideoTrack && localStream && isCameraOn;
+    isVideo && hasLocalVideoTrack && localStream && isCameraOn && !isSharingScreen;
+  const showScreenShareParticipants =
+    screenShareParticipantStreams.length > 0 ||
+    (showLocalVideo && !isSharingScreen);
   const showRemoteVideo = isVideo && remoteVideoStreams.length > 0;
   const showVideoGrid = isVideo && remoteVideoStreams.length > 1;
+  const displayedRemoteVideoIds = new Set<number>();
+  if (screenShareStream) {
+    if (remoteScreenShare) {
+      displayedRemoteVideoIds.add(remoteScreenShare.participantId);
+    }
+    screenShareParticipantStreams.forEach(({ participantId }) => {
+      displayedRemoteVideoIds.add(participantId);
+    });
+  } else if (showVideoGrid) {
+    remoteVideoStreams.forEach(({ participantId }) => {
+      displayedRemoteVideoIds.add(participantId);
+    });
+  } else if (showRemoteVideo) {
+    displayedRemoteVideoIds.add(remoteVideoStreams[0].participantId);
+  }
+  const audioOnlyRemoteStreams = remoteStreams.filter(
+    ({ participantId }) => !displayedRemoteVideoIds.has(participantId),
+  );
+  const primaryRemoteTrack = remoteVideoStreams[0]?.stream.getVideoTracks()[0];
+  const primaryRemoteSettings = primaryRemoteTrack?.getSettings();
+  const primaryRemoteAspectRatio =
+    primaryRemoteSettings?.width && primaryRemoteSettings.height
+      ? primaryRemoteSettings.width / primaryRemoteSettings.height
+      : 16 / 9;
+
+  const displayName =
+    call.participantCount > 2 ? "Group Call" : call.participantName;
+  const primaryAvatar =
+    remoteStreams.length > 0
+      ? (participantAvatars[remoteStreams[0].participantId] ?? {
+          username: call.participantName,
+          localAvatarUrlPath: null,
+        })
+      : (participantAvatars[call.participantId] ?? {
+          username: call.participantName,
+          localAvatarUrlPath: null,
+        });
 
   return (
     <Modal
@@ -117,194 +457,458 @@ export default function CallOverlay() {
         if (isIncoming) {
           void declineCall();
         } else {
-          void endCall();
+          setIsMinimized(true);
         }
       }}
     >
-      <View className="flex-1 bg-[#0B0F10]">
-        {showVideoGrid ? (
+      <View className="flex-1 bg-[#0B0F10]" style={styles.container}>
+        {/* Background: gradient for non-video states, dark for video */}
+        {!screenShareStream && !showRemoteVideo && !showVideoGrid ? (
+          <LinearGradient
+            colors={["#0D1B2A", "#1B2838", "#0D1B2A"]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={StyleSheet.absoluteFill}
+          />
+        ) : null}
+
+        {audioOnlyRemoteStreams.map(({ participantId, stream }) => (
+          <CallAudio key={`audio-${participantId}`} stream={stream} />
+        ))}
+
+        {screenShareStream ? (
+          <>
+            <View
+              style={[
+                styles.screenShareStage,
+                showScreenShareParticipants && styles.screenShareStageWithRail,
+              ]}
+            >
+              <CallScreenShareViewer
+                stream={screenShareStream}
+                sharerName={screenSharerName}
+                isLocal={!remoteScreenShare}
+              />
+            </View>
+            {showScreenShareParticipants ? (
+              <ScrollView
+                horizontal
+                style={styles.screenShareParticipantRail}
+                contentContainerStyle={styles.screenShareParticipantContent}
+                showsHorizontalScrollIndicator={false}
+              >
+                {screenShareParticipantStreams.map(
+                  ({ participantId, stream }) => {
+                    const avatar = participantAvatars[participantId];
+                    return (
+                      <View
+                        key={participantId}
+                        style={styles.screenShareParticipantTile}
+                      >
+                        <RemoteCallVideo
+                          stream={stream}
+                          style={StyleSheet.absoluteFill}
+                        />
+                        <View style={styles.tileBadge}>
+                          <Text style={styles.tileBadgeName} numberOfLines={1}>
+                            {avatar?.username ?? `Participant ${participantId}`}
+                          </Text>
+                        </View>
+                      </View>
+                    );
+                  },
+                )}
+                {showLocalVideo && !isSharingScreen ? (
+                  <View style={styles.screenShareParticipantTile}>
+                    <CallVideo
+                      stream={localStream}
+                      style={StyleSheet.absoluteFill}
+                      objectFit="contain"
+                      mirror
+                      muted
+                    />
+                    <View style={styles.tileBadge}>
+                      <Text style={styles.tileBadgeName}>You</Text>
+                    </View>
+                  </View>
+                ) : null}
+              </ScrollView>
+            ) : null}
+          </>
+        ) : null}
+
+        {/* === Video grid (group calls, multiple remotes) === */}
+        {!screenShareStream && showVideoGrid ? (
           <ScrollView
             style={styles.videoGrid}
             contentContainerStyle={styles.videoGridContent}
             showsVerticalScrollIndicator={false}
           >
-            {remoteVideoStreams.map(({ participantId, stream }) => (
-              <View key={participantId} style={styles.participantTile}>
-                <CallVideo
-                  stream={stream}
-                  style={StyleSheet.absoluteFill}
-                  objectFit="cover"
-                />
-                <Text style={styles.participantLabel}>
-                  Participant {participantId}
-                </Text>
-              </View>
-            ))}
-            {showLocalVideo ? (
-              <View style={styles.participantTile}>
-                <DoubleTapCallVideo
-                  stream={localStream}
-                  style={StyleSheet.absoluteFill}
-                  objectFit="cover"
-                  mirror
-                  muted
-                  onDoubleTap={flipCamera}
-                />
-                <Text style={styles.participantLabel}>You</Text>
+            {remoteVideoStreams.map(({ participantId, stream }) => {
+              const avatar = participantAvatars[participantId];
+              return (
+                <View
+                  key={participantId}
+                  style={[
+                    styles.participantTile,
+                    windowWidth >= 1100 && styles.wideParticipantTile,
+                  ]}
+                >
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Show or hide call controls"
+                    onPress={toggleCallControls}
+                    style={StyleSheet.absoluteFill}
+                  >
+                    <RemoteCallVideo
+                      key={`${participantId}-${remoteCameraStates[participantId] ?? true}`}
+                      stream={stream}
+                      style={StyleSheet.absoluteFill}
+                    />
+                  </Pressable>
+                  {/* Participant info badge */}
+                  <View style={styles.tileBadge}>
+                    <Text style={styles.tileBadgeName} numberOfLines={1}>
+                      {avatar?.username ?? `Participant ${participantId}`}
+                    </Text>
+                  </View>
+                </View>
+              );
+            })}
+            {localStream && isVideo ? (
+              <View
+                style={[
+                  styles.participantTile,
+                  windowWidth >= 1100 && styles.wideParticipantTile,
+                ]}
+              >
+                {showLocalVideo ? (
+                  <DoubleTapCallVideo
+                    stream={localStream}
+                    style={StyleSheet.absoluteFill}
+                    objectFit="cover"
+                    mirror
+                    muted
+                    onDoubleTap={flipCamera}
+                  />
+                ) : (
+                  <View style={styles.gridAvatar}>
+                    <CallAvatar participant={localAvatar} size={72} />
+                  </View>
+                )}
+                <View style={styles.tileBadge}>
+                  <Text style={styles.tileBadgeName}>You</Text>
+                </View>
               </View>
             ) : null}
           </ScrollView>
-        ) : showRemoteVideo ? (
-          <CallVideo
-            stream={remoteVideoStreams[0].stream}
-            style={StyleSheet.absoluteFill}
-            objectFit="cover"
-          />
-        ) : showLocalVideo ? (
-          <DoubleTapCallVideo
-            stream={localStream}
-            style={StyleSheet.absoluteFill}
-            objectFit="cover"
-            mirror
-            muted
-            onDoubleTap={flipCamera}
-          />
-        ) : (
-          <View className="absolute inset-0 items-center justify-center">
-            {remoteStreams.map(({ participantId, stream }) => (
-              <CallAudio key={participantId} stream={stream} />
-            ))}
-            <View
-              className="h-28 w-28 items-center justify-center rounded-full"
-              style={{ backgroundColor: BRAND_COLOR + "33" }}
+        ) : !screenShareStream && showRemoteVideo ? (
+          /* === Single remote video (1-to-1) === */
+          <View style={styles.singleVideoStage}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Show or hide call controls"
+              onPress={toggleCallControls}
+              style={[
+                styles.singleVideoFrame,
+                { aspectRatio: primaryRemoteAspectRatio },
+              ]}
             >
-              <Feather
-                name={isVideo ? "video" : "phone"}
-                size={46}
-                color="#fff"
+              <RemoteCallVideo
+                key={`${remoteVideoStreams[0].participantId}-${remoteCameraStates[remoteVideoStreams[0].participantId] ?? true}`}
+                stream={remoteVideoStreams[0].stream}
+                style={StyleSheet.absoluteFill}
+              />
+            </Pressable>
+            <LinearGradient
+              colors={["rgba(0,0,0,0.45)", "transparent", "transparent", "rgba(0,0,0,0.55)"]}
+              locations={[0, 0.2, 0.7, 1]}
+              style={StyleSheet.absoluteFill}
+              pointerEvents="none"
+            />
+          </View>
+        ) : !screenShareStream && showLocalVideo && !showRemoteVideo ? (
+          /* === Local camera preview when no remote video is available === */
+          <View style={styles.singleVideoStage}>
+            <View style={styles.singleVideoFrame}>
+              <DoubleTapCallVideo
+                stream={localStream}
+                key={`${localStream.id}-${isCameraOn ? "on" : "off"}`}
+                style={StyleSheet.absoluteFill}
+                objectFit="cover"
+                mirror
+                muted
+                onDoubleTap={flipCamera}
+                onSingleTap={toggleCallControls}
               />
             </View>
+            <LinearGradient
+              colors={["rgba(0,0,0,0.4)", "transparent", "transparent", "rgba(0,0,0,0.5)"]}
+              locations={[0, 0.25, 0.7, 1]}
+              style={StyleSheet.absoluteFill}
+              pointerEvents="none"
+            />
           </View>
-        )}
-
-        <SafeAreaView
-          className="absolute inset-x-0 top-0"
-          edges={["top", "left", "right"]}
-        >
-          <View style={styles.header}>
-            <Text
-              numberOfLines={1}
-              style={styles.participantName}
-            >
-              {call.participantCount > 2 ? "Group call" : call.participantName}
-            </Text>
-            <Text style={styles.callStatus}>
-              {statusText(call, elapsedSeconds)}
-            </Text>
-          </View>
+        ) : !screenShareStream ? (
+          /* === Audio-only / no-video fallback === */
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Minimize call"
-            onPress={() => setIsMinimized(true)}
-            style={styles.minimizeButton}
+            accessibilityLabel="Show or hide call controls"
+            onPress={toggleCallControls}
+            style={styles.audioCenter}
           >
-            <Feather name="chevron-down" size={24} color="#fff" />
+            <View style={styles.ringingAvatarWrap}>
+              {isRinging ? <PulseRing /> : null}
+              <CallAvatar participant={primaryAvatar} size={120} />
+            </View>
+            <Text style={styles.audioName} numberOfLines={1}>
+              {displayName}
+            </Text>
+            <Text style={styles.audioStatus}>
+              {statusText(call, elapsedSeconds)}
+            </Text>
           </Pressable>
-        </SafeAreaView>
+        ) : null}
 
-        {showRemoteVideo && !showVideoGrid && showLocalVideo ? (
-          <View className="absolute right-4 top-24 h-[148px] w-[104px] overflow-hidden rounded-[14px] border border-white/35 bg-[#111]">
-            <DoubleTapCallVideo
-              stream={localStream}
-              style={styles.localVideo}
-              objectFit="cover"
-              mirror
-              muted
-              zOrder={1}
-              onDoubleTap={flipCamera}
-            />
-            <Text style={styles.participantLabel}>You</Text>
+        {/* === Header info bar === */}
+        {controlsVisible || call.status !== "active" ? (
+          <SafeAreaView
+            style={styles.headerSafeArea}
+            edges={["top", "left", "right"]}
+            pointerEvents="box-none"
+          >
+            <View style={styles.headerRow} pointerEvents="box-none">
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Minimize call"
+                onPress={() => setIsMinimized(true)}
+                style={styles.headerButton}
+              >
+                <Feather name="chevron-down" size={22} color="#fff" />
+              </Pressable>
+              <View style={styles.headerCenter} pointerEvents="none">
+                {(showRemoteVideo || showVideoGrid) ? (
+                  <>
+                    <Text numberOfLines={1} style={styles.headerName}>
+                      {displayName}
+                    </Text>
+                    <View style={styles.statusRow}>
+                      <View
+                        style={[
+                          styles.statusDot,
+                          call.status === "active"
+                            ? styles.statusDotActive
+                            : styles.statusDotConnecting,
+                        ]}
+                      />
+                      <Text style={styles.headerStatus}>
+                        {statusText(call, elapsedSeconds)}
+                      </Text>
+                    </View>
+                  </>
+                ) : null}
+              </View>
+              <View style={styles.headerButton} />
+            </View>
+          </SafeAreaView>
+        ) : null}
+
+        {/* === Local video PiP (1-to-1 with remote) === */}
+        {localStream &&
+        isVideo &&
+        !screenShareStream &&
+        !showVideoGrid &&
+        showRemoteVideo ? (
+          <View style={styles.localVideoPreview}>
+            {showLocalVideo ? (
+              <DoubleTapCallVideo
+                stream={localStream}
+                key={`${localStream.id}-${isCameraOn ? "on" : "off"}`}
+                style={styles.localVideo}
+                objectFit="cover"
+                mirror
+                muted
+                zOrder={1}
+                onDoubleTap={flipCamera}
+                onSingleTap={toggleCallControls}
+              />
+            ) : (
+              <View style={styles.localAvatarPreview}>
+                <CallAvatar participant={localAvatar} size={52} />
+              </View>
+            )}
           </View>
         ) : null}
 
-        <SafeAreaView className="absolute inset-x-0 bottom-0" edges={["bottom"]}>
-          <View style={styles.controlDock}>
-            {isIncoming ? (
-              <>
-                <CallButton
-                  icon="phone-off"
-                  label="Decline"
-                  color="#EF4444"
+        {/* === Controls dock === */}
+        {controlsVisible || isIncoming || call.status !== "active" ? (
+        <SafeAreaView
+          style={styles.controlsSafeArea}
+          edges={["bottom"]}
+          pointerEvents="box-none"
+        >
+          {isIncoming ? (
+            /* Incoming call: decline + accept */
+            <View style={styles.incomingControls}>
+              <View style={styles.incomingButtonWrap}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Decline call"
                   onPress={() => void declineCall()}
-                />
-                <CallButton
-                  icon="phone"
-                  label="Accept"
-                  color="#22C55E"
+                  className="h-14 w-14 items-center justify-center rounded-full"
+                  style={({ pressed }) => [
+                    styles.controlCircle,
+                    styles.declineButton,
+                    pressed && styles.controlPressed,
+                  ]}
+                >
+                  <Feather name="phone-off" size={26} color="#fff" />
+                </Pressable>
+                <Text style={styles.controlLabel}>Decline</Text>
+              </View>
+              <View style={styles.incomingButtonWrap}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Accept call"
                   onPress={() => void acceptCall()}
-                />
-              </>
-            ) : (
-              <>
+                  className="h-14 w-14 items-center justify-center rounded-full"
+                  style={({ pressed }) => [
+                    styles.controlCircle,
+                    styles.acceptButton,
+                    pressed && styles.controlPressed,
+                  ]}
+                >
+                  <Feather name="phone" size={26} color="#fff" />
+                </Pressable>
+                <Text style={styles.controlLabel}>Accept</Text>
+              </View>
+            </View>
+          ) : (
+            /* Active / outgoing call controls */
+            <View style={styles.controlDock}>
+              <View style={styles.controlRow}>
                 {localStream ? (
                   <>
-                    <CallButton
+                    <ControlButton
                       icon={isMuted ? "mic-off" : "mic"}
                       label={isMuted ? "Unmute" : "Mute"}
                       active={isMuted}
-                      slashed={isMuted}
                       onPress={toggleMute}
+                      onInteract={revealControls}
                     />
                     {Platform.OS !== "web" ? (
-                      <CallButton
-                        icon={isSpeakerOn ? "volume-2" : "volume-x"}
-                        label={isSpeakerOn ? "Speaker on" : "Speaker off"}
+                      <ControlButton
+                        icon={isSpeakerOn ? "volume-2" : "volume-1"}
+                        label="Speaker"
                         active={isSpeakerOn}
-                        slashed={!isSpeakerOn}
                         onPress={toggleSpeaker}
+                        onInteract={revealControls}
                       />
                     ) : null}
-                    <CallButton
+                    {Platform.OS === "web" || Platform.OS === "android" ? (
+                      <ControlButton
+                        icon={isSharingScreen ? "monitor" : "airplay"}
+                        label={
+                          isSharingScreen
+                            ? "Stop share"
+                            : hasLocalVideoTrack
+                              ? "Share"
+                              : "Turn camera on to share"
+                        }
+                        active={isSharingScreen}
+                        onPress={() => void toggleScreenShare()}
+                        disabled={
+                          isCameraBusy || (!hasLocalVideoTrack && !isSharingScreen)
+                        }
+                        loading={isCameraBusy}
+                        onInteract={revealControls}
+                      />
+                    ) : null}
+                    <ControlButton
                       icon={isCameraOn ? "video" : "video-off"}
-                      label={isCameraOn ? "Camera off" : "Enable camera"}
+                      label="Camera"
                       active={!isCameraOn}
-                      slashed={!isCameraOn}
                       onPress={() => void toggleVideo()}
-                      disabled={isCameraBusy}
+                      disabled={isCameraBusy || isSharingScreen}
+                      loading={isCameraBusy}
+                      onInteract={revealControls}
                     />
-                    {hasLocalVideoTrack ? (
-                      <CallButton
-                        icon="refresh-cw"
-                        label="Switch camera"
-                        onPress={() => void flipCamera()}
-                        disabled={isCameraBusy}
-                      />
-                    ) : null}
-                    <CallButton
-                      icon="message-circle"
-                      label="Chat"
-                      onPress={() => {
-                        pendingChatConversationId.current = call.conversationId;
-                        setIsMinimized(true);
-                      }}
-                    />
-                    <CallButton
-                      icon="edit-3"
-                      label="Board"
-                      onPress={() => setIsWhiteboardVisible(true)}
+                    <ControlButton
+                      icon={moreControlsVisible ? "x" : "more-horizontal"}
+                      label={moreControlsVisible ? "Less" : "More"}
+                      active={moreControlsVisible}
+                      onPress={() =>
+                        setMoreControlsVisible((visible) => !visible)
+                      }
+                      onInteract={revealControls}
                     />
                   </>
                 ) : null}
-                <CallButton
-                  icon="phone-off"
-                  label="End"
-                  color="#EF4444"
-                  onPress={() => void endCall()}
-                />
-              </>
-            )}
-          </View>
+              </View>
+              {moreControlsVisible && localStream ? (
+                <View style={styles.secondaryControlRow}>
+                  {hasLocalVideoTrack && !isSharingScreen ? (
+                    <ControlButton
+                      icon="refresh-cw"
+                      label="Flip"
+                      onPress={() => {
+                        setMoreControlsVisible(false);
+                        void flipCamera();
+                      }}
+                      disabled={isCameraBusy}
+                      loading={isCameraBusy}
+                      onInteract={revealControls}
+                    />
+                  ) : null}
+                  <ControlButton
+                    icon="message-circle"
+                    label="Chat"
+                    onPress={() => {
+                      if (
+                        !Number.isSafeInteger(call.conversationId) ||
+                        call.conversationId <= 0
+                      ) {
+                        Toast.show({
+                          type: "error",
+                          text1: "Chat is unavailable",
+                          text2: "This call has no valid conversation.",
+                        });
+                        return;
+                      }
+                      pendingChatConversationId.current = call.conversationId;
+                      setIsMinimized(true);
+                    }}
+                    onInteract={revealControls}
+                  />
+                  <ControlButton
+                    icon="edit-3"
+                    label="Board"
+                    onPress={() => {
+                      setMoreControlsVisible(false);
+                      setIsWhiteboardVisible(true);
+                    }}
+                    onInteract={revealControls}
+                  />
+                </View>
+              ) : null}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="End call"
+                onPress={() => void endCall()}
+                className="min-h-14 flex-row items-center justify-center gap-2 rounded-full bg-red-600 px-8 py-3.5"
+                style={({ pressed }) => [
+                  styles.endCallButton,
+                  pressed && styles.controlPressed,
+                ]}
+              >
+                <Feather name="phone-off" size={22} color="#fff" />
+                <Text className="text-[15px] font-bold text-white">End</Text>
+              </Pressable>
+            </View>
+          )}
         </SafeAreaView>
+          ) : null}
+
         <CallWhiteboard
           callId={call.callId}
           visible={isWhiteboardVisible}
@@ -315,6 +919,27 @@ export default function CallOverlay() {
   );
 }
 
+// --- Helpers ---
+
+function statusLabel(call: OngoingCall) {
+  switch (call.status) {
+    case "outgoing":
+      return "Ringing";
+    case "incoming":
+      return "Incoming";
+    case "connecting":
+      return "Connecting";
+    case "active":
+      return "Active";
+    case "ended":
+      return "Ended";
+    case "failed":
+      return "Failed";
+    default:
+      return "";
+  }
+}
+
 function statusText(call: OngoingCall, elapsedSeconds: number) {
   switch (call.status) {
     case "outgoing":
@@ -323,8 +948,12 @@ function statusText(call: OngoingCall, elapsedSeconds: number) {
       return `Incoming ${call.callType} call`;
     case "connecting":
       return "Connecting…";
-    case "active":
-      return `${call.participantIds.length + 1} participants · ${formatElapsedTime(elapsedSeconds)}`;
+    case "active": {
+      const count = call.participantIds.length + 1;
+      return count > 2
+        ? `${count} participants · ${formatElapsedTime(elapsedSeconds)}`
+        : formatElapsedTime(elapsedSeconds);
+    }
     case "ended":
       return "Call ended";
     case "failed":
@@ -340,10 +969,46 @@ function formatElapsedTime(totalSeconds: number) {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
+function RemoteCallVideo({
+  stream,
+  style,
+}: Pick<CallVideoProps, "stream" | "style">) {
+  const track = stream.getVideoTracks()[0];
+  const settings = track?.getSettings();
+  const [objectFit, setObjectFit] = useState<"cover" | "contain">(
+    settings?.width &&
+      settings.height &&
+      settings.width >= settings.height * 1.25
+      ? "contain"
+      : "cover",
+  );
+  const onDimensionsChange = useCallback(
+    ({ width, height }: { width: number; height: number }) => {
+      if (width >= height * 1.25) setObjectFit("contain");
+    },
+    [],
+  );
+
+  return (
+    <CallVideo
+      stream={stream}
+      style={style}
+      objectFit={objectFit}
+      onDimensionsChange={onDimensionsChange}
+    />
+  );
+}
+
+// --- Reusable sub-components ---
+
 function DoubleTapCallVideo({
   onDoubleTap,
+  onSingleTap,
   ...videoProps
-}: CallVideoProps & { onDoubleTap: () => void }) {
+}: CallVideoProps & {
+  onDoubleTap: () => void;
+  onSingleTap?: () => void;
+}) {
   const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(
@@ -363,13 +1028,14 @@ function DoubleTapCallVideo({
 
     tapTimer.current = setTimeout(() => {
       tapTimer.current = null;
+      onSingleTap?.();
     }, 300);
   };
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel="Double tap to switch camera"
+      accessibilityLabel="Tap to show controls; double tap to switch camera"
       onPress={handlePress}
       style={StyleSheet.absoluteFill}
     >
@@ -378,129 +1044,372 @@ function DoubleTapCallVideo({
   );
 }
 
-function CallButton({
+function CallAvatar({
+  participant,
+  size,
+}: {
+  participant: CallAvatarData;
+  size: number;
+}) {
+  return (
+    <Avatar
+      username={participant.username}
+      avatarUrl={participant.avatarUrl ?? undefined}
+      localAvatarUrlPath={participant.localAvatarUrlPath}
+      size={size}
+      ringColor="#0B0F10"
+    />
+  );
+}
+
+function ControlButton({
   icon,
   label,
-  color,
   active = false,
-  slashed = false,
   disabled = false,
+  loading = false,
+  onInteract,
   onPress,
 }: {
   icon: React.ComponentProps<typeof Feather>["name"];
   label: string;
-  color?: string;
   active?: boolean;
-  slashed?: boolean;
   disabled?: boolean;
+  loading?: boolean;
+  onInteract?: () => void;
   onPress: () => void;
 }) {
-  const backgroundColor = color ?? (active ? "#fff" : "rgba(255,255,255,0.18)");
-  const foregroundColor = color ? "#fff" : active ? "#11181C" : "#fff";
-
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ disabled, selected: active }}
-      onPress={onPress}
-      disabled={disabled}
-      className="min-w-[76px] items-center justify-center gap-1.5 rounded-2xl px-3 py-3"
-      style={({ pressed }) => ({
-        backgroundColor,
-        opacity: disabled ? 0.45 : pressed ? 0.7 : 1,
-      })}
-    >
-      <View style={styles.iconContainer}>
-        <Feather name={icon} size={24} color={foregroundColor} />
-        {slashed ? (
-          <View
-            pointerEvents="none"
-            style={[styles.iconSlash, { backgroundColor: foregroundColor }]}
-          />
-        ) : null}
-      </View>
-      <Text style={[styles.buttonLabel, { color: foregroundColor }]}>
+    <View style={styles.controlButtonWrap}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        accessibilityState={{ disabled, selected: active }}
+        onPress={() => {
+          onInteract?.();
+          onPress();
+        }}
+        disabled={disabled}
+        className="h-14 w-14 items-center justify-center rounded-full"
+        style={({ pressed }) => [
+          active ? styles.controlActive : styles.controlInactive,
+          disabled && styles.controlDisabled,
+          pressed && styles.controlPressed,
+        ]}
+      >
+        {loading ? (
+          <ActivityIndicator size="small" color="#fff" />
+        ) : (
+          <Feather name={icon} size={22} color="#fff" />
+        )}
+      </Pressable>
+      <Text className="text-center text-[11px] font-semibold text-white/80">
         {label}
       </Text>
-    </Pressable>
+    </View>
   );
 }
 
+// --- Styles ---
+
+const CONTROL_SIZE = 54;
+
 const styles = StyleSheet.create({
-  iconContainer: {
-    alignItems: "center",
-    height: 26,
-    justifyContent: "center",
-    width: 28,
+  container: {
+    flex: 1,
+    backgroundColor: "#0B0F10",
   },
-  iconSlash: {
-    height: 2,
+
+  // Audio-only center layout
+  audioCenter: {
+    alignItems: "center",
+    flex: 1,
+    justifyContent: "center",
+    gap: 14,
+  },
+  singleVideoStage: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+    paddingTop: 80,
+    paddingBottom: 130,
+  },
+  singleVideoFrame: {
+    alignSelf: "center",
+    aspectRatio: 16 / 9,
+    backgroundColor: "#11181C",
+    borderRadius: 16,
+    maxHeight: "100%",
+    maxWidth: 1200,
+    overflow: "hidden",
+    width: "100%",
+  },
+  ringingAvatarWrap: {
+    alignItems: "center",
+    height: 160,
+    justifyContent: "center",
+    width: 160,
+  },
+  audioName: {
+    color: "#fff",
+    fontSize: 26,
+    fontWeight: "700",
+    letterSpacing: 0.3,
+    marginTop: 8,
+    maxWidth: "80%",
+    textAlign: "center",
+  },
+  audioStatus: {
+    color: "rgba(255,255,255,0.65)",
+    fontSize: 15,
+    fontWeight: "500",
+  },
+
+  // Header
+  headerSafeArea: {
+    left: 0,
     position: "absolute",
-    transform: [{ rotate: "45deg" }],
-    width: 30,
+    right: 0,
+    top: 0,
+    zIndex: 10,
+    ...Platform.select({
+      android: { elevation: 10 },
+    }),
+  },
+  headerRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    paddingHorizontal: 8,
+    paddingTop: 6,
+    paddingBottom: 4,
+  },
+  headerButton: {
+    alignItems: "center",
+    borderRadius: 24,
+    height: 48,
+    justifyContent: "center",
+    width: 48,
+  },
+  headerCenter: {
+    alignItems: "center",
+    flex: 1,
+  },
+  headerName: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  statusRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 5,
+    marginTop: 2,
+  },
+  statusDot: {
+    borderRadius: 4,
+    height: 8,
+    width: 8,
+  },
+  statusDotActive: {
+    backgroundColor: "#22C55E",
+  },
+  statusDotConnecting: {
+    backgroundColor: "#F59E0B",
+  },
+  headerStatus: {
+    color: "rgba(255,255,255,0.7)",
+    fontSize: 12,
+    fontWeight: "500",
+  },
+
+  // Local video PiP
+  localVideoPreview: {
+    backgroundColor: "#111",
+    borderColor: "rgba(255,255,255,0.25)",
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    height: 180,
+    overflow: "hidden",
+    position: "absolute",
+    right: 14,
+    top: 100,
+    width: 120,
+    zIndex: 4,
+    ...Platform.select({
+      android: {
+        elevation: 4,
+      },
+      default: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.35,
+        shadowRadius: 8,
+      },
+    }),
   },
   localVideo: {
     flex: 1,
   },
-  header: {
+  localAvatarPreview: {
     alignItems: "center",
-    alignSelf: "center",
-    backgroundColor: "rgba(10, 15, 18, 0.72)",
-    borderRadius: 20,
-    marginTop: 12,
-    maxWidth: "84%",
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-  },
-  minimizeButton: {
-    alignItems: "center",
-    backgroundColor: "rgba(10, 15, 18, 0.72)",
-    borderRadius: 22,
-    height: 44,
+    flex: 1,
     justifyContent: "center",
-    left: 12,
-    marginTop: 10,
+    backgroundColor: "#1A2028",
+  },
+
+  // Controls safe area
+  controlsSafeArea: {
+    bottom: 0,
+    left: 0,
     position: "absolute",
-    top: 0,
-    width: 44,
+    right: 0,
+    zIndex: 10,
+    ...Platform.select({
+      android: { elevation: 10 },
+    }),
   },
-  participantName: {
-    color: "#fff",
-    fontSize: 20,
-    fontWeight: "700",
-  },
-  callStatus: {
-    color: "rgba(255, 255, 255, 0.78)",
-    fontSize: 14,
-    marginTop: 3,
-  },
+
+  // Active call control dock
   controlDock: {
     alignItems: "center",
     alignSelf: "center",
-    backgroundColor: "rgba(10, 15, 18, 0.82)",
-    borderColor: "rgba(255, 255, 255, 0.12)",
-    borderRadius: 28,
+    gap: 14,
+    marginBottom: 12,
+    maxWidth: 440,
+    paddingHorizontal: 12,
+    width: "100%",
+  },
+  controlRow: {
+    alignItems: "flex-start",
+    backgroundColor: "rgba(15, 20, 25, 0.85)",
+    borderColor: "rgba(255,255,255,0.1)",
+    borderRadius: 24,
     borderWidth: StyleSheet.hairlineWidth,
     flexDirection: "row",
     flexWrap: "wrap",
+    gap: 6,
     justifyContent: "center",
-    marginHorizontal: 16,
-    marginBottom: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 12,
-    maxWidth: "94%",
+    paddingHorizontal: 12,
+    paddingVertical: 14,
   },
-  buttonLabel: {
+  secondaryControlRow: {
+    alignItems: "flex-start",
+    backgroundColor: "rgba(15, 20, 25, 0.92)",
+    borderColor: "rgba(255,255,255,0.1)",
+    borderRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  controlButtonWrap: {
+    alignItems: "center",
+    gap: 6,
+    minWidth: 62,
+  },
+  controlCircle: {
+    alignItems: "center",
+    borderRadius: CONTROL_SIZE / 2,
+    height: CONTROL_SIZE,
+    justifyContent: "center",
+    width: CONTROL_SIZE,
+  },
+  controlInactive: {
+    backgroundColor: "rgba(255,255,255,0.15)",
+  },
+  controlActive: {
+    backgroundColor: "rgba(220, 50, 60, 0.85)",
+  },
+  controlDisabled: {
+    opacity: 0.4,
+  },
+  controlPressed: {
+    opacity: 0.6,
+  },
+  controlLabel: {
+    color: "rgba(255,255,255,0.8)",
     fontSize: 11,
     fontWeight: "600",
-    marginTop: 6,
     textAlign: "center",
+  },
+  endCallButton: {
+    alignItems: "center",
+    backgroundColor: "#DC2626",
+    borderRadius: 28,
+    flexDirection: "row",
+    gap: 8,
+    justifyContent: "center",
+    minHeight: 56,
+    paddingHorizontal: 32,
+    paddingVertical: 14,
+  },
+  endCallText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+
+  // Incoming call controls
+  incomingControls: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 50,
+    justifyContent: "center",
+    marginBottom: 32,
+  },
+  incomingButtonWrap: {
+    alignItems: "center",
+    gap: 10,
+  },
+  declineButton: {
+    backgroundColor: "#DC2626",
+  },
+  acceptButton: {
+    backgroundColor: "#16A34A",
+  },
+
+  // Video grid
+  screenShareStage: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    paddingBottom: 152,
+    paddingHorizontal: 12,
+    paddingTop: 78,
+  },
+  screenShareStageWithRail: {
+    paddingBottom: 272,
+  },
+  screenShareParticipantRail: {
+    bottom: 190,
+    height: 94,
+    left: 0,
+    position: "absolute",
+    right: 0,
+  },
+  screenShareParticipantContent: {
+    alignItems: "center",
+    gap: 8,
+    justifyContent: "center",
+    paddingHorizontal: 12,
+  },
+  screenShareParticipantTile: {
+    aspectRatio: 16 / 9,
+    backgroundColor: "#11181C",
+    borderColor: "rgba(255,255,255,0.16)",
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    height: 82,
+    overflow: "hidden",
+    width: 146,
   },
   videoGrid: {
     ...StyleSheet.absoluteFillObject,
-    paddingTop: 100,
-    paddingBottom: 120,
+    paddingTop: 80,
+    paddingBottom: 130,
   },
   videoGridContent: {
     alignContent: "center",
@@ -508,52 +1417,87 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     justifyContent: "center",
-    paddingHorizontal: 8,
+    alignSelf: "center",
+    maxWidth: 1120,
+    paddingHorizontal: 6,
+    width: "100%",
   },
   participantTile: {
     backgroundColor: "#11181C",
-    borderColor: "rgba(255,255,255,0.2)",
-    borderRadius: 14,
+    borderColor: "rgba(255,255,255,0.12)",
+    borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
-    flexBasis: "48%",
+    flexBasis: "46%",
     flexGrow: 1,
     margin: 3,
     overflow: "hidden",
-    aspectRatio: 0.75,
+    aspectRatio: 16 / 9,
+    maxHeight: 360,
+    maxWidth: 500,
+    minWidth: 145,
   },
-  participantLabel: {
+  wideParticipantTile: {
+    flexBasis: "31%",
+    maxWidth: 350,
+  },
+  gridAvatar: {
+    alignItems: "center",
+    flex: 1,
+    justifyContent: "center",
+  },
+  tileBadge: {
     alignSelf: "flex-start",
-    backgroundColor: "rgba(10,15,18,0.72)",
+    backgroundColor: "rgba(10, 15, 18, 0.75)",
     borderRadius: 10,
+    bottom: 8,
+    left: 8,
+    maxWidth: "80%",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    position: "absolute",
+  },
+  tileBadgeName: {
     color: "#fff",
     fontSize: 12,
     fontWeight: "600",
-    margin: 8,
-    overflow: "hidden",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
   },
+
+  // Minimized call bar
   minimizedCall: {
     alignItems: "center",
-    alignSelf: "center",
     backgroundColor: "#142126",
-    borderColor: "rgba(255,255,255,0.24)",
-    borderRadius: 24,
+    borderColor: "rgba(255,255,255,0.18)",
+    borderRadius: 28,
     borderWidth: StyleSheet.hairlineWidth,
-    bottom: 20,
     flexDirection: "row",
     gap: 10,
-    left: 16,
-    maxWidth: "92%",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    maxWidth: "90%",
     position: "absolute",
-    right: 16,
+    right: 12,
+    zIndex: 100,
+    minHeight: 56,
+    width: 280,
+    ...Platform.select({
+      android: {
+        elevation: 8,
+      },
+      default: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.4,
+        shadowRadius: 12,
+      },
+    }),
   },
-  minimizedCallText: {
-    color: "#fff",
-    flex: 1,
-    fontSize: 13,
-    fontWeight: "600",
+  minimizedIconWrap: {
+    alignItems: "center",
+    backgroundColor: BRAND_COLOR,
+    borderRadius: 18,
+    height: 36,
+    justifyContent: "center",
+    width: 36,
+  },
+  minimizedIconActive: {
+    backgroundColor: "#16A34A",
   },
 });

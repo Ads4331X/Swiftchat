@@ -5,9 +5,12 @@ import {
   onIncomingCall,
   endCall as signalEndCall,
   onCallAccepted,
+  onCallCameraState,
   onCallDeclined,
   onCallEnded,
   onCallParticipantLeft,
+  onCallParticipantStatus,
+  onCallScreenShareState,
   sendCallOffer,
   sendCallAnswer,
   onCallOffer,
@@ -37,6 +40,10 @@ type IncomingCall = {
   callerId: number;
   callType: "audio" | "video";
   participantCount: number;
+  participantStatuses: Record<
+    number,
+    "ringing" | "accepted" | "declined" | "disconnected"
+  >;
 };
 
 export function setupCallListeners({
@@ -45,9 +52,12 @@ export function setupCallListeners({
   onDeclined,
   onEnded,
   onParticipantLeft,
+  onParticipantStatus,
   onOffer,
   onAnswer,
   onIce,
+  onCameraState,
+  onScreenShareState,
 }: {
   onIncoming: (call: IncomingCall) => void;
   onAccepted: (data: {
@@ -59,6 +69,11 @@ export function setupCallListeners({
   onDeclined: (data: { callId: string; userId: number }) => void;
   onEnded: (data: { callId: string; userId: number }) => void;
   onParticipantLeft: (data: { callId: string; userId: number }) => void;
+  onParticipantStatus: (data: {
+    callId: string;
+    userId: number;
+    status: "ringing" | "accepted" | "declined" | "disconnected";
+  }) => void;
   onOffer: (data: {
     callId: string;
     senderId: number;
@@ -75,15 +90,30 @@ export function setupCallListeners({
     senderId: number;
     candidate: RTCIceCandidateInit;
   }) => void;
+  onCameraState: (data: {
+    callId: string;
+    userId: number;
+    cameraOn: boolean;
+  }) => void;
+  onScreenShareState: (data: {
+    callId: string;
+    userId: number;
+    isSharing: boolean;
+  }) => void;
 }) {
   const unsubscribeIncoming = onIncomingCall(onIncoming);
   const unsubscribeAccepted = onCallAccepted(onAccepted);
   const unsubscribeDeclined = onCallDeclined(onDeclined);
   const unsubscribeEnded = onCallEnded(onEnded);
   const unsubscribeParticipantLeft = onCallParticipantLeft(onParticipantLeft);
+  const unsubscribeParticipantStatus =
+    onCallParticipantStatus(onParticipantStatus);
   const unsubscribeOffer = onCallOffer(onOffer);
   const unsubscribeAnswer = onCallAnswer(onAnswer);
   const unsubscribeIce = onIceCandidate(onIce);
+  const unsubscribeCameraState = onCallCameraState(onCameraState);
+  const unsubscribeScreenShareState =
+    onCallScreenShareState(onScreenShareState);
 
   return () => {
     unsubscribeIncoming?.();
@@ -91,9 +121,12 @@ export function setupCallListeners({
     unsubscribeDeclined?.();
     unsubscribeEnded?.();
     unsubscribeParticipantLeft?.();
+    unsubscribeParticipantStatus?.();
     unsubscribeOffer?.();
     unsubscribeAnswer?.();
     unsubscribeIce?.();
+    unsubscribeCameraState?.();
+    unsubscribeScreenShareState?.();
   };
 }
 

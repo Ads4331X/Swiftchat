@@ -5,6 +5,7 @@ import { NativeModules, Platform } from "react-native";
 import InCallManager from "react-native-incall-manager";
 import type {
   MediaStream,
+  MediaStreamTrack,
   RTCPeerConnection as RTCPeerConnectionType,
 } from "react-native-webrtc";
 
@@ -456,7 +457,20 @@ export function closeAllPeerConnections() {
   }
 }
 
+/** Read-only snapshot of active peer connections for diagnostics. */
+export function getPeerConnections(): ReadonlyMap<number, RTCPeerConnectionType> {
+  return peerConnections;
+}
+
 export async function stopLocalMedia({ stream }: { stream: MediaStream }) {
+  if (screenShareTrack) {
+    try {
+      await stopScreenShare({ localStream: stream });
+    } catch (error) {
+      console.warn("Could not restore the camera while ending the call:", error);
+    }
+  }
+
   for (const track of stream.getTracks()) {
     track.stop();
   }
@@ -579,4 +593,168 @@ export async function processPendingIceCandidates({
   for (const candidate of pending) {
     await pc.addIceCandidate(candidate as unknown as LibIceCandidate);
   }
+}
+
+// --- Screen sharing (native) ---
+
+let screenShareTrack: MediaStreamTrack | null = null;
+let screenShareEndedListener: (() => void) | null = null;
+let previousCameraTrack: MediaStreamTrack | null = null;
+let previousCameraEnabled = true;
+type ScreenCaptureTrack = MediaStreamTrack & {
+  addEventListener: (event: "ended", listener: () => void) => void;
+  removeEventListener: (event: "ended", listener: () => void) => void;
+};
+
+export async function startScreenShare({
+  localStream,
+  onStopped,
+}: {
+  localStream: MediaStream;
+  onStopped?: () => void;
+}): Promise<void> {
+  if (Platform.OS !== "android") {
+    throw new Error(
+      "Native screen sharing is currently available on Android only.",
+    );
+  }
+  if (screenShareTrack) {
+    throw new Error("Screen sharing is already active.");
+  }
+
+  const displayStream = await getWebRTC().mediaDevices.getDisplayMedia();
+  const track = displayStream.getVideoTracks()[0];
+  if (!track) {
+    displayStream.getTracks().forEach((displayTrack) => displayTrack.stop());
+    throw new Error("Android did not provide a screen capture track.");
+  }
+
+  const currentVideoTrack = localStream.getVideoTracks()[0] ?? null;
+  if (!currentVideoTrack || currentVideoTrack.readyState !== "live") {
+    displayStream.getTracks().forEach((displayTrack) => displayTrack.stop());
+    throw new Error("Start a video call before sharing your screen.");
+  }
+
+  const replacedSenders: ReturnType<
+    RTCPeerConnectionType["getSenders"]
+  > = [];
+  try {
+    for (const peerConnection of peerConnections.values()) {
+      for (const sender of peerConnection.getSenders()) {
+        if (sender.track?.id !== currentVideoTrack.id) continue;
+        if (track.readyState !== "live") {
+          throw new Error("Screen sharing ended before it could start.");
+        }
+        await sender.replaceTrack(track);
+        replacedSenders.push(sender);
+      }
+    }
+    if (replacedSenders.length === 0) {
+      throw new Error("No active video connection is available to share.");
+    }
+    if (track.readyState !== "live") {
+      throw new Error("Screen sharing ended before it could start.");
+    }
+  } catch (error) {
+    const rollbackErrors: string[] = [];
+    for (const sender of replacedSenders) {
+      try {
+        await sender.replaceTrack(currentVideoTrack);
+      } catch (rollbackError) {
+        rollbackErrors.push(
+          rollbackError instanceof Error
+            ? rollbackError.message
+            : "A camera track could not be restored.",
+        );
+      }
+    }
+    displayStream.getTracks().forEach((displayTrack) => displayTrack.stop());
+    const rollbackDetail =
+      rollbackErrors.length > 0
+        ? ` Camera restoration also failed: ${rollbackErrors.join("; ")}`
+        : "";
+    throw new Error(
+      `Could not start screen sharing. ${
+        error instanceof Error ? error.message : "Please try again."
+      }${rollbackDetail}`,
+    );
+  }
+
+  previousCameraTrack = currentVideoTrack;
+  previousCameraEnabled = currentVideoTrack.enabled;
+  currentVideoTrack.enabled = false;
+  localStream.removeTrack(currentVideoTrack);
+  localStream.addTrack(track);
+  screenShareTrack = track;
+
+  screenShareEndedListener = () => {
+    void stopScreenShare({ localStream }).then(
+      () => onStopped?.(),
+      (error: unknown) => {
+        console.error("Could not restore the camera after screen sharing:", error);
+        onStopped?.();
+      },
+    );
+  };
+  (track as ScreenCaptureTrack).addEventListener(
+    "ended",
+    screenShareEndedListener,
+  );
+}
+
+export async function stopScreenShare({
+  localStream,
+}: {
+  localStream: MediaStream;
+}): Promise<void> {
+  const track = screenShareTrack;
+  const cameraTrack = previousCameraTrack;
+
+  if (track) {
+    if (screenShareEndedListener) {
+      (track as ScreenCaptureTrack).removeEventListener(
+        "ended",
+        screenShareEndedListener,
+      );
+    }
+    localStream.removeTrack(track);
+  }
+
+  const cameraIsLive = cameraTrack?.readyState === "live";
+  if (cameraIsLive && cameraTrack) {
+    cameraTrack.enabled = previousCameraEnabled;
+    localStream.addTrack(cameraTrack);
+  }
+
+  const restorationErrors: string[] = [];
+  for (const peerConnection of peerConnections.values()) {
+    for (const sender of peerConnection.getSenders()) {
+      if (sender.track?.id !== track?.id) continue;
+      try {
+        await sender.replaceTrack(cameraIsLive ? cameraTrack : null);
+      } catch (error) {
+        restorationErrors.push(
+          error instanceof Error
+            ? error.message
+            : "A peer connection could not restore the camera.",
+        );
+      }
+    }
+  }
+
+  track?.stop();
+  screenShareTrack = null;
+  screenShareEndedListener = null;
+  previousCameraTrack = null;
+  previousCameraEnabled = true;
+
+  if (restorationErrors.length > 0) {
+    throw new Error(
+      `Could not restore the camera on every participant: ${restorationErrors.join("; ")}`,
+    );
+  }
+}
+
+export function isScreenSharing(): boolean {
+  return screenShareTrack !== null && screenShareTrack.readyState === "live";
 }

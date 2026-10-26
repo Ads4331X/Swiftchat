@@ -8,6 +8,12 @@ export type CallStatus =
   | "ended"
   | "failed";
 
+export type ParticipantCallStatus =
+  | "ringing"
+  | "accepted"
+  | "declined"
+  | "disconnected";
+
 export type OngoingCall = {
   callId: string;
   callType: CallType;
@@ -19,6 +25,7 @@ export type OngoingCall = {
   connectedAt?: number;
   participantIds: number[];
   participantCount: number;
+  participantStatuses: Record<number, ParticipantCallStatus>;
 };
 
 export type Call = {

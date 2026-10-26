@@ -355,6 +355,11 @@ async function limitSenderBandwidth(peerConnection: RTCPeerConnection) {
     const kind = sender.track?.kind;
     if (!kind) continue;
 
+    if (kind === "video" && sender.track?.id === screenShareTrack?.id) {
+      await setScreenShareEncodingLimits(sender, true);
+      continue;
+    }
+
     try {
       const parameters = sender.getParameters();
       if (!parameters.encodings?.length) parameters.encodings = [{}];
@@ -413,8 +418,21 @@ export function closeAllPeerConnections() {
   pendingIceCandidates.clear();
 }
 
+/** Read-only snapshot of active peer connections for diagnostics. */
+export function getPeerConnections(): ReadonlyMap<number, RTCPeerConnection> {
+  return peerConnections;
+}
+
 export async function stopLocalMedia({ stream }: { stream: RNMediaStream }) {
   const webStream = stream as unknown as MediaStream;
+
+  if (screenShareTrack) {
+    try {
+      await stopScreenShare({ localStream: stream });
+    } catch (error) {
+      console.warn("Could not restore the camera while ending the call:", error);
+    }
+  }
 
   for (const track of webStream.getTracks()) {
     track.stop();
@@ -540,3 +558,224 @@ export async function startCallAudio(_args: {
 export function setCallSpeakerphone(_enabled: boolean) {}
 
 export async function stopCallAudio() {}
+
+// --- Screen sharing (web) ---
+
+let screenShareTrack: MediaStreamTrack | null = null;
+let previousCameraTrack: MediaStreamTrack | null = null;
+let previousCameraEnabled = true;
+const previousScreenShareEncodingLimits = new Map<
+  RTCRtpSender,
+  {
+    encodings: { maxBitrate?: number; maxFramerate?: number }[];
+    degradationPreference?: RTCRtpSendParameters["degradationPreference"];
+  }
+>();
+
+export async function startScreenShare({
+  localStream,
+  onStopped,
+}: {
+  localStream: RNMediaStream;
+  onStopped?: () => void;
+}): Promise<void> {
+  if (
+    typeof navigator === "undefined" ||
+    !navigator.mediaDevices?.getDisplayMedia
+  ) {
+    throw new Error(
+      "Screen sharing is only available in browsers that support getDisplayMedia.",
+    );
+  }
+
+  if (screenShareTrack) {
+    throw new Error("Screen sharing is already active.");
+  }
+
+  const displayStream = await navigator.mediaDevices.getDisplayMedia({
+    video: {
+      width: { ideal: 1280, max: 1920 },
+      frameRate: { ideal: 15, max: 20 },
+    },
+    audio: false,
+  });
+
+  const track = displayStream.getVideoTracks()[0];
+  if (!track) {
+    displayStream.getTracks().forEach((t) => t.stop());
+    throw new Error("No screen share track was provided.");
+  }
+
+  const webLocalStream = localStream as unknown as MediaStream;
+  const currentVideoTrack = webLocalStream.getVideoTracks()[0] ?? null;
+  if (!currentVideoTrack || currentVideoTrack.readyState !== "live") {
+    displayStream.getTracks().forEach((displayTrack) => displayTrack.stop());
+    throw new Error("Start a video call before sharing your screen.");
+  }
+
+  const replacedSenders: RTCRtpSender[] = [];
+  try {
+    for (const peerConnection of peerConnections.values()) {
+      for (const sender of peerConnection.getSenders()) {
+        if (sender.track?.id !== currentVideoTrack.id) continue;
+        if (track.readyState !== "live") {
+          throw new Error("Screen sharing ended before it could start.");
+        }
+        await sender.replaceTrack(track);
+        replacedSenders.push(sender);
+      }
+    }
+
+    for (const peerConnection of peerConnections.values()) {
+      for (const sender of peerConnection.getSenders()) {
+        if (sender.track?.id !== track.id) continue;
+        await setScreenShareEncodingLimits(sender, true);
+      }
+    }
+
+    if (track.readyState !== "live") {
+      throw new Error("Screen sharing ended before it could start.");
+    }
+  } catch (error) {
+    const rollbackErrors: string[] = [];
+    for (const sender of replacedSenders) {
+      try {
+        await sender.replaceTrack(currentVideoTrack);
+        await setScreenShareEncodingLimits(sender, false);
+      } catch (rollbackError) {
+        rollbackErrors.push(
+          rollbackError instanceof Error
+            ? rollbackError.message
+            : "A camera track could not be restored.",
+        );
+      }
+    }
+    displayStream.getTracks().forEach((displayTrack) => displayTrack.stop());
+    const rollbackDetail =
+      rollbackErrors.length > 0
+        ? ` Camera restoration also failed: ${rollbackErrors.join("; ")}`
+        : "";
+    throw new Error(
+      `Could not start screen sharing. ${
+        error instanceof Error ? error.message : "Please try again."
+      }${rollbackDetail}`,
+    );
+  }
+
+  previousCameraTrack = currentVideoTrack;
+  previousCameraEnabled = currentVideoTrack.enabled;
+  currentVideoTrack.enabled = false;
+  webLocalStream.removeTrack(currentVideoTrack);
+  webLocalStream.addTrack(track);
+  screenShareTrack = track;
+
+  track.onended = () => {
+    void stopScreenShare({ localStream }).then(
+      () => onStopped?.(),
+      (error: unknown) => {
+        console.error("Could not restore the camera after screen sharing:", error);
+        onStopped?.();
+      },
+    );
+  };
+}
+
+export async function stopScreenShare({
+  localStream,
+}: {
+  localStream: RNMediaStream;
+}): Promise<void> {
+  const webLocalStream = localStream as unknown as MediaStream;
+  const track = screenShareTrack;
+  const cameraTrack = previousCameraTrack;
+
+  if (track) {
+    track.onended = null;
+    webLocalStream.removeTrack(track);
+  }
+
+  const restorationErrors: string[] = [];
+  if (cameraTrack && cameraTrack.readyState !== "ended") {
+    cameraTrack.enabled = previousCameraEnabled;
+    webLocalStream.addTrack(cameraTrack);
+
+    for (const peerConnection of peerConnections.values()) {
+      for (const sender of peerConnection.getSenders()) {
+        if (sender.track?.id !== track?.id) continue;
+        try {
+          await sender.replaceTrack(cameraTrack);
+        } catch (error) {
+          restorationErrors.push(
+            error instanceof Error
+              ? error.message
+              : "A peer connection could not restore the camera.",
+          );
+        }
+        await setScreenShareEncodingLimits(sender, false);
+      }
+    }
+  }
+
+  track?.stop();
+  screenShareTrack = null;
+  previousCameraTrack = null;
+  previousCameraEnabled = true;
+
+  if (restorationErrors.length > 0) {
+    throw new Error(
+      `Could not restore the camera on every participant: ${restorationErrors.join("; ")}`,
+    );
+  }
+}
+
+export function isScreenSharing(): boolean {
+  return screenShareTrack !== null && screenShareTrack.readyState === "live";
+}
+
+async function setScreenShareEncodingLimits(
+  sender: RTCRtpSender,
+  sharingScreen: boolean,
+) {
+  try {
+    const parameters = sender.getParameters();
+    if (!parameters.encodings?.length) parameters.encodings = [{}];
+
+    if (sharingScreen) {
+      previousScreenShareEncodingLimits.set(sender, {
+        encodings: parameters.encodings.map((encoding) => ({
+          maxBitrate: encoding.maxBitrate,
+          maxFramerate: encoding.maxFramerate,
+        })),
+        degradationPreference: parameters.degradationPreference,
+      });
+      for (const encoding of parameters.encodings) {
+        encoding.maxBitrate = 1_500_000;
+        encoding.maxFramerate = 15;
+      }
+      parameters.degradationPreference = "balanced";
+    } else {
+      const previous = previousScreenShareEncodingLimits.get(sender);
+      if (!previous) return;
+      parameters.encodings.forEach((encoding, index) => {
+        const previousEncoding = previous.encodings[index];
+        if (!previousEncoding) return;
+        if (previousEncoding.maxBitrate === undefined) {
+          delete encoding.maxBitrate;
+        } else {
+          encoding.maxBitrate = previousEncoding.maxBitrate;
+        }
+        if (previousEncoding.maxFramerate === undefined) {
+          delete encoding.maxFramerate;
+        } else {
+          encoding.maxFramerate = previousEncoding.maxFramerate;
+        }
+      });
+      parameters.degradationPreference = previous.degradationPreference;
+    }
+
+    await sender.setParameters(parameters);
+    if (!sharingScreen) previousScreenShareEncodingLimits.delete(sender);
+  } catch (error) {
+    console.warn("Could not adjust screen-share video quality:", error);
+  }
+}
