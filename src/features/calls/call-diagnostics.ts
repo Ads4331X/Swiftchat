@@ -146,10 +146,22 @@ async function collectPeerDiagnostics(
   }
 
   // Second pass: collect stats
+  const selectedPairIds = new Set(
+    entries
+      .filter(
+        (report) =>
+          report.type === "transport" &&
+          typeof report.selectedCandidatePairId === "string",
+      )
+      .map((report) => String(report.selectedCandidatePairId)),
+  );
+
   for (const report of entries) {
     if (
       report.type === "candidate-pair" &&
-      (report.state === "succeeded" || report.nominated === true)
+      (selectedPairIds.has(String(report.id)) ||
+        (selectedPairIds.size === 0 &&
+          (report.state === "succeeded" || report.nominated === true)))
     ) {
       const localCandidate = entries.find(
         (r) =>
@@ -178,7 +190,9 @@ async function collectPeerDiagnostics(
       };
     }
 
-    if (report.type === "outbound-rtp" && report.kind === "video") {
+    const mediaKind = report.kind ?? report.mediaType;
+
+    if (report.type === "outbound-rtp" && mediaKind === "video") {
       outboundVideo = {
         width: toNumber(report.frameWidth),
         height: toNumber(report.frameHeight),
@@ -200,7 +214,7 @@ async function collectPeerDiagnostics(
       };
     }
 
-    if (report.type === "inbound-rtp" && report.kind === "video") {
+    if (report.type === "inbound-rtp" && mediaKind === "video") {
       inboundVideo = {
         width: toNumber(report.frameWidth),
         height: toNumber(report.frameHeight),
@@ -216,7 +230,7 @@ async function collectPeerDiagnostics(
       };
     }
 
-    if (report.type === "outbound-rtp" && report.kind === "audio") {
+    if (report.type === "outbound-rtp" && mediaKind === "audio") {
       outboundAudio = {
         bytesSent: toNumber(report.bytesSent),
         packetsSent: toNumber(report.packetsSent),
@@ -224,7 +238,7 @@ async function collectPeerDiagnostics(
       };
     }
 
-    if (report.type === "inbound-rtp" && report.kind === "audio") {
+    if (report.type === "inbound-rtp" && mediaKind === "audio") {
       inboundAudio = {
         bytesReceived: toNumber(report.bytesReceived),
         packetsReceived: toNumber(report.packetsReceived),
@@ -244,6 +258,72 @@ async function collectPeerDiagnostics(
     inboundVideo,
     outboundAudio,
     inboundAudio,
+  };
+}
+
+function compactValue(value: number | undefined, digits = 0) {
+  return value === undefined ? "?" : value.toFixed(digits);
+}
+
+function compactVideo(video: OutboundVideoInfo | InboundVideoInfo | null) {
+  if (!video) return "none";
+  return `${video.width ?? "?"}x${video.height ?? "?"}@${compactValue(video.framesPerSecond)}fps`;
+}
+
+function compactBytes(value: number | undefined) {
+  return value === undefined ? "?" : String(value);
+}
+
+function formatCompactCallStats(peer: PeerDiagnostics) {
+  const pair = peer.selectedCandidatePair;
+  const outbound = peer.outboundVideo;
+  const inbound = peer.inboundVideo;
+  return [
+    "[call][stats]",
+    `peer=${peer.participantId}`,
+    `pair=${pair ? `${pair.localType}/${pair.remoteType}` : "?"}`,
+    `rtt=${pair?.roundTripTime === undefined ? "?" : compactValue(pair.roundTripTime * 1000)}ms`,
+    `outgoing=${pair?.availableOutgoingBitrate === undefined ? "?" : compactValue(pair.availableOutgoingBitrate / 1000)}kbps`,
+    `videoOut=${compactVideo(outbound)}`,
+    `limit=${outbound?.qualityLimitationReason ?? "?"}`,
+    `bytesSent=${compactBytes(outbound?.bytesSent)}`,
+    `videoIn=${compactVideo(inbound)}`,
+    `packetsLost=${compactBytes(inbound?.packetsLost)}`,
+    `framesDropped=${compactBytes(inbound?.framesDropped)}`,
+  ].join(" ");
+}
+
+/** Logs one compact, credential-free stats line every three seconds in development. */
+export function startCallStatsLogger(
+  participantId: number,
+  pc: PeerConnection,
+): () => void {
+  if (typeof __DEV__ === "undefined" || !__DEV__) return () => {};
+
+  let stopped = false;
+  let collecting = false;
+  const interval = setInterval(() => {
+    if (stopped || collecting || pc.connectionState === "closed") return;
+
+    collecting = true;
+    void collectPeerDiagnostics(participantId, pc)
+      .then((peer) => {
+        if (!stopped) console.info(formatCompactCallStats(peer));
+      })
+      .catch((error: unknown) => {
+        if (stopped) return;
+        const detail =
+          error instanceof Error ? error.message : "stats unavailable";
+        console.warn(`[call][stats] peer=${participantId} error=${detail}`);
+      })
+      .finally(() => {
+        collecting = false;
+      });
+  }, 3000);
+
+  return () => {
+    stopped = true;
+    clearInterval(interval);
   };
 }
 
@@ -280,7 +360,7 @@ export function formatDiagnostics(diag: CallDiagnostics): string {
     const ov = peer.outboundVideo;
     if (ov) {
       lines.push(
-        `Video out: ${ov.width ?? "?"}×${ov.height ?? "?"} @ ${ov.framesPerSecond ?? "?"}fps`,
+        `Video out: ${ov.width ?? "?"}×${ov.height ?? "?"} @ ${ov.framesPerSecond ?? "?"}fps | framesSent: ${ov.framesSent ?? "?"} | bytesSent: ${ov.bytesSent ?? "?"}`,
       );
       if (ov.qualityLimitationReason) {
         lines.push(`Quality limitation: ${ov.qualityLimitationReason}`);

@@ -11,6 +11,11 @@ export default function CallVideo({
   onDimensionsChange,
 }: CallVideoProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const onDimensionsChangeRef = useRef(onDimensionsChange);
+
+  useEffect(() => {
+    onDimensionsChangeRef.current = onDimensionsChange;
+  }, [onDimensionsChange]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -27,7 +32,7 @@ export default function CallVideo({
     };
     const reportDimensions = () => {
       if (video.videoWidth > 0 && video.videoHeight > 0) {
-        onDimensionsChange?.({
+        onDimensionsChangeRef.current?.({
           width: video.videoWidth,
           height: video.videoHeight,
         });
@@ -49,7 +54,7 @@ export default function CallVideo({
       document.removeEventListener("pointerdown", retryOnGesture);
       video.srcObject = null;
     };
-  }, [muted, onDimensionsChange, stream]);
+  }, [muted, stream]);
 
   return (
     <View pointerEvents="none" style={style}>

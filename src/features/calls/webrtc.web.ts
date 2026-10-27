@@ -1,9 +1,31 @@
 import { sendIceCandidate } from "@/core/socket/call-signaling";
 import type { MediaStream as RNMediaStream } from "react-native-webrtc";
 
+import {
+  clearAllPeerOperationQueues,
+  clearPeerOperationQueue,
+  runPeerOperation,
+  waitForStableSignalingState,
+} from "./call-negotiation";
+import { getIceServers, hasTurnCredentials } from "./webrtc-config";
+import {
+  describeSdp,
+  describeTrack,
+  logIceCandidateError,
+  logPeerState,
+  logRemoteTrack,
+} from "./call-debug";
+import { startCallStatsLogger } from "./call-diagnostics";
+
+export { hasTurnCredentials };
+
 const peerConnections = new Map<number, RTCPeerConnection>();
+const stopStatsLoggers = new Map<number, () => void>();
+const screenShareSenders = new Map<number, RTCRtpSender>();
+let warnedAboutSenderParameterFailure = false;
 
 const pendingIceCandidates = new Map<number, RTCIceCandidateInit[]>();
+const politePeerConnections = new Map<number, boolean>();
 
 const audioConstraints: MediaTrackConstraints = {
   echoCancellation: true,
@@ -12,27 +34,11 @@ const audioConstraints: MediaTrackConstraints = {
 };
 
 const videoConstraints: MediaTrackConstraints = {
-  width: { ideal: 720, max: 1280 },
-  height: { ideal: 1280, max: 1280 },
+  width: { ideal: 1280, max: 1920 },
+  height: { ideal: 720, max: 1080 },
   frameRate: { ideal: 30, max: 30 },
   facingMode: "user",
 };
-
-const iceServers: RTCConfiguration["iceServers"] = [
-  {
-    urls: "stun:stun.relay.metered.ca:80",
-  },
-  {
-    urls: [
-      "turn:global.relay.metered.ca:80",
-      "turn:global.relay.metered.ca:80?transport=tcp",
-      "turn:global.relay.metered.ca:443",
-      "turns:global.relay.metered.ca:443?transport=tcp",
-    ],
-    username: process.env.EXPO_PUBLIC_TURN_USERNAME!,
-    credential: process.env.EXPO_PUBLIC_TURN_CREDENTIAL!,
-  },
-];
 
 export async function requestPermissions({
   callType,
@@ -64,11 +70,13 @@ export async function requestPermissions({
 export function createPeerConnection({
   participantId,
   callId,
+  polite = false,
   onRemoteStream,
   onConnectionStateChange,
 }: {
   participantId: number;
   callId: string;
+  polite?: boolean;
   onConnectionStateChange: (
     state: RTCPeerConnectionState,
     iceState: RTCIceConnectionState,
@@ -80,11 +88,31 @@ export function createPeerConnection({
     return peerConnections.get(participantId);
   }
 
-  const participantPeer = new RTCPeerConnection({ iceServers });
+  const participantPeer = new RTCPeerConnection({
+    iceServers: getIceServers(),
+  });
 
   peerConnections.set(participantId, participantPeer);
+  stopStatsLoggers.set(
+    participantId,
+    startCallStatsLogger(participantId, participantPeer),
+  );
+  politePeerConnections.set(participantId, polite);
+
+  const logState = () =>
+    logPeerState({
+      participantId,
+      callId,
+      connectionState: participantPeer.connectionState,
+      iceConnectionState: participantPeer.iceConnectionState,
+      signalingState: participantPeer.signalingState,
+      iceGatheringState: participantPeer.iceGatheringState,
+    });
+
+  logState();
 
   participantPeer.onconnectionstatechange = () => {
+    logState();
     onConnectionStateChange(
       participantPeer.connectionState,
       participantPeer.iceConnectionState,
@@ -93,6 +121,7 @@ export function createPeerConnection({
   };
 
   participantPeer.oniceconnectionstatechange = () => {
+    logState();
     onConnectionStateChange(
       participantPeer.connectionState,
       participantPeer.iceConnectionState,
@@ -100,18 +129,28 @@ export function createPeerConnection({
     );
   };
 
+  participantPeer.onsignalingstatechange = logState;
+  participantPeer.onicegatheringstatechange = logState;
+
   participantPeer.onicecandidateerror = (event) => {
-    console.warn("WebRTC ICE candidate error:", {
-      code: event.errorCode,
-      message: event.errorText,
-      server: event.url,
-    });
+    logIceCandidateError({ participantId, callId, event });
   };
 
   participantPeer.ontrack = (event) => {
+    logRemoteTrack({
+      participantId,
+      callId,
+      streams: (event.streams ??
+        []) as unknown as readonly RNMediaStream[],
+      track: event.track,
+    });
+
     try {
       const stream = handleRemoteTrack({
-        event: event as unknown as { streams: readonly RNMediaStream[] },
+        event: event as unknown as {
+          streams: readonly RNMediaStream[];
+          track?: MediaStreamTrack;
+        },
       });
       onRemoteStream(participantId, stream);
     } catch (err) {
@@ -121,7 +160,7 @@ export function createPeerConnection({
 
   participantPeer.onicecandidate = (event) => {
     if (event.candidate) {
-      sendIceCandidate({
+      void sendIceCandidateWithRetry({
         callId,
         candidate: event.candidate.toJSON(),
       });
@@ -131,11 +170,26 @@ export function createPeerConnection({
   return participantPeer;
 }
 
-export function hasTurnCredentials() {
-  return Boolean(
-    process.env.EXPO_PUBLIC_TURN_USERNAME?.trim() &&
-      process.env.EXPO_PUBLIC_TURN_CREDENTIAL?.trim(),
-  );
+async function sendIceCandidateWithRetry({
+  callId,
+  candidate,
+}: {
+  callId: string;
+  candidate: RTCIceCandidateInit;
+}) {
+  try {
+    await sendIceCandidate({ callId, candidate });
+  } catch (firstError) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    try {
+      await sendIceCandidate({ callId, candidate });
+    } catch (retryError) {
+      console.warn("Could not send an ICE candidate:", {
+        firstError,
+        retryError,
+      });
+    }
+  }
 }
 
 function mediaErrorMessage(error: unknown) {
@@ -233,11 +287,14 @@ export async function switchCamera({ stream }: { stream: RNMediaStream }) {
   }
 
   const localStream = stream as unknown as MediaStream;
-  const [currentTrack, ...duplicateTracks] = localStream.getVideoTracks();
+  const videoTracks = localStream.getVideoTracks();
+  const currentTrack = screenShareTrack
+    ? previousCameraTrack
+    : videoTracks[0];
   if (!currentTrack) {
     throw new Error("Enable your camera before switching cameras.");
   }
-  if (duplicateTracks.length > 0) {
+  if (!screenShareTrack && videoTracks.length > 1) {
     throw new Error("More than one local video track is active. Restart the call before switching cameras.");
   }
 
@@ -308,9 +365,29 @@ export async function switchCamera({ stream }: { stream: RNMediaStream }) {
     );
   }
 
-  localStream.removeTrack(currentTrack);
-  localStream.addTrack(replacementTrack);
+  if (screenShareTrack) {
+    previousCameraTrack = replacementTrack;
+    previousCameraEnabled = replacementTrack.enabled;
+  } else {
+    localStream.removeTrack(currentTrack);
+    localStream.addTrack(replacementTrack);
+  }
   currentTrack.stop();
+}
+
+function getSenderKind(
+  peerConnection: RTCPeerConnection,
+  sender: RTCRtpSender,
+) {
+  if (sender.track?.kind) return sender.track.kind;
+
+  try {
+    return peerConnection
+      .getTransceivers()
+      .find((transceiver) => transceiver.sender === sender)?.receiver.track.kind;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function addLocalTracks({
@@ -322,16 +399,52 @@ export async function addLocalTracks({
 }) {
   const webStream = stream as unknown as MediaStream;
 
-  for (const track of webStream.getTracks()) {
+  const tracks = webStream.getTracks();
+  if (
+    screenShareTrack &&
+    previousCameraTrack?.readyState === "live" &&
+    !tracks.some((track) => track.id === previousCameraTrack?.id)
+  ) {
+    tracks.unshift(previousCameraTrack);
+  }
+
+  for (const track of tracks) {
     if (
-      peerConnection
-        .getSenders()
-        .some((sender) => sender.track?.id === track.id)
+      screenShareTrack &&
+      track.kind === "video" &&
+      track.id !== screenShareTrack.id &&
+      !previousCameraTrack
     ) {
+      previousCameraTrack = track;
+      previousCameraEnabled = track.enabled;
+    }
+    const senders = peerConnection.getSenders();
+    if (senders.some((sender) => sender.track?.id === track.id)) {
       continue;
     }
 
-    peerConnection.addTrack(track, webStream);
+    const inactiveSender = senders.find(
+      (sender) =>
+        sender.track === null &&
+        ![...screenShareSenders.values()].includes(sender) &&
+        getSenderKind(peerConnection, sender) === track.kind,
+    );
+    let sender: RTCRtpSender;
+    if (inactiveSender) {
+      await inactiveSender.replaceTrack(track);
+      sender = inactiveSender;
+    } else {
+      sender = peerConnection.addTrack(track, webStream);
+    }
+
+    if (track.id === screenShareTrack?.id) {
+      const participantId = [...peerConnections].find(
+        ([, connection]) => connection === peerConnection,
+      )?.[0];
+      if (participantId !== undefined) {
+        screenShareSenders.set(participantId, sender);
+      }
+    }
   }
 
   await limitSenderBandwidth(peerConnection);
@@ -366,7 +479,7 @@ async function limitSenderBandwidth(peerConnection: RTCPeerConnection) {
 
       for (const encoding of parameters.encodings) {
         if (kind === "video") {
-          delete encoding.maxBitrate;
+          encoding.maxBitrate = 2_500_000;
           encoding.maxFramerate = 30;
         } else {
           encoding.maxBitrate = 64_000;
@@ -374,9 +487,24 @@ async function limitSenderBandwidth(peerConnection: RTCPeerConnection) {
       }
 
       parameters.degradationPreference = "balanced";
-      await sender.setParameters(parameters);
+      try {
+        await sender.setParameters(parameters);
+      } catch (error) {
+        Reflect.deleteProperty(parameters, "degradationPreference");
+        await sender.setParameters(parameters);
+        if (!warnedAboutSenderParameterFailure) {
+          warnedAboutSenderParameterFailure = true;
+          console.warn(
+            "Sender degradation preference is unsupported; using default adaptation.",
+            error,
+          );
+        }
+      }
     } catch (err) {
-      console.warn("Could not set sender bandwidth limits:", err);
+      if (!warnedAboutSenderParameterFailure) {
+        warnedAboutSenderParameterFailure = true;
+        console.warn("Could not set sender bandwidth limits:", err);
+      }
     }
   }
 }
@@ -384,15 +512,57 @@ async function limitSenderBandwidth(peerConnection: RTCPeerConnection) {
 export function handleRemoteTrack({
   event,
 }: {
-  event: { streams: readonly RNMediaStream[] };
+  event: {
+    streams?: readonly RNMediaStream[] | null;
+    track?: MediaStreamTrack;
+  };
 }) {
-  const firstStream = event.streams[0];
+  const [firstStream] = event.streams ?? [];
+  if (firstStream) return firstStream;
 
-  if (!firstStream) {
-    throw new Error("Stream not found");
+  if (event.track) {
+    return new MediaStream([event.track]) as unknown as RNMediaStream;
   }
 
-  return firstStream;
+  throw new Error("Remote track did not include a stream or track");
+}
+
+export function mergeRemoteStreams(
+  existing: MediaStream | null,
+  incoming: MediaStream,
+) {
+  if (!existing || existing === incoming) return incoming;
+
+  const tracksById = new Map<string, MediaStreamTrack>();
+  const existingTracks = existing.getTracks();
+  for (const track of existingTracks) {
+    const key = track.kind === "video" ? `video:${track.id}` : track.kind;
+    tracksById.set(key, track);
+  }
+  for (const track of incoming.getTracks()) {
+    const key = track.kind === "video" ? `video:${track.id}` : track.kind;
+    tracksById.set(key, track);
+  }
+
+  if (
+    tracksById.size === existingTracks.length &&
+    existingTracks.every((track) => {
+      const key = track.kind === "video" ? `video:${track.id}` : track.kind;
+      return tracksById.get(key) === track;
+    })
+  ) {
+    return existing;
+  }
+
+  const merged = new MediaStream();
+  for (const track of tracksById.values()) {
+    merged.addTrack(track);
+  }
+  return merged;
+}
+
+export function createVideoTrackStream(track: MediaStreamTrack): RNMediaStream {
+  return new MediaStream([track]) as unknown as RNMediaStream;
 }
 
 export function closePeerConnection({
@@ -404,18 +574,28 @@ export function closePeerConnection({
 
   if (!pc) return;
 
+  stopStatsLoggers.get(participantId)?.();
+  stopStatsLoggers.delete(participantId);
   pc.close();
 
   peerConnections.delete(participantId);
+  screenShareSenders.delete(participantId);
   pendingIceCandidates.delete(participantId);
+  politePeerConnections.delete(participantId);
+  clearPeerOperationQueue(participantId);
 }
 
 export function closeAllPeerConnections() {
+  for (const stopLogger of stopStatsLoggers.values()) stopLogger();
+  stopStatsLoggers.clear();
   for (const [, pc] of peerConnections) {
     pc.close();
   }
   peerConnections.clear();
+  screenShareSenders.clear();
   pendingIceCandidates.clear();
+  politePeerConnections.clear();
+  clearAllPeerOperationQueues();
 }
 
 /** Read-only snapshot of active peer connections for diagnostics. */
@@ -453,7 +633,18 @@ export function toggleMicrophone({ stream }: { stream: RNMediaStream }) {
   return enabled;
 }
 
-export function toggleCamera({ stream }: { stream: RNMediaStream }) {
+export function toggleCamera({
+  stream,
+}: {
+  stream: RNMediaStream;
+}): boolean | null {
+  if (screenShareTrack) {
+    if (!previousCameraTrack) return null;
+    previousCameraTrack.enabled = !previousCameraTrack.enabled;
+    previousCameraEnabled = previousCameraTrack.enabled;
+    return previousCameraTrack.enabled;
+  }
+
   const tracks = stream.getVideoTracks();
 
   if (tracks.length === 0) return false;
@@ -469,16 +660,42 @@ export function toggleCamera({ stream }: { stream: RNMediaStream }) {
 
 export async function createOffer({
   participantId,
+  iceRestart = false,
 }: {
   participantId: number;
-}) {
-  const pc = peerConnections.get(participantId);
+  iceRestart?: boolean;
+}): Promise<RTCSessionDescriptionInit | undefined> {
+  const peerConnection = peerConnections.get(participantId);
+  if (!peerConnection) return;
 
-  if (!pc) return;
+  const stable = await waitForStableSignalingState(peerConnection);
+  if (!stable) {
+    throw new Error(
+      "Timed out waiting for the current call negotiation to finish.",
+    );
+  }
 
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  return offer;
+  return runPeerOperation(participantId, async () => {
+    const pc = peerConnections.get(participantId);
+    if (pc !== peerConnection || !pc || pc.signalingState === "closed") {
+      return;
+    }
+
+    // Another negotiation may have started while this request was queued.
+    if (pc.signalingState && pc.signalingState !== "stable") return;
+
+    const offer = await pc.createOffer(
+      iceRestart ? { iceRestart: true } : undefined,
+    );
+    await pc.setLocalDescription(offer);
+    console.info("[call][negotiation] offer created", {
+      participantId,
+      iceRestart,
+      sdp: describeSdp(offer.sdp),
+      signalingState: pc.signalingState,
+    });
+    return offer;
+  });
 }
 
 export async function createAnswer({
@@ -487,17 +704,41 @@ export async function createAnswer({
 }: {
   offer: RTCSessionDescriptionInit;
   participantId: number;
-}) {
-  const pc = peerConnections.get(participantId);
+}): Promise<RTCSessionDescriptionInit | null | undefined> {
+  const peerConnection = peerConnections.get(participantId);
+  if (!peerConnection) return;
 
-  if (!pc) return;
+  return runPeerOperation(participantId, async () => {
+    const pc = peerConnections.get(participantId);
+    if (pc !== peerConnection || !pc || pc.signalingState === "closed") {
+      return;
+    }
 
-  await pc.setRemoteDescription(offer);
-  await processPendingIceCandidates({ participantId });
+    if (pc.signalingState === "have-local-offer") {
+      if (!politePeerConnections.get(participantId)) {
+        console.info(
+          "Ignoring a colliding call offer while waiting for its answer.",
+        );
+        return null;
+      }
 
-  const answer = await pc.createAnswer();
-  await pc.setLocalDescription(answer);
-  return answer;
+      await pc.setLocalDescription({ type: "rollback" });
+    }
+
+    if (pc.signalingState !== "have-remote-offer") {
+      await pc.setRemoteDescription(offer);
+    }
+    await processPendingIceCandidates({ participantId });
+
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    console.info("[call][negotiation] answer created", {
+      participantId,
+      sdp: describeSdp(answer.sdp),
+      signalingState: pc.signalingState,
+    });
+    return answer;
+  });
 }
 
 export async function handleAnswer({
@@ -507,12 +748,32 @@ export async function handleAnswer({
   answer: RTCSessionDescriptionInit;
   participantId: number;
 }) {
-  const pc = peerConnections.get(participantId);
+  const peerConnection = peerConnections.get(participantId);
+  if (!peerConnection) return;
 
-  if (!pc) return;
+  return runPeerOperation(participantId, async () => {
+    const pc = peerConnections.get(participantId);
+    if (
+      pc !== peerConnection ||
+      !pc ||
+      (pc.signalingState && pc.signalingState !== "have-local-offer")
+    ) {
+      console.warn("[call][negotiation] ignoring answer in unexpected state", {
+        participantId,
+        hasPeerConnection: Boolean(pc),
+        signalingState: pc?.signalingState,
+      });
+      return;
+    }
 
-  await pc.setRemoteDescription(answer);
-  await processPendingIceCandidates({ participantId });
+    await pc.setRemoteDescription(answer);
+    await processPendingIceCandidates({ participantId });
+    console.info("[call][negotiation] answer applied", {
+      participantId,
+      sdp: describeSdp(answer.sdp),
+      signalingState: pc.signalingState,
+    });
+  });
 }
 
 export async function addIceCandidate({
@@ -522,16 +783,30 @@ export async function addIceCandidate({
   participantId: number;
   candidate: RTCIceCandidateInit;
 }) {
-  const pc = peerConnections.get(participantId);
-
-  if (!pc || !pc.remoteDescription) {
+  const peerConnection = peerConnections.get(participantId);
+  if (!peerConnection) {
     const pending = pendingIceCandidates.get(participantId) ?? [];
     pending.push(candidate);
     pendingIceCandidates.set(participantId, pending);
     return;
   }
 
-  await pc.addIceCandidate(candidate);
+  return runPeerOperation(participantId, async () => {
+    const pc = peerConnections.get(participantId);
+
+    if (pc !== peerConnection) {
+      return;
+    }
+
+    if (!pc.remoteDescription) {
+      const pending = pendingIceCandidates.get(participantId) ?? [];
+      pending.push(candidate);
+      pendingIceCandidates.set(participantId, pending);
+      return;
+    }
+
+    await pc.addIceCandidate(candidate);
+  });
 }
 
 export async function processPendingIceCandidates({
@@ -578,7 +853,7 @@ export async function startScreenShare({
 }: {
   localStream: RNMediaStream;
   onStopped?: () => void;
-}): Promise<void> {
+}): Promise<boolean> {
   if (
     typeof navigator === "undefined" ||
     !navigator.mediaDevices?.getDisplayMedia
@@ -608,21 +883,44 @@ export async function startScreenShare({
 
   const webLocalStream = localStream as unknown as MediaStream;
   const currentVideoTrack = webLocalStream.getVideoTracks()[0] ?? null;
-  if (!currentVideoTrack || currentVideoTrack.readyState !== "live") {
-    displayStream.getTracks().forEach((displayTrack) => displayTrack.stop());
-    throw new Error("Start a video call before sharing your screen.");
-  }
-
-  const replacedSenders: RTCRtpSender[] = [];
+  const addedSenders: {
+    peerConnection: RTCPeerConnection;
+    sender: RTCRtpSender;
+  }[] = [];
+  const reusedSenders: RTCRtpSender[] = [];
+  let needsRenegotiation = false;
   try {
-    for (const peerConnection of peerConnections.values()) {
-      for (const sender of peerConnection.getSenders()) {
-        if (sender.track?.id !== currentVideoTrack.id) continue;
+    for (const [participantId, peerConnection] of peerConnections) {
+      const senders = peerConnection.getSenders();
+      const previousScreenSender = screenShareSenders.get(participantId);
+      const canReuseScreenSender = Boolean(
+        previousScreenSender &&
+          senders.includes(previousScreenSender) &&
+          previousScreenSender.track === null,
+      );
+      console.info("[call][screen-share] attaching track", {
+        participantId,
+        mode: canReuseScreenSender ? "reuse-screen-sender" : "add-screen-track",
+        track: describeTrack(track),
+        signalingState: peerConnection.signalingState,
+      });
+      if (canReuseScreenSender && previousScreenSender) {
         if (track.readyState !== "live") {
           throw new Error("Screen sharing ended before it could start.");
         }
-        await sender.replaceTrack(track);
-        replacedSenders.push(sender);
+        await previousScreenSender.replaceTrack(track);
+        reusedSenders.push(previousScreenSender);
+      } else {
+        if (track.readyState !== "live") {
+          throw new Error("Screen sharing ended before it could start.");
+        }
+        const sender = peerConnection.addTrack(track, displayStream);
+        addedSenders.push({
+          peerConnection,
+          sender,
+        });
+        screenShareSenders.set(participantId, sender);
+        needsRenegotiation = true;
       }
     }
 
@@ -636,24 +934,39 @@ export async function startScreenShare({
     if (track.readyState !== "live") {
       throw new Error("Screen sharing ended before it could start.");
     }
+
+    console.info("[call][screen-share] tracks attached", {
+      peers: peerConnections.size,
+      needsRenegotiation,
+      track: describeTrack(track),
+    });
   } catch (error) {
     const rollbackErrors: string[] = [];
-    for (const sender of replacedSenders) {
+    for (const sender of reusedSenders) {
       try {
-        await sender.replaceTrack(currentVideoTrack);
+        await sender.replaceTrack(null);
         await setScreenShareEncodingLimits(sender, false);
       } catch (rollbackError) {
         rollbackErrors.push(
           rollbackError instanceof Error
             ? rollbackError.message
-            : "A camera track could not be restored.",
+            : "A screen-share sender could not be reset.",
         );
+      }
+    }
+    for (const { peerConnection, sender } of addedSenders) {
+      peerConnection.removeTrack(sender);
+      for (const [participantId, currentPeer] of peerConnections) {
+        if (currentPeer === peerConnection) {
+          screenShareSenders.delete(participantId);
+          break;
+        }
       }
     }
     displayStream.getTracks().forEach((displayTrack) => displayTrack.stop());
     const rollbackDetail =
       rollbackErrors.length > 0
-        ? ` Camera restoration also failed: ${rollbackErrors.join("; ")}`
+        ? ` Screen-share rollback also failed: ${rollbackErrors.join("; ")}`
         : "";
     throw new Error(
       `Could not start screen sharing. ${
@@ -663,9 +976,10 @@ export async function startScreenShare({
   }
 
   previousCameraTrack = currentVideoTrack;
-  previousCameraEnabled = currentVideoTrack.enabled;
-  currentVideoTrack.enabled = false;
-  webLocalStream.removeTrack(currentVideoTrack);
+  previousCameraEnabled = currentVideoTrack?.enabled ?? true;
+  if (currentVideoTrack) {
+    webLocalStream.removeTrack(currentVideoTrack);
+  }
   webLocalStream.addTrack(track);
   screenShareTrack = track;
 
@@ -678,6 +992,7 @@ export async function startScreenShare({
       },
     );
   };
+  return needsRenegotiation;
 }
 
 export async function stopScreenShare({
@@ -695,25 +1010,30 @@ export async function stopScreenShare({
   }
 
   const restorationErrors: string[] = [];
-  if (cameraTrack && cameraTrack.readyState !== "ended") {
+  const cameraIsLive = cameraTrack?.readyState === "live";
+  if (cameraIsLive && cameraTrack) {
     cameraTrack.enabled = previousCameraEnabled;
     webLocalStream.addTrack(cameraTrack);
+  }
 
-    for (const peerConnection of peerConnections.values()) {
-      for (const sender of peerConnection.getSenders()) {
-        if (sender.track?.id !== track?.id) continue;
-        try {
-          await sender.replaceTrack(cameraTrack);
-        } catch (error) {
-          restorationErrors.push(
-            error instanceof Error
-              ? error.message
-              : "A peer connection could not restore the camera.",
-          );
-        }
-        await setScreenShareEncodingLimits(sender, false);
-      }
+  for (const participantId of peerConnections.keys()) {
+    const sender = screenShareSenders.get(participantId);
+    if (!sender || sender.track?.id !== track?.id) continue;
+    console.info("[call][screen-share] detaching track", {
+      participantId,
+      restoreCamera: cameraIsLive,
+      track: describeTrack(track),
+    });
+    try {
+      await sender.replaceTrack(null);
+    } catch (error) {
+      restorationErrors.push(
+        error instanceof Error
+          ? error.message
+          : "A peer connection could not stop screen sharing.",
+      );
     }
+    await setScreenShareEncodingLimits(sender, false);
   }
 
   track?.stop();
@@ -723,7 +1043,7 @@ export async function stopScreenShare({
 
   if (restorationErrors.length > 0) {
     throw new Error(
-      `Could not restore the camera on every participant: ${restorationErrors.join("; ")}`,
+      `Could not stop screen sharing for every participant: ${restorationErrors.join("; ")}`,
     );
   }
 }

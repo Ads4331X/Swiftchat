@@ -18,6 +18,7 @@ import {
   onIceCandidate,
 } from "@/core/socket/call-signaling";
 import type { MediaStream } from "react-native-webrtc";
+import { describeSdp } from "./call-debug";
 import {
   addIceCandidate,
   addLocalTracks,
@@ -27,6 +28,7 @@ import {
   createOffer,
   createPeerConnection,
   getLocalMedia,
+  getPeerConnections,
   handleAnswer,
   requestPermissions,
   startCallAudio,
@@ -218,6 +220,7 @@ export async function setupOutgoingCall({
   const peerConnection = createPeerConnection({
     participantId,
     callId,
+    polite: false,
     onRemoteStream,
     onConnectionStateChange,
   });
@@ -293,12 +296,29 @@ export async function renegotiateCallVideo({
   participantIds: number[];
   localStream: MediaStream;
 }) {
+  const connectedParticipantIds = [...getPeerConnections().keys()].filter(
+    (participantId) => participantIds.includes(participantId),
+  );
+
   await Promise.all(
-    participantIds.map(async (participantId) => {
+    connectedParticipantIds.map(async (participantId) => {
       await addLocalTracksToPeerConnection({ participantId, stream: localStream });
       const offer = await createOffer({ participantId });
-      if (!offer) return;
+      if (!offer) {
+        console.warn("[call][negotiation] no renegotiation offer created", {
+          callId,
+          participantId,
+        });
+        throw new Error(
+          "Could not renegotiate the call because the peer connection was busy.",
+        );
+      }
 
+      console.info("[call][negotiation] sending renegotiation offer", {
+        callId,
+        participantId,
+        sdp: describeSdp(offer.sdp),
+      });
       await sendCallOffer({
         callId,
         receiverId: participantId,
@@ -308,6 +328,23 @@ export async function renegotiateCallVideo({
   );
 }
 
+export async function restartCallIce({
+  callId,
+  participantId,
+}: {
+  callId: string;
+  participantId: number;
+}) {
+  const offer = await createOffer({ participantId, iceRestart: true });
+  if (!offer) throw new Error("Could not create an ICE restart offer.");
+
+  await sendCallOffer({
+    callId,
+    receiverId: participantId,
+    offer,
+  });
+}
+
 export async function handleCallAnswer({
   participantId,
   answer,
@@ -315,6 +352,10 @@ export async function handleCallAnswer({
   participantId: number;
   answer: RTCSessionDescriptionInit;
 }) {
+  console.info("[call][negotiation] incoming answer received", {
+    participantId,
+    sdp: describeSdp(answer.sdp),
+  });
   await handleAnswer({ participantId, answer });
 }
 
@@ -359,9 +400,16 @@ export async function handleIncomingOffer({
   const ownsStream = !localStream;
   const stream = localStream ?? (await prepareCall({ callType }));
 
+  console.info("[call][negotiation] incoming offer received", {
+    callId,
+    participantId: senderId,
+    sdp: describeSdp(offer.sdp),
+  });
+
   const peerConnection = createPeerConnection({
     participantId: senderId,
     callId,
+    polite: true,
     onRemoteStream,
     onConnectionStateChange,
   });
@@ -380,9 +428,17 @@ export async function handleIncomingOffer({
     });
 
     if (!answer) {
-      throw new Error("Failed to create call answer");
+      // A glare collision was resolved in favour of the other participant's
+      // offer, so there is nothing to answer.
+      if (ownsStream) await stopLocalMedia({ stream });
+      return { stream: localStream, peerConnection, answer: null };
     }
 
+    console.info("[call][negotiation] sending answer", {
+      callId,
+      participantId: senderId,
+      sdp: describeSdp(answer.sdp),
+    });
     await sendCallAnswer({
       callId,
       receiverId: senderId,

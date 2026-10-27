@@ -11,6 +11,7 @@
 const mockSendIceCandidate = jest.fn();
 const mockSendCallOffer = jest.fn();
 const mockSendCallAnswer = jest.fn();
+const mockCreateOffer = jest.fn();
 
 class MockPeerConnection {
   connectionState: RTCPeerConnectionState = "new";
@@ -25,7 +26,8 @@ class MockPeerConnection {
   ontrack: ((event: unknown) => void) | null = null;
   onicecandidate: ((event: unknown) => void) | null = null;
 
-  async createOffer() {
+  async createOffer(options?: RTCOfferOptions) {
+    mockCreateOffer(options);
     return { type: "offer" as const, sdp: "mock-sdp-offer" };
   }
 
@@ -177,7 +179,9 @@ import {
   handleCallAnswer,
   handleParticipantLeft,
   createOutgoingOffer,
+  renegotiateCallVideo,
   setupCallListeners,
+  restartCallIce,
 } from "../call-manager";
 // eslint-disable-next-line import/first
 import {
@@ -199,6 +203,49 @@ describe("Call Manager", () => {
   beforeEach(() => {
     closeAllPeerConnections();
     jest.clearAllMocks();
+  });
+
+  it("restarts ICE for a participant without rebuilding the call", async () => {
+    createPeerConnection({
+      participantId: 48,
+      callId: "test-call-id",
+      onRemoteStream: jest.fn(),
+      onConnectionStateChange: jest.fn(),
+    });
+
+    await restartCallIce({
+      callId: "test-call-id",
+      participantId: 48,
+    });
+
+    expect(mockCreateOffer).toHaveBeenCalledWith({ iceRestart: true });
+    expect(mockSendCallOffer).toHaveBeenCalledWith({
+      callId: "test-call-id",
+      receiverId: 48,
+      offer: expect.objectContaining({ type: "offer" }),
+    });
+  });
+
+  it("renegotiates media only for participants with a peer connection", async () => {
+    createPeerConnection({
+      participantId: 48,
+      callId: "test-call-id",
+      onRemoteStream: jest.fn(),
+      onConnectionStateChange: jest.fn(),
+    });
+
+    await renegotiateCallVideo({
+      callId: "test-call-id",
+      participantIds: [48, 999],
+      localStream: createMockStream("audio") as unknown as RNMediaStream,
+    });
+
+    expect(mockCreateOffer).toHaveBeenCalledTimes(1);
+    expect(mockSendCallOffer).toHaveBeenCalledWith({
+      callId: "test-call-id",
+      receiverId: 48,
+      offer: expect.objectContaining({ type: "offer" }),
+    });
   });
 
   describe("prepareCall", () => {

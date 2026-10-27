@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { AppState } from "react-native";
 import Toast from "react-native-toast-message";
 import type { MediaStream } from "react-native-webrtc";
 
@@ -28,6 +29,7 @@ import {
   prepareCall,
   renegotiateCallVideo,
   rejectIncomingCall,
+  restartCallIce,
   setupCallListeners,
   startCall as signalStartCall,
 } from "./call-manager";
@@ -35,8 +37,8 @@ import {
   closeAllPeerConnections,
   getLocalVideoMedia,
   getPeerConnections,
-  hasTurnCredentials,
   isScreenSharing as checkScreenSharing,
+  mergeRemoteStreams,
   requestPermissions,
   setCallSpeakerphone,
   startScreenShare,
@@ -51,6 +53,8 @@ import {
   collectDiagnostics,
   formatDiagnostics,
 } from "./call-diagnostics";
+import { hasTurnCredentials } from "./webrtc-config";
+import { describeTrack } from "./call-debug";
 import type {
   CallType,
   OngoingCall,
@@ -98,6 +102,17 @@ type CallContextValue = {
 
 const CallContext = createContext<CallContextValue | null>(null);
 
+function isPeerConnectionHealthy(peerConnection: {
+  connectionState: RTCPeerConnectionState;
+  iceConnectionState: RTCIceConnectionState;
+}) {
+  return (
+    peerConnection.connectionState === "connected" ||
+    peerConnection.iceConnectionState === "connected" ||
+    peerConnection.iceConnectionState === "completed"
+  );
+}
+
 export function CallProvider({ children }: { children: React.ReactNode }) {
   const [call, setCall] = useState<OngoingCall | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -119,6 +134,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const callRef = useRef<OngoingCall | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const cameraOperationRef = useRef(false);
+  const screenShareCleanupRef = useRef(false);
+  const iceRestartAttemptsRef = useRef(new Map<number, number>());
+  const iceRestartInFlightRef = useRef(new Set<number>());
+  const iceRecoveryTimersRef = useRef(
+    new Map<number, ReturnType<typeof setTimeout>>(),
+  );
 
   const commitCall = useCallback((next: OngoingCall | null) => {
     callRef.current = next;
@@ -140,6 +161,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const resetCall = useCallback(() => {
+    for (const timer of iceRecoveryTimersRef.current.values()) {
+      clearTimeout(timer);
+    }
+    iceRecoveryTimersRef.current.clear();
+    iceRestartAttemptsRef.current.clear();
+    iceRestartInFlightRef.current.clear();
     if (!callRef.current && !localStreamRef.current) return;
 
     const stream = localStreamRef.current;
@@ -180,13 +207,21 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
   const handleRemoteStream = useCallback(
     (participantId: number, stream: MediaStream) => {
+      console.info("[call][render] remote stream updated", {
+        participantId,
+        audioTracks: stream.getAudioTracks().map(describeTrack),
+        videoTracks: stream.getVideoTracks().map(describeTrack),
+      });
+
       setRemoteStreams((current) => {
         const existing = current.findIndex(
           (entry) => entry.participantId === participantId,
         );
         if (existing < 0) return [...current, { participantId, stream }];
+
         const next = [...current];
-        next[existing] = { participantId, stream };
+        const merged = mergeRemoteStreams(next[existing].stream, stream);
+        next[existing] = { participantId, stream: merged };
         return next;
       });
     },
@@ -213,6 +248,139 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
+  const removeParticipantFromCall = useCallback(
+    (participantId: number) => {
+      closeCallParticipant({ participantId });
+      setRemoteStreams((entries) =>
+        entries.filter((entry) => entry.participantId !== participantId),
+      );
+      setRemoteCameraStates((states) => {
+        const next = { ...states };
+        delete next[participantId];
+        return next;
+      });
+      setRemoteScreenShareStates((states) => {
+        const next = { ...states };
+        delete next[participantId];
+        return next;
+      });
+      patchCall({
+        participantIds: callRef.current?.participantIds.filter(
+          (id) => id !== participantId,
+        ),
+        participantStatuses: {
+          ...callRef.current?.participantStatuses,
+          [participantId]: "disconnected",
+        },
+      });
+    },
+    [patchCall],
+  );
+
+  const handleIceConnectionFailure = useCallback(
+    (participantId: number, iceState: RTCIceConnectionState) => {
+      const current = callRef.current;
+      if (!current) return;
+
+      if (current.participantCount > 2) {
+        removeParticipantFromCall(participantId);
+        Toast.show({
+          type: "error",
+          text1: "Participant connection failed",
+          text2: `Could not reconnect participant ${participantId}.`,
+        });
+        return;
+      }
+
+      const connectionHelp = hasTurnCredentials()
+        ? `ICE connection failed (${iceState}). Check the network or TURN relay availability.`
+        : "TURN relay is not configured. Add EXPO_PUBLIC_TURN_URLS, EXPO_PUBLIC_TURN_USERNAME, and EXPO_PUBLIC_TURN_CREDENTIAL, then restart Metro.";
+      Toast.show({
+        type: "error",
+        text1: "Call failed",
+        text2: connectionHelp,
+      });
+      void finishCall();
+    },
+    [finishCall, removeParticipantFromCall],
+  );
+
+  const recoverIceConnection = useCallback(
+    async (
+      participantId: number,
+      iceState: RTCIceConnectionState,
+      callId: string,
+    ) => {
+      if (iceRestartInFlightRef.current.has(participantId)) return;
+      iceRestartInFlightRef.current.add(participantId);
+
+      try {
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          if (callRef.current?.callId !== callId) return;
+
+          const peerConnection = getPeerConnections().get(participantId);
+          if (!peerConnection || isPeerConnectionHealthy(peerConnection)) {
+            iceRestartAttemptsRef.current.delete(participantId);
+            return;
+          }
+
+          iceRestartAttemptsRef.current.set(participantId, attempt + 1);
+          try {
+            await restartCallIce({ callId, participantId });
+          } catch (error) {
+            console.warn("Could not restart the call ICE connection:", error);
+          }
+
+          await new Promise((resolve) =>
+            setTimeout(resolve, attempt === 0 ? 4_000 : 6_000),
+          );
+        }
+
+        if (callRef.current?.callId !== callId) return;
+        const peerConnection = getPeerConnections().get(participantId);
+        if (peerConnection && !isPeerConnectionHealthy(peerConnection)) {
+          handleIceConnectionFailure(participantId, iceState);
+        }
+      } finally {
+        if (callRef.current?.callId === callId) {
+          iceRestartInFlightRef.current.delete(participantId);
+        }
+      }
+    },
+    [handleIceConnectionFailure],
+  );
+
+  const scheduleIceRecovery = useCallback(
+    (
+      participantId: number,
+      iceState: RTCIceConnectionState,
+      delayMs: number,
+    ) => {
+      if (
+        iceRestartInFlightRef.current.has(participantId) ||
+        iceRecoveryTimersRef.current.has(participantId)
+      ) {
+        return;
+      }
+
+      const timer = setTimeout(() => {
+        iceRecoveryTimersRef.current.delete(participantId);
+        const current = callRef.current;
+        if (!current) return;
+
+        const peerConnection = getPeerConnections().get(participantId);
+        if (!peerConnection || isPeerConnectionHealthy(peerConnection)) {
+          return;
+        }
+
+        void recoverIceConnection(participantId, iceState, current.callId);
+      }, delayMs);
+
+      iceRecoveryTimersRef.current.set(participantId, timer);
+    },
+    [recoverIceConnection],
+  );
+
   const handleConnectionStateChange = useCallback(
     (
       state: RTCPeerConnectionState,
@@ -220,6 +388,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       participantId: number,
     ) => {
       if (state === "connected") {
+        const timer = iceRecoveryTimersRef.current.get(participantId);
+        if (timer) clearTimeout(timer);
+        iceRecoveryTimersRef.current.delete(participantId);
+        iceRestartAttemptsRef.current.delete(participantId);
+        iceRestartInFlightRef.current.delete(participantId);
         const current = callRef.current;
         patchCall({
           status: "active",
@@ -234,45 +407,17 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      if (state === "failed") {
-        const current = callRef.current;
-        if (current && current.participantCount > 2) {
-          closeCallParticipant({ participantId });
-          setRemoteStreams((entries) =>
-            entries.filter((entry) => entry.participantId !== participantId),
-          );
-          setRemoteScreenShareStates((states) => {
-            const next = { ...states };
-            delete next[participantId];
-            return next;
-          });
-          patchCall({
-            participantIds: current.participantIds.filter(
-              (id) => id !== participantId,
-            ),
-          });
-          Toast.show({
-            type: "error",
-            text1: "Participant connection failed",
-            text2: hasTurnCredentials()
-              ? `Connection to participant ${participantId} failed.`
-              : "Check TURN configuration and network access.",
-          });
-          return;
-        }
+      const isFailed = state === "failed" || iceState === "failed";
+      const isDisconnected = iceState === "disconnected";
+      if (!isFailed && !isDisconnected) return;
 
-        const connectionHelp = hasTurnCredentials()
-          ? `ICE connection failed (${iceState}). Check the network or TURN relay availability.`
-          : "TURN relay credentials are missing. Configure EXPO_PUBLIC_TURN_USERNAME and EXPO_PUBLIC_TURN_CREDENTIAL, then restart Metro.";
-        Toast.show({
-          type: "error",
-          text1: "Call failed",
-          text2: connectionHelp,
-        });
-        void finishCall();
-      }
+      scheduleIceRecovery(
+        participantId,
+        iceState,
+        isFailed ? 0 : 2_500,
+      );
     },
-    [finishCall, patchCall],
+    [patchCall, scheduleIceRecovery],
   );
 
   const handleIncoming = useCallback(
@@ -540,11 +685,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         });
 
         if (callRef.current?.callId !== data.callId) {
-          void stopLocalMedia({ stream });
+          if (stream) void stopLocalMedia({ stream });
           return;
         }
 
-        if (!localStreamRef.current) {
+        if (!localStreamRef.current && stream) {
           commitLocalStream(stream);
           setIsCameraOn(stream.getVideoTracks().some((track) => track.enabled));
         }
@@ -657,6 +802,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       ) {
         return;
       }
+
+      console.info("[call][render] remote screen-share state", {
+        callId: data.callId,
+        participantId: data.userId,
+        isSharing: data.isSharing,
+      });
 
       setRemoteScreenShareStates((current) => ({
         ...current,
@@ -806,6 +957,55 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   ]);
 
   useEffect(() => {
+    const reconcileScreenShare = () => {
+      if (!isSharingScreen || screenShareCleanupRef.current) return;
+      const currentCall = callRef.current;
+      const stream = localStreamRef.current;
+      if (!currentCall || !stream || checkScreenSharing()) return;
+
+      screenShareCleanupRef.current = true;
+      void stopScreenShare({ localStream: stream }).then(
+        () => {
+          if (callRef.current?.callId !== currentCall.callId) return;
+          setIsSharingScreen(false);
+          const cameraOn = stream.getVideoTracks().some((track) => track.enabled);
+          setIsCameraOn(cameraOn);
+          publishCameraState(currentCall.callId, cameraOn);
+          publishScreenShareState(currentCall.callId, false);
+        },
+        (error: unknown) => {
+          console.error("Could not clean up screen sharing after resuming:", error);
+          Toast.show({
+            type: "error",
+            text1: "Screen sharing stopped",
+            text2: "The captured screen could not be restored after resuming.",
+          });
+          setIsSharingScreen(false);
+          publishScreenShareState(currentCall.callId, false);
+        },
+      ).finally(() => {
+        screenShareCleanupRef.current = false;
+      });
+    };
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active") reconcileScreenShare();
+    });
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") reconcileScreenShare();
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+    }
+
+    return () => {
+      subscription.remove();
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", handleVisibilityChange);
+      }
+    };
+  }, [isSharingScreen, publishCameraState, publishScreenShareState]);
+
+  useEffect(() => {
     return () => {
       if (localStreamRef.current) {
         void stopLocalMedia({ stream: localStreamRef.current });
@@ -839,15 +1039,18 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
   const toggleVideo = useCallback(async () => {
     const stream = localStreamRef.current;
-    if (!stream || checkScreenSharing()) return;
+    if (!stream) return;
 
     if (stream.getVideoTracks().length > 0) {
       const enabled = toggleCamera({ stream });
-      setIsCameraOn(enabled);
-      const currentCall = callRef.current;
-      if (currentCall) publishCameraState(currentCall.callId, enabled);
-      return;
+      if (enabled !== null) {
+        setIsCameraOn(enabled);
+        const currentCall = callRef.current;
+        if (currentCall) publishCameraState(currentCall.callId, enabled);
+        return;
+      }
     }
+    if (checkScreenSharing()) return;
 
     const currentCall = callRef.current;
     if (!currentCall || cameraOperationRef.current) return;
@@ -905,11 +1108,13 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       setIsCameraOn(true);
       publishCameraState(currentCall.callId, true);
     } catch (err) {
-      if (!addedToCallStream && videoTrack) {
-        videoTrack.stop();
+      if (addedToCallStream && videoTrack) {
+        stream.removeTrack(videoTrack);
       }
-      if (addedToCallStream) {
-        setIsCameraOn(true);
+      videoTrack?.stop();
+      setIsCameraOn(false);
+      if (callRef.current?.callId === currentCall.callId) {
+        publishCameraState(currentCall.callId, false);
       }
       Toast.show({
         type: "error",
@@ -928,8 +1133,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     if (
       !stream ||
       !callId ||
-      cameraOperationRef.current ||
-      checkScreenSharing()
+      cameraOperationRef.current
     ) {
       return;
     }
@@ -969,7 +1173,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         publishCameraState(currentCall.callId, cameraOn);
         publishScreenShareState(currentCall.callId, false);
       } else {
-        await startScreenShare({
+        const needsRenegotiation = await startScreenShare({
           localStream: stream,
           onStopped: () => {
             if (callRef.current?.callId !== currentCall.callId) return;
@@ -983,6 +1187,21 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         if (callRef.current?.callId !== currentCall.callId) {
           await stopScreenShare({ localStream: stream });
           return;
+        }
+        if (needsRenegotiation) {
+          const connectedParticipantIds = currentCall.participantIds.filter(
+            (participantId) => getPeerConnections().has(participantId),
+          );
+          try {
+            await renegotiateCallVideo({
+              callId: currentCall.callId,
+              participantIds: connectedParticipantIds,
+              localStream: stream,
+            });
+          } catch (error) {
+            await stopScreenShare({ localStream: stream });
+            throw error;
+          }
         }
         if (!checkScreenSharing()) {
           setIsSharingScreen(false);

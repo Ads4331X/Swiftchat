@@ -27,6 +27,7 @@ import Avatar from "@/features/profile/components/Avatar";
 import { getConversationOtherUser, getUser } from "@/core/db";
 import { getCurrentUserId } from "@/features/auth/services";
 
+import { shouldMirrorLocalVideo } from "../call-video-utils";
 import type { OngoingCall } from "../types";
 import { useCall } from "../use-call";
 import type { CallVideoProps } from "./call-video-types";
@@ -168,10 +169,15 @@ export default function CallOverlay() {
   const [participantAvatars, setParticipantAvatars] = useState<
     Record<number, CallAvatarData>
   >({});
+  const [remoteVideoAspectRatios, setRemoteVideoAspectRatios] = useState<
+    Record<number, number>
+  >({});
   const callId = call?.callId;
   const conversationId = call?.conversationId;
   const callParticipantId = call?.participantId;
   const callParticipantName = call?.participantName;
+  const isAnyScreenShareActive =
+    isSharingScreen || Object.values(remoteScreenShareStates).some(Boolean);
 
   const revealControls = useCallback(() => {
     setControlsVisible(true);
@@ -203,7 +209,8 @@ export default function CallOverlay() {
       call?.status !== "active" ||
       !controlsVisible ||
       moreControlsVisible ||
-      isWhiteboardVisible
+      isWhiteboardVisible ||
+      isAnyScreenShareActive
     ) {
       if (controlsTimer.current) clearTimeout(controlsTimer.current);
       controlsTimer.current = null;
@@ -224,6 +231,7 @@ export default function CallOverlay() {
     call?.status,
     controlsVisible,
     controlActivity,
+    isAnyScreenShareActive,
     isWhiteboardVisible,
     moreControlsVisible,
   ]);
@@ -405,6 +413,7 @@ export default function CallOverlay() {
     call.status === "connecting";
   const showLocalVideo =
     isVideo && hasLocalVideoTrack && localStream && isCameraOn && !isSharingScreen;
+  const hasRemoteParticipant = remoteStreams.length > 0;
   const showScreenShareParticipants =
     screenShareParticipantStreams.length > 0 ||
     (showLocalVideo && !isSharingScreen);
@@ -430,13 +439,28 @@ export default function CallOverlay() {
   );
   const primaryRemoteTrack = remoteVideoStreams[0]?.stream.getVideoTracks()[0];
   const primaryRemoteSettings = primaryRemoteTrack?.getSettings();
+  const primaryRemoteParticipantId = remoteVideoStreams[0]?.participantId;
+  const localVideoSettings = localStream?.getVideoTracks()[0]?.getSettings();
+  const mirrorLocalVideo = shouldMirrorLocalVideo(localStream);
   const primaryRemoteAspectRatio =
-    primaryRemoteSettings?.width && primaryRemoteSettings.height
+    (primaryRemoteParticipantId != null
+      ? remoteVideoAspectRatios[primaryRemoteParticipantId]
+      : undefined) ??
+    (primaryRemoteSettings?.width && primaryRemoteSettings.height
       ? primaryRemoteSettings.width / primaryRemoteSettings.height
-      : 16 / 9;
+      : 16 / 9);
+  const localVideoAspectRatio =
+    localVideoSettings?.width && localVideoSettings.height
+      ? localVideoSettings.width / localVideoSettings.height
+      : 9 / 16;
 
   const displayName =
     call.participantCount > 2 ? "Group Call" : call.participantName;
+  const canShareScreen =
+    Platform.OS === "android" ||
+    (Platform.OS === "web" &&
+      typeof navigator !== "undefined" &&
+      typeof navigator.mediaDevices?.getDisplayMedia === "function");
   const primaryAvatar =
     remoteStreams.length > 0
       ? (participantAvatars[remoteStreams[0].participantId] ?? {
@@ -488,6 +512,7 @@ export default function CallOverlay() {
                 stream={screenShareStream}
                 sharerName={screenSharerName}
                 isLocal={!remoteScreenShare}
+                onSingleTap={toggleCallControls}
               />
             </View>
             {showScreenShareParticipants ? (
@@ -524,7 +549,7 @@ export default function CallOverlay() {
                       stream={localStream}
                       style={StyleSheet.absoluteFill}
                       objectFit="contain"
-                      mirror
+                      mirror={mirrorLocalVideo}
                       muted
                     />
                     <View style={styles.tileBadge}>
@@ -587,7 +612,7 @@ export default function CallOverlay() {
                     stream={localStream}
                     style={StyleSheet.absoluteFill}
                     objectFit="cover"
-                    mirror
+                    mirror={mirrorLocalVideo}
                     muted
                     onDoubleTap={flipCamera}
                   />
@@ -618,6 +643,12 @@ export default function CallOverlay() {
                 key={`${remoteVideoStreams[0].participantId}-${remoteCameraStates[remoteVideoStreams[0].participantId] ?? true}`}
                 stream={remoteVideoStreams[0].stream}
                 style={StyleSheet.absoluteFill}
+                onAspectRatioChange={(aspectRatio) =>
+                  setRemoteVideoAspectRatios((current) => ({
+                    ...current,
+                    [remoteVideoStreams[0].participantId]: aspectRatio,
+                  }))
+                }
               />
             </Pressable>
             <LinearGradient
@@ -627,16 +658,24 @@ export default function CallOverlay() {
               pointerEvents="none"
             />
           </View>
-        ) : !screenShareStream && showLocalVideo && !showRemoteVideo ? (
+        ) : !screenShareStream &&
+          showLocalVideo &&
+          !showRemoteVideo &&
+          !hasRemoteParticipant ? (
           /* === Local camera preview when no remote video is available === */
           <View style={styles.singleVideoStage}>
-            <View style={styles.singleVideoFrame}>
+            <View
+              style={[
+                styles.singleVideoFrame,
+                { aspectRatio: localVideoAspectRatio },
+              ]}
+            >
               <DoubleTapCallVideo
                 stream={localStream}
                 key={`${localStream.id}-${isCameraOn ? "on" : "off"}`}
                 style={StyleSheet.absoluteFill}
                 objectFit="cover"
-                mirror
+                mirror={mirrorLocalVideo}
                 muted
                 onDoubleTap={flipCamera}
                 onSingleTap={toggleCallControls}
@@ -659,7 +698,10 @@ export default function CallOverlay() {
           >
             <View style={styles.ringingAvatarWrap}>
               {isRinging ? <PulseRing /> : null}
-              <CallAvatar participant={primaryAvatar} size={120} />
+              <CallAvatar
+                participant={primaryAvatar}
+                size={showLocalVideo && hasRemoteParticipant ? 152 : 120}
+              />
             </View>
             <Text style={styles.audioName} numberOfLines={1}>
               {displayName}
@@ -671,7 +713,7 @@ export default function CallOverlay() {
         ) : null}
 
         {/* === Header info bar === */}
-        {controlsVisible || call.status !== "active" ? (
+        {controlsVisible || call.status !== "active" || isAnyScreenShareActive ? (
           <SafeAreaView
             style={styles.headerSafeArea}
             edges={["top", "left", "right"]}
@@ -718,7 +760,7 @@ export default function CallOverlay() {
         isVideo &&
         !screenShareStream &&
         !showVideoGrid &&
-        showRemoteVideo ? (
+        (showRemoteVideo || (showLocalVideo && hasRemoteParticipant)) ? (
           <View style={styles.localVideoPreview}>
             {showLocalVideo ? (
               <DoubleTapCallVideo
@@ -726,7 +768,7 @@ export default function CallOverlay() {
                 key={`${localStream.id}-${isCameraOn ? "on" : "off"}`}
                 style={styles.localVideo}
                 objectFit="cover"
-                mirror
+                mirror={mirrorLocalVideo}
                 muted
                 zOrder={1}
                 onDoubleTap={flipCamera}
@@ -741,7 +783,10 @@ export default function CallOverlay() {
         ) : null}
 
         {/* === Controls dock === */}
-        {controlsVisible || isIncoming || call.status !== "active" ? (
+        {controlsVisible ||
+        isIncoming ||
+        call.status !== "active" ||
+        isAnyScreenShareActive ? (
         <SafeAreaView
           style={styles.controlsSafeArea}
           edges={["bottom"]}
@@ -805,21 +850,13 @@ export default function CallOverlay() {
                         onInteract={revealControls}
                       />
                     ) : null}
-                    {Platform.OS === "web" || Platform.OS === "android" ? (
+                    {canShareScreen ? (
                       <ControlButton
                         icon={isSharingScreen ? "monitor" : "airplay"}
-                        label={
-                          isSharingScreen
-                            ? "Stop share"
-                            : hasLocalVideoTrack
-                              ? "Share"
-                              : "Turn camera on to share"
-                        }
+                        label={isSharingScreen ? "Stop share" : "Share screen"}
                         active={isSharingScreen}
                         onPress={() => void toggleScreenShare()}
-                        disabled={
-                          isCameraBusy || (!hasLocalVideoTrack && !isSharingScreen)
-                        }
+                        disabled={isCameraBusy}
                         loading={isCameraBusy}
                         onInteract={revealControls}
                       />
@@ -829,7 +866,7 @@ export default function CallOverlay() {
                       label="Camera"
                       active={!isCameraOn}
                       onPress={() => void toggleVideo()}
-                      disabled={isCameraBusy || isSharingScreen}
+                      disabled={isCameraBusy}
                       loading={isCameraBusy}
                       onInteract={revealControls}
                     />
@@ -847,7 +884,7 @@ export default function CallOverlay() {
               </View>
               {moreControlsVisible && localStream ? (
                 <View style={styles.secondaryControlRow}>
-                  {hasLocalVideoTrack && !isSharingScreen ? (
+                  {hasLocalVideoTrack && call.callType === "video" ? (
                     <ControlButton
                       icon="refresh-cw"
                       label="Flip"
@@ -972,7 +1009,10 @@ function formatElapsedTime(totalSeconds: number) {
 function RemoteCallVideo({
   stream,
   style,
-}: Pick<CallVideoProps, "stream" | "style">) {
+  onAspectRatioChange,
+}: Pick<CallVideoProps, "stream" | "style"> & {
+  onAspectRatioChange?: (aspectRatio: number) => void;
+}) {
   const track = stream.getVideoTracks()[0];
   const settings = track?.getSettings();
   const [objectFit, setObjectFit] = useState<"cover" | "contain">(
@@ -984,9 +1024,10 @@ function RemoteCallVideo({
   );
   const onDimensionsChange = useCallback(
     ({ width, height }: { width: number; height: number }) => {
+      if (width > 0 && height > 0) onAspectRatioChange?.(width / height);
       if (width >= height * 1.25) setObjectFit("contain");
     },
-    [],
+    [onAspectRatioChange],
   );
 
   return (
@@ -1140,8 +1181,8 @@ const styles = StyleSheet.create({
     aspectRatio: 16 / 9,
     backgroundColor: "#11181C",
     borderRadius: 16,
-    maxHeight: "100%",
-    maxWidth: 1200,
+    maxHeight: Platform.OS === "web" ? "100%" : "78%",
+    maxWidth: Platform.OS === "web" ? 1200 : 480,
     overflow: "hidden",
     width: "100%",
   },

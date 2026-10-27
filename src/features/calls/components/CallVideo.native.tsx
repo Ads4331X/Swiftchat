@@ -12,6 +12,7 @@ export default function CallVideo({
     <RTCView
       streamURL={stream.toURL()}
       pointerEvents="none"
+      zOrder={0}
       onDimensionsChange={
         onDimensionsChange
           ? (event) => onDimensionsChange(event.nativeEvent)

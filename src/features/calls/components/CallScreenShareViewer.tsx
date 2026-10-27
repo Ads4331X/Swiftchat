@@ -1,10 +1,12 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import * as ScreenOrientation from "expo-screen-orientation";
 import {
   Gesture,
   GestureDetector,
 } from "react-native-gesture-handler";
 import {
   Pressable,
+  Platform,
   StyleSheet,
   Text,
   View,
@@ -17,18 +19,28 @@ import Animated, {
 import type { MediaStream } from "react-native-webrtc";
 
 import CallVideo from "./CallVideo";
+import { createVideoTrackStream } from "../webrtc";
 
 export default function CallScreenShareViewer({
   stream,
   sharerName,
   isLocal,
+  onSingleTap,
 }: {
   stream: MediaStream;
   sharerName: string;
   isLocal: boolean;
+  onSingleTap?: () => void;
 }) {
   const { width } = useWindowDimensions();
   const [isLarger, setIsLarger] = useState(false);
+  const [isLandscape, setIsLandscape] = useState(false);
+  const [orientationReady, setOrientationReady] = useState(
+    Platform.OS === "web",
+  );
+  const previousOrientationLock = useRef<
+    ScreenOrientation.OrientationLock | undefined
+  >(undefined);
   const scale = useSharedValue(1);
   const initialScale = useSharedValue(1);
   const translateX = useSharedValue(0);
@@ -37,6 +49,50 @@ export default function CallScreenShareViewer({
   const initialY = useSharedValue(0);
   const viewportWidth = useSharedValue(0);
   const viewportHeight = useSharedValue(0);
+
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    setIsLandscape(false);
+    setOrientationReady(false);
+    previousOrientationLock.current = undefined;
+
+    let cancelled = false;
+    const orientationSubscription =
+      ScreenOrientation.addOrientationChangeListener(({ orientationInfo }) => {
+        setIsLandscape(
+          orientationInfo.orientation ===
+            ScreenOrientation.Orientation.LANDSCAPE_LEFT ||
+            orientationInfo.orientation ===
+              ScreenOrientation.Orientation.LANDSCAPE_RIGHT,
+        );
+      });
+
+    void (async () => {
+      try {
+        const previousLock = await ScreenOrientation.getOrientationLockAsync();
+        if (cancelled) return;
+        previousOrientationLock.current = previousLock;
+        setOrientationReady(true);
+      } catch (error) {
+        previousOrientationLock.current =
+          ScreenOrientation.OrientationLock.PORTRAIT_UP;
+        setOrientationReady(true);
+        console.warn("Could not read screen orientation:", error);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      orientationSubscription.remove();
+      const previousLock = previousOrientationLock.current;
+      previousOrientationLock.current = undefined;
+      if (previousLock !== undefined) {
+        void ScreenOrientation.lockAsync(previousLock).catch((error: unknown) => {
+          console.warn("Could not restore screen orientation:", error);
+        });
+      }
+    };
+  }, []);
 
   const pinchGesture = useMemo(
     () =>
@@ -83,9 +139,18 @@ export default function CallScreenShareViewer({
       viewportWidth,
     ],
   );
+  const tapGesture = useMemo(
+    () =>
+      Gesture.Tap()
+        .maxDistance(10)
+        .onEnd((_event, success) => {
+          if (success) onSingleTap?.();
+        }),
+    [onSingleTap],
+  );
   const gesture = useMemo(
-    () => Gesture.Simultaneous(pinchGesture, panGesture),
-    [panGesture, pinchGesture],
+    () => Gesture.Simultaneous(pinchGesture, panGesture, tapGesture),
+    [panGesture, pinchGesture, tapGesture],
   );
   const videoStyle = useAnimatedStyle(() => ({
     transform: [
@@ -94,6 +159,14 @@ export default function CallScreenShareViewer({
       { scale: scale.value },
     ],
   }));
+  const videoTracks = stream.getVideoTracks();
+  const screenTrack = isLocal
+    ? videoTracks[0]
+    : videoTracks[videoTracks.length - 1];
+  const screenStream = useMemo(
+    () => (screenTrack ? createVideoTrackStream(screenTrack) : stream),
+    [screenTrack, stream],
+  );
 
   const resetZoom = () => {
     scale.value = 1;
@@ -102,6 +175,22 @@ export default function CallScreenShareViewer({
     translateY.value = 0;
     initialX.value = 0;
     initialY.value = 0;
+  };
+
+  const toggleOrientation = async () => {
+    if (Platform.OS === "web") return;
+    const nextOrientation = isLandscape
+      ? (previousOrientationLock.current ??
+        ScreenOrientation.OrientationLock.PORTRAIT_UP)
+      : ScreenOrientation.OrientationLock.LANDSCAPE;
+
+    try {
+      await ScreenOrientation.lockAsync(nextOrientation);
+      setIsLandscape(!isLandscape);
+      resetZoom();
+    } catch (error) {
+      console.warn("Could not rotate shared screen:", error);
+    }
   };
 
   return (
@@ -121,7 +210,7 @@ export default function CallScreenShareViewer({
         >
           <Animated.View style={[StyleSheet.absoluteFill, videoStyle]}>
             <CallVideo
-              stream={stream}
+              stream={screenStream}
               muted={isLocal}
               objectFit="contain"
               style={StyleSheet.absoluteFill}
@@ -145,6 +234,21 @@ export default function CallScreenShareViewer({
           >
             <Text style={styles.toolbarButtonText}>Fit</Text>
           </Pressable>
+          {Platform.OS !== "web" ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                isLandscape ? "Return to previous orientation" : "Rotate to landscape"
+              }
+              onPress={() => void toggleOrientation()}
+              disabled={!orientationReady}
+              style={styles.toolbarButton}
+            >
+              <Text style={styles.toolbarButtonText}>
+                {isLandscape ? "Portrait" : "Rotate"}
+              </Text>
+            </Pressable>
+          ) : null}
           {width >= 900 ? (
             <Pressable
               accessibilityRole="button"
