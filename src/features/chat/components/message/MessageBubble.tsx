@@ -96,6 +96,7 @@ export default memo(function MessageBubble({
     useAttachment({
       conversationId,
       messageId: message.id,
+      keyEpoch: message.keyEpoch,
       enabled: showAttachment,
       autoLoad: !isDocumentAttachment,
     });
@@ -123,6 +124,7 @@ export default memo(function MessageBubble({
       const loaded = await ensureAttachmentLoaded({
         messageId: message.id,
         conversationId,
+        keyEpoch: message.keyEpoch,
       });
 
       if (loaded.status !== "ready" || !loaded.sourceUri) {
@@ -148,6 +150,7 @@ export default memo(function MessageBubble({
     conversationId,
     isDocumentAttachment,
     message.id,
+    message.keyEpoch,
     messageAttachmentMime,
   ]);
 

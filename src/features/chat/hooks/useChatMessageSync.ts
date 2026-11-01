@@ -7,6 +7,7 @@ import {
   flushPendingMessages,
   onChatCleared,
   onPendingFlushed,
+  onPendingMessageUpdated,
 } from "@/features/chat/services/sync";
 import {
   decryptMessages,
@@ -164,6 +165,15 @@ export default function useChatMessageSync({
 
     return unsubscribe;
   }, [isConnected, isInternetReachable, id, reconcileMessages]);
+
+  useEffect(() => {
+    return onPendingMessageUpdated(({ pendingId, conversationId, nonce }) => {
+      if (Number(conversationId) !== Number(id)) return;
+      setMessages((prev) =>
+        prev.map((m) => (m.id === pendingId ? { ...m, nonce } : m)),
+      );
+    });
+  }, [id, setMessages]);
 
   // React when this conversation is cleared from anywhere in the app (swipe
   // action, profile screen): drop the in-memory list so the screen shows empty.

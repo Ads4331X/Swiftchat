@@ -1,4 +1,4 @@
-import { encryptAttachment } from "@/core/crypto";
+import { encryptAttachment, getConversationEpoch } from "@/core/crypto";
 import { api } from "@/core/api";
 import { saveMessage } from "@/core/db";
 import { createAttachment } from "@/core/db/attachments";
@@ -19,9 +19,11 @@ export async function uploadAttachment({
   waveform?: number[];
   durationMs?: number;
 }) {
+  const epoch = await getConversationEpoch(conversationId);
   const attachment = await encryptAttachment({
     uri,
     conversationId,
+    epoch,
     caption,
     waveform,
     durationMs,
@@ -35,6 +37,7 @@ export async function uploadAttachment({
   });
 
   formData.append("conversationId", String(conversationId));
+  formData.append("keyEpoch", String(epoch));
   formData.append("encryptedKey", attachment.encryptedKey);
   formData.append("keyNonce", attachment.keyNonce);
   formData.append("encryptedHeader", attachment.encryptedHeader);
@@ -54,6 +57,7 @@ export async function uploadAttachment({
     keyNonce: attachment.keyNonce,
     encryptedHeader: attachment.encryptedHeader,
     headerNonce: attachment.headerNonce,
+    keyEpoch: epoch,
     uuid: attachment.uuid,
   });
 
@@ -64,6 +68,7 @@ export async function uploadAttachment({
     SenderId: Number(response.data.senderId),
     ConversationId: Number(response.data.conversationId),
     nonce: response.data.nonce,
+    keyEpoch: response.data.keyEpoch ?? epoch,
   });
 
   return messageId;

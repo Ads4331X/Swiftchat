@@ -25,6 +25,7 @@ const STATEMENTS = [
     reactions TEXT,
     replyToId INTEGER,
     repliedTo TEXT,
+    keyEpoch INTEGER,
     attachment TEXT
   );`,
   `CREATE TABLE IF NOT EXISTS Conversation (
@@ -46,7 +47,8 @@ const STATEMENTS = [
     editedAt TEXT,
     replyToId INTEGER,
     forwardedFromMsgId INTEGER,
-    repliedTo TEXT
+    repliedTo TEXT,
+    keyEpoch INTEGER,
   );`,
   `CREATE TABLE IF NOT EXISTS User (
     id INTEGER PRIMARY KEY,
@@ -71,9 +73,11 @@ const STATEMENTS = [
     messageId INTEGER NOT NULL
   );`,
   `CREATE TABLE IF NOT EXISTS ConversationKey (
-    conversationId INTEGER PRIMARY KEY,
-    keyBase64 TEXT NOT NULL
-  );`,
+  conversationId INTEGER NOT NULL,
+  epoch INTEGER NOT NULL,
+  keyBase64 TEXT NOT NULL,
+  PRIMARY KEY (conversationId, epoch)
+);`,
   `CREATE TABLE IF NOT EXISTS BlockedUser (
   userId INTEGER PRIMARY KEY
 );`,
@@ -88,6 +92,7 @@ const STATEMENTS = [
   keyNonce TEXT NOT NULL,
   encryptedHeader TEXT NOT NULL,
   headerNonce TEXT NOT NULL,
+  keyEpoch INTEGER,
   uploadStatus TEXT NOT NULL DEFAULT 'pending',
   downloadStatus TEXT NOT NULL DEFAULT 'pending'
 );`,
@@ -115,6 +120,45 @@ async function openDbOnce(): Promise<SQLite.SQLiteDatabase | null> {
       for (const stmt of STATEMENTS) {
         await database.execAsync(stmt);
       }
+
+      // Migrate ConversationKey to support multiple key epochs
+      const keyColumns = await database.getAllAsync<{ name: string }>(
+        `PRAGMA table_info(ConversationKey);`,
+      );
+
+      if (!keyColumns.some((column) => column.name === "epoch")) {
+        await database.execAsync(`
+    CREATE TABLE ConversationKey_new (
+      conversationId INTEGER NOT NULL,
+      epoch INTEGER NOT NULL,
+      keyBase64 TEXT NOT NULL,
+      PRIMARY KEY (conversationId, epoch)
+    );
+
+    INSERT INTO ConversationKey_new (conversationId, epoch, keyBase64)
+    SELECT conversationId, 1, keyBase64 FROM ConversationKey;
+
+    DROP TABLE ConversationKey;
+
+    ALTER TABLE ConversationKey_new RENAME TO ConversationKey;
+  `);
+      }
+
+      try {
+        await database.execAsync(
+          `ALTER TABLE PendingMessage ADD COLUMN keyEpoch INTEGER;`,
+        );
+      } catch {}
+      try {
+        await database.execAsync(
+          `ALTER TABLE Message ADD COLUMN keyEpoch INTEGER;`,
+        );
+      } catch {}
+      try {
+        await database.execAsync(
+          `ALTER TABLE Attachment ADD COLUMN keyEpoch INTEGER;`,
+        );
+      } catch {}
       try {
         await database.execAsync(
           `CREATE VIRTUAL TABLE IF NOT EXISTS MessageSearch USING fts5(content);`,

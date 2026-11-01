@@ -15,7 +15,12 @@ import { getConversationMemberIds, getMessagesByIds, getUser } from "@/core/db";
 import { Message } from "@/features/chat/hooks/useChatMessages";
 import { searchMessages } from "@/core/db/search";
 import { emitScrollToMessage } from "@/features/chat/services/sync/scrollToMessage";
-import { decryptMessage, getOrCreateConversationKey } from "@/core/crypto";
+import {
+  decryptMessage,
+  getConversationEpoch,
+  getConversationKeyForEpoch,
+  getOrCreateConversationKey,
+} from "@/core/crypto";
 import { getCurrentUserId } from "@/features/auth/services";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import Avatar from "@/features/profile/components/Avatar";
@@ -156,11 +161,23 @@ export default function Search() {
       }
 
       // 7. Decrypt matching messages
+      const currentEpoch = await getConversationEpoch(conversationId);
       for (const msg of conversationMessages) {
+        const epoch = Number(msg.keyEpoch);
+        const messageEpoch = Number.isInteger(epoch) && epoch >= 1 ? epoch : 1;
+        const messageKey =
+          (await getConversationKeyForEpoch(conversationId, messageEpoch)) ??
+          (messageEpoch === currentEpoch ? conversationKey : null);
+
+        if (!messageKey) {
+          msg.text = "[Encrypted Message]";
+          continue;
+        }
+
         const decryptedMsg = await decryptMessage({
           encryptedMessage: msg.text,
           nonce: msg.nonce,
-          decryptedConversationKey: conversationKey,
+          decryptedConversationKey: messageKey,
         });
 
         msg.text = decryptedMsg.decryptMessage;

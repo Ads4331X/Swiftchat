@@ -10,11 +10,13 @@ import {
 export function useAttachment({
   conversationId,
   messageId,
+  keyEpoch,
   enabled,
   autoLoad = true,
 }: {
   conversationId: number;
   messageId: number;
+  keyEpoch: number | null | undefined;
   enabled: boolean;
   autoLoad?: boolean;
 }) {
@@ -27,11 +29,15 @@ export function useAttachment({
 
     const unsubscribe = subscribeAttachment(messageId, setState);
     if (autoLoad) {
-      ensureAttachmentLoaded({ messageId, conversationId }).catch(() => {});
+      ensureAttachmentLoaded({
+        messageId,
+        conversationId,
+        keyEpoch,
+      }).catch(() => {});
     }
 
     return unsubscribe;
-  }, [messageId, conversationId, enabled, autoLoad]);
+  }, [messageId, conversationId, keyEpoch, enabled, autoLoad]);
 
   return {
     sourceUri: state.sourceUri,

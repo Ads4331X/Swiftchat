@@ -17,6 +17,7 @@ export type Message = {
   senderId: number;
   conversationId: number;
   nonce: string;
+  keyEpoch?: number | null;
 
   /** Stable client key so optimistic rows keep their position when confirmed. */
   key?: string;

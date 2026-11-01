@@ -37,11 +37,13 @@ type AttachmentRow = NonNullable<Awaited<ReturnType<typeof getAttachment>>>;
  */
 async function resolveConversationKey(
   conversationId: number,
+  epoch: number,
 ): Promise<Uint8Array | null> {
-  const keyBase64 = await getConversationKeyCache(conversationId);
+  const keyBase64 = await getConversationKeyCache(conversationId, epoch);
+
   if (keyBase64) return Base64.toUint8Array(keyBase64);
 
-  return getInMemoryConversationKey(conversationId);
+  return getInMemoryConversationKey(conversationId, epoch);
 }
 
 export async function encryptMessage({
@@ -103,10 +105,12 @@ export async function encryptAttachment({
   uri,
   conversationId,
   caption,
+  epoch,
   waveform,
   durationMs,
 }: {
   uri: string;
+  epoch: number;
   conversationId: number;
   caption?: string;
   waveform?: number[];
@@ -142,7 +146,7 @@ export async function encryptAttachment({
     handle.close();
   }
 
-  const conversationKey = await resolveConversationKey(conversationId);
+  const conversationKey = await resolveConversationKey(conversationId, epoch);
 
   if (!conversationKey) {
     throw new Error("Conversation key not found");
@@ -238,17 +242,19 @@ async function decryptHeader({
 export async function readAttachmentHeader({
   messageId,
   conversationId,
+  epoch,
   attachment,
 }: {
   messageId: number;
   conversationId: number;
+  epoch: number;
   attachment?: AttachmentRow;
 }): Promise<{ waveform: number[] | null; durationMs: number | null }> {
   const empty = { waveform: null, durationMs: null };
   const attachmentData = attachment ?? (await getAttachment({ messageId }));
   if (!attachmentData) return empty;
 
-  const conversationKey = await resolveConversationKey(conversationId);
+  const conversationKey = await resolveConversationKey(conversationId, epoch);
   if (!conversationKey) return empty;
 
   try {
@@ -266,12 +272,14 @@ export async function readAttachmentHeader({
 export async function decryptAttachment({
   messageId,
   conversationId,
+  epoch,
   attachment,
   encryptedSize,
   onProgress,
 }: {
   messageId: number;
   conversationId: number;
+  epoch: number;
   attachment?: AttachmentRow; // skips a SQLite re-read
   encryptedSize?: number; // encrypted size, for progress
   onProgress?: (fraction: number) => void; // 0..1 decrypt progress
@@ -279,7 +287,7 @@ export async function decryptAttachment({
   await sodium.ready;
 
   const attachmentData = attachment ?? (await getAttachment({ messageId }));
-  const conversationKey = await resolveConversationKey(conversationId);
+  const conversationKey = await resolveConversationKey(conversationId, epoch);
 
   if (!conversationKey || !attachmentData || !attachmentData.localPath) {
     console.warn("decryptAttachment could not find", {

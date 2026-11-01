@@ -10,7 +10,11 @@ import {
   updateMsg,
 } from "@/core/db";
 import { removeMessageFromSearch, updateMessageInSearch } from "@/core/db/search";
-import { encryptMessage } from "@/core/crypto";
+import {
+  encryptMessage,
+  getConversationEpoch,
+  getConversationKeyForEpoch,
+} from "@/core/crypto";
 import { acquireFlushLock, releaseFlushLock } from "@/features/chat/services/sync";
 import { decryptMessages, persistMessageLocally } from "@/features/chat/services";
 import { Message, MessageReaction } from "@/types/message";
@@ -66,6 +70,7 @@ export default function useChatMessageActions({
     sentAt,
     replyToId,
     repliedTo,
+    keyEpoch,
   }: {
     message: string;
     nonce: string;
@@ -75,6 +80,7 @@ export default function useChatMessageActions({
     sentAt: string;
     replyToId?: number;
     repliedTo?: string;
+    keyEpoch: number;
   }) => {
     await savePendingMessage({
       message,
@@ -85,6 +91,7 @@ export default function useChatMessageActions({
       sentAt,
       replyToId,
       repliedTo,
+      keyEpoch,
     });
   };
 
@@ -123,6 +130,7 @@ export default function useChatMessageActions({
     const held = await acquireFlushLock();
     let queued = false;
     try {
+      const keyEpoch = await getConversationEpoch(Number(conversationId));
       const { encryptedMessage, nonce: replyNonce } = await encryptMessage({
         message: trimmed,
         decryptedConversationKey,
@@ -144,6 +152,7 @@ export default function useChatMessageActions({
         repliedTo: repliedToSnapshot
           ? JSON.stringify(repliedToSnapshot)
           : undefined,
+        keyEpoch,
       });
       queued = true;
 
@@ -152,6 +161,7 @@ export default function useChatMessageActions({
         conversationId: Number(conversationId),
         nonce: replyNonce,
         replyToId: Number(messageId),
+        keyEpoch,
       });
 
       const [confirmedMessage] = await decryptMessages({
@@ -167,6 +177,7 @@ export default function useChatMessageActions({
           repliedTo: repliedToSnapshot
             ? JSON.stringify(repliedToSnapshot)
             : undefined,
+          keyEpoch,
         });
         await deletePendingMessage({ messageId: tempId });
       } catch (err) {
@@ -214,6 +225,7 @@ export default function useChatMessageActions({
     const held = await acquireFlushLock();
     let queued = false;
     try {
+      const keyEpoch = await getConversationEpoch(Number(id));
       const { encryptedMessage, nonce: encryptedNonce } = await encryptMessage({
         message: trimmed,
         decryptedConversationKey,
@@ -233,6 +245,7 @@ export default function useChatMessageActions({
         senderId: optimisticMessage.senderId,
         conversationId: optimisticMessage.conversationId,
         sentAt: optimisticMessage.sentAt,
+        keyEpoch,
       });
       queued = true;
 
@@ -240,6 +253,7 @@ export default function useChatMessageActions({
         messageText: encryptedMessage,
         conversationId: Number(id),
         nonce: encryptedNonce,
+        keyEpoch,
       });
 
       const [confirmedMessage] = await decryptMessages({
@@ -251,6 +265,7 @@ export default function useChatMessageActions({
       try {
         await persistMessageLocally(response.data, confirmedMessage.text, {
           nonce: encryptedNonce,
+          keyEpoch,
         });
         await deletePendingMessage({ messageId: tempId });
       } catch (err) {
@@ -279,10 +294,21 @@ export default function useChatMessageActions({
 
   const editMessage = async (messageId: string | number, text: string) => {
     if (!decryptedConversationKey) return;
+
+    const existing = messages.find((m) => m.id === Number(messageId));
+    const epoch = Number(existing?.keyEpoch);
+    const messageEpoch = Number.isInteger(epoch) && epoch >= 1 ? epoch : 1;
+    const conversationKey =
+      (await getConversationKeyForEpoch(id, messageEpoch)) ??
+      (messageEpoch === (await getConversationEpoch(id))
+        ? decryptedConversationKey
+        : null);
+    if (!conversationKey) return;
+
     const { encryptedMessage: encryptEditedMessage, nonce: editedNonce } =
       await encryptMessage({
         message: text,
-        decryptedConversationKey,
+        decryptedConversationKey: conversationKey,
       });
     await api.patch(`/api/conversations/messages/${messageId}`, {
       text: encryptEditedMessage,

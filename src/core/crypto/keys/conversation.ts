@@ -7,29 +7,40 @@ import { getCurrentUserPrivateKey } from "@/core/crypto/keys/identityStorage";
 const sodium = (sodiumModule as any).default ?? sodiumModule;
 // creating a temp cache while the conversation is open
 const conversationKeyCache = new Map<string, Uint8Array>();
+const conversationEpochCache = new Map<string, number>();
 
 type EncryptedConversationKeyRow = {
   encryptedConversationKey: string;
   nonce: string;
+  epoch: number;
   createdById: number | null;
   senderUserId: number | null;
 };
 
 async function getCachedConversationKey(
   conversationId: string,
+  epoch: number,
 ): Promise<Uint8Array | null> {
-  // gets the cached converastion key and returns if it exists
-  const cached = conversationKeyCache.get(conversationId);
-  if (cached) return cached;
+  // gets the cached conversation key and returns if it exists
+  const cacheId = `${conversationId}:${epoch}`;
+  const cached = conversationKeyCache.get(cacheId);
+  if (cached) {
+    conversationEpochCache.set(conversationId, epoch);
+    return cached;
+  }
 
-  // get the conversationkey cache from the local db
-  const persisted = await getConversationKeyCache(Number(conversationId));
+  // get the conversation key cache from the local db
+  const persisted = await getConversationKeyCache(
+    Number(conversationId),
+    epoch,
+  );
   if (!persisted) return null;
 
   try {
-    // setup the conversation key cache a
+    // setup the conversation key cache
     const key = Base64.toUint8Array(persisted);
-    conversationKeyCache.set(conversationId, key);
+    conversationKeyCache.set(cacheId, key);
+    conversationEpochCache.set(conversationId, epoch);
     return key;
   } catch {
     return null;
@@ -43,18 +54,103 @@ async function getCachedConversationKey(
  */
 export function getInMemoryConversationKey(
   conversationId: number,
+  epoch: number,
 ): Uint8Array | null {
-  return conversationKeyCache.get(String(conversationId)) ?? null;
+  return conversationKeyCache.get(`${conversationId}:${epoch}`) ?? null;
+}
+
+/**
+ * Resolves the key for a specific historical epoch without changing the
+ * conversation's cached current epoch. Used to decrypt each message with the
+ * key it was actually encrypted under.
+ */
+export async function getConversationKeyForEpoch(
+  conversationId: number | string,
+  epoch: number,
+): Promise<Uint8Array | null> {
+  const id = String(conversationId);
+  const cacheId = `${id}:${epoch}`;
+  const cached = conversationKeyCache.get(cacheId);
+  if (cached) return cached;
+
+  const persisted = await getConversationKeyCache(Number(id), epoch);
+  if (!persisted) return null;
+
+  try {
+    const key = Base64.toUint8Array(persisted);
+    conversationKeyCache.set(cacheId, key);
+    return key;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolves the conversation's current key epoch. Uses the epoch cached while
+ * loading the conversation key, then falls back to the server.
+ */
+export async function getConversationEpoch(
+  conversationId: number | string,
+): Promise<number> {
+  const key = String(conversationId);
+  const cached = conversationEpochCache.get(key);
+  if (cached != null) return cached;
+
+  try {
+    const row = await getEncryptedConversationKey(key);
+    if (row?.epoch) {
+      conversationEpochCache.set(key, row.epoch);
+      return row.epoch;
+    }
+  } catch {
+    // no key package yet — fall back to the default epoch
+  }
+
+  return 1;
+}
+
+/**
+ * Fetches the server's current key package and resolves its conversation key,
+ * bypassing the cached epoch so a rejected old epoch can be refreshed.
+ */
+export async function getCurrentConversationKey(
+  conversationId: number | string,
+): Promise<{ conversationKey: Uint8Array; epoch: number } | null> {
+  const id = String(conversationId);
+  const row = await getEncryptedConversationKey(id);
+  if (!row?.encryptedConversationKey || !row?.nonce) return null;
+
+  conversationEpochCache.set(id, row.epoch);
+  const cached = await getCachedConversationKey(id, row.epoch);
+  if (cached) {
+    return { conversationKey: cached, epoch: row.epoch };
+  }
+
+  const currentUserPrivateKey = await getCurrentUserPrivateKey();
+  if (!currentUserPrivateKey) return null;
+
+  const conversationKey = await openConversationKey({
+    conversationId: id,
+    row,
+    receiverPrivateKey: currentUserPrivateKey,
+  });
+  if (!conversationKey) return null;
+
+  conversationEpochCache.set(id, row.epoch);
+  return { conversationKey, epoch: row.epoch };
 }
 
 function cacheConversationKey(
   conversationId: string,
+  epoch: number,
   conversationKey: Uint8Array,
 ): void {
-  // set the conversation key (encrypted) as cache and also store locally
-  conversationKeyCache.set(conversationId, conversationKey);
+  // set the conversation key as cache and also store locally
+  conversationKeyCache.set(`${conversationId}:${epoch}`, conversationKey);
+
   setConversationKeyCache(
     Number(conversationId),
+    epoch,
     Base64.fromUint8Array(conversationKey),
   ).catch(() => {});
 }
@@ -89,16 +185,25 @@ export async function generateEncryptedKey({
 }
 
 export async function getEncryptedConversationKey(conversationId: string) {
-  // fetches the encrypted conversation key from the server
-  const response = await api.get(`/api/conversations/${conversationId}/key`);
-  return {
-    encryptedConversationKey: response.data.encryptedConversationKey,
-    nonce: response.data.nonce,
-    createdById: response.data.createdById, // user who created the conversation
-    keyCreatedById: response.data.keyCreatedById ?? null, // user who created the encryption key
-    senderUserId:
-      response.data.senderUserId ?? response.data.createdById ?? null, // user who sent the encrypted key
-  };
+  try {
+    const response = await api.get(`/api/conversations/${conversationId}/key`);
+
+    return {
+      encryptedConversationKey: response.data.encryptedConversationKey,
+      nonce: response.data.nonce,
+      epoch: response.data.epoch,
+      createdById: response.data.createdById,
+      keyCreatedById: response.data.keyCreatedById ?? null,
+      senderUserId:
+        response.data.senderUserId ?? response.data.createdById ?? null,
+    };
+  } catch (error: any) {
+    if (error?.response?.status === 404) {
+      return null;
+    }
+
+    throw error;
+  }
 }
 export async function claimConversationKey(conversationId: string) {
   // asks the server if this user can create the conversation key
@@ -107,6 +212,7 @@ export async function claimConversationKey(conversationId: string) {
   return {
     claimed: Boolean(response.data?.claimed),
     keyCreatedById: response.data?.keyCreatedById ?? null,
+    epoch: response.data?.epoch ?? null,
   };
 }
 
@@ -167,7 +273,8 @@ async function openConversationKey({
       senderPublicKey: Base64.toUint8Array(data.publicKey), // converts the sender's public key to unit8array
     });
 
-    cacheConversationKey(conversationId, conversationKey); // stores the decrypted conversation key in the cache
+    cacheConversationKey(conversationId, row.epoch, conversationKey); // stores the decrypted conversation key in the cache
+    conversationEpochCache.set(conversationId, row.epoch);
     return conversationKey; // returns the decrypted conversation key
   } catch {
     console.warn(
@@ -183,29 +290,36 @@ async function storeEncryptedConversationKeysForMembers({
   memberIds,
   conversationKey,
   currentUserPrivateKey,
+  epoch,
 }: {
   conversationId: string;
   memberIds: number[];
   conversationKey: Uint8Array;
   currentUserPrivateKey: string;
+  epoch: number;
 }): Promise<void> {
-  const senderPrivateKey = Base64.toUint8Array(currentUserPrivateKey); // convert your( user's) encoded base 64 private key to unit8array
+  const senderPrivateKey = Base64.toUint8Array(currentUserPrivateKey);
 
   for (const memberId of memberIds) {
-    // fetch each member public key
+    // Fetch each member's public key
     const { data } = await api.get(`/api/user/${memberId}/public-key`);
-    if (!data?.publicKey) continue;
-    // generates encrypted conversation key for each member using their public key and creator ( group admin) private key
+
+    if (!data?.publicKey) {
+      throw new Error(`Public key not found for user ${memberId}`);
+    }
+
+    // Encrypt the conversation key for this member
     const { encryptedKey, nonce } = await generateEncryptedKey({
       conversationKey,
-      receiverPublicKey: Base64.toUint8Array(data.publicKey), // converts member public key tpo unit8array
+      receiverPublicKey: Base64.toUint8Array(data.publicKey),
       senderPrivateKey,
     });
 
-    // store the group members encrypted key and nonce as base 64
+    // Store the encrypted key package on the server
     await api.put(`/api/conversations/${conversationId}/key/${memberId}`, {
       encryptedKey: Base64.fromUint8Array(encryptedKey),
       nonce: Base64.fromUint8Array(nonce),
+      epoch,
     });
   }
 }
@@ -231,18 +345,19 @@ export async function getOrCreateConversationKey(
   conversationId: string,
   memberIds: number[],
 ) {
-  const cached = await getCachedConversationKey(conversationId); // gets the conversaion key from the cache
-  if (cached) return cached;
-
   // gets the users private key
   const currentUserPrivateKey = await getCurrentUserPrivateKey();
   if (!currentUserPrivateKey) return null;
 
   // gets the encrypted conversation key as base64
   const row = await getEncryptedConversationKey(conversationId);
+
   // if encrypted conversation key and nonce exist then open the conversation
-  //( decrypt the conversation using user's private key and encrypted conversation key)
   if (row?.encryptedConversationKey && row?.nonce) {
+    conversationEpochCache.set(conversationId, row.epoch);
+    const cached = await getCachedConversationKey(conversationId, row.epoch);
+    if (cached) return cached;
+
     return openConversationKey({
       conversationId,
       row,
@@ -251,10 +366,13 @@ export async function getOrCreateConversationKey(
   }
 
   let claimed = false;
+  let epoch: number | null = null;
+
   try {
     // asks the server if this user can create the conversation key
     const result = await claimConversationKey(conversationId);
     claimed = result.claimed;
+    epoch = result.epoch;
   } catch (error: any) {
     if (error?.response?.status !== 409) {
       console.warn("Failed to claim conversation key:", error);
@@ -264,33 +382,45 @@ export async function getOrCreateConversationKey(
 
   // if this user did not create the key, fetch it from the server
   if (!claimed) {
-    // fetch the encrypted conversation key from the server
     const winnerRow = await getEncryptedConversationKey(conversationId);
-    // if nonce and encypted conversation exists then open the conversation
-    //( decrypt the conversation using user's private key and encrypted conversation key)
+
     if (winnerRow?.encryptedConversationKey && winnerRow?.nonce) {
+      conversationEpochCache.set(conversationId, winnerRow.epoch);
+      const cached = await getCachedConversationKey(
+        conversationId,
+        winnerRow.epoch,
+      );
+      if (cached) return cached;
+
       return openConversationKey({
         conversationId,
         row: winnerRow,
         receiverPrivateKey: currentUserPrivateKey,
       });
     }
+
     return null;
   }
 
+  if (!epoch) return null;
+
   // if no conversation key was found till now then a conversation key of random 32 byte is created
   const conversationKey = await generateConversationKey();
-  // stores the encrypted conversation key for each member
+
+  // stores conversation key for each group member
   await storeEncryptedConversationKeysForMembers({
     conversationId,
     memberIds,
     conversationKey,
     currentUserPrivateKey,
+    epoch,
   });
-  // cache the converastion key
-  cacheConversationKey(conversationId, conversationKey);
 
-  return conversationKey; // returns the encrypted conversation key
+  // cache the conversation key
+  cacheConversationKey(conversationId, epoch, conversationKey);
+  conversationEpochCache.set(conversationId, epoch);
+
+  return conversationKey;
 }
 
 export async function shareConversationKeyWithMembers({
@@ -307,16 +437,5 @@ export async function shareConversationKeyWithMembers({
   );
   if (!conversationKey) return false;
 
-  // gets the user's private key
-  const currentUserPrivateKey = await getCurrentUserPrivateKey();
-  if (!currentUserPrivateKey) return false;
-
-  // encrypts and stores the conversation key for each member
-  await storeEncryptedConversationKeysForMembers({
-    conversationId,
-    memberIds,
-    conversationKey,
-    currentUserPrivateKey,
-  });
   return true;
 }

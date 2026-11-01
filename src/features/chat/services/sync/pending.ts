@@ -1,13 +1,22 @@
 import { AppState } from "react-native";
 import NetInfo from "@react-native-community/netinfo";
+import Toast from "react-native-toast-message";
 import { api } from "@/core/api";
+import {
+  decryptMessage,
+  encryptMessage,
+  getConversationKeyForEpoch,
+  getCurrentConversationKey,
+} from "@/core/crypto";
 import { getToken } from "@/features/auth/services";
 import {
   confirmPendingMessage,
   deletePendingMessage,
   getMessageByNonce,
   getPendingMessages,
+  PendingMessage,
   updateConversationPreview,
+  updatePendingMessageEncryption,
 } from "@/core/db";
 
 let started = false;
@@ -34,6 +43,114 @@ function notifyFlushed(conversationId: number) {
   listeners.forEach((listener) =>
     listener({ conversationIds: [conversationId] }),
   );
+}
+
+type PendingUpdatedListener = (info: {
+  pendingId: number;
+  conversationId: number;
+  nonce: string;
+}) => void;
+const updatedListeners = new Set<PendingUpdatedListener>();
+
+export function onPendingMessageUpdated(
+  listener: PendingUpdatedListener,
+): () => void {
+  updatedListeners.add(listener);
+  return () => {
+    updatedListeners.delete(listener);
+  };
+}
+
+function notifyPendingMessageUpdated(info: {
+  pendingId: number;
+  conversationId: number;
+  nonce: string;
+}) {
+  updatedListeners.forEach((listener) => listener(info));
+}
+
+const DECRYPT_FAILED_TEXT = "[Encrypted Message]";
+const reportedFailures = new Set<number>();
+
+type PendingRotationResult =
+  | { ok: true; message: string; nonce: string; keyEpoch: number }
+  | { ok: false; reason: string };
+
+function isEpochConflict(error: unknown): boolean {
+  return (
+    (error as { response?: { status?: number } })?.response?.status === 409
+  );
+}
+
+function reportPendingFailure(pendingMessage: PendingMessage, reason: string) {
+  if (reportedFailures.has(pendingMessage.id)) return;
+  reportedFailures.add(pendingMessage.id);
+  console.warn(
+    `Pending message ${pendingMessage.id} left queued: ${reason}`,
+  );
+  Toast.show({
+    type: "error",
+    text1: "Queued message needs attention",
+    text2:
+      "It could not be updated after a key change and remains in the queue.",
+  });
+}
+
+async function rotatePendingMessageToCurrentEpoch(
+  pendingMessage: PendingMessage,
+  keyEpoch: number,
+): Promise<PendingRotationResult> {
+  const oldKey = await getConversationKeyForEpoch(
+    pendingMessage.conversationId,
+    keyEpoch,
+  );
+  if (!oldKey) {
+    return { ok: false, reason: "original epoch key is unavailable" };
+  }
+
+  const decrypted = await decryptMessage({
+    encryptedMessage: pendingMessage.text,
+    nonce: pendingMessage.nonce,
+    decryptedConversationKey: oldKey,
+  });
+  if (decrypted.decryptMessage === DECRYPT_FAILED_TEXT) {
+    return { ok: false, reason: "original ciphertext could not be decrypted" };
+  }
+
+  const current = await getCurrentConversationKey(
+    pendingMessage.conversationId,
+  );
+  if (!current) {
+    return { ok: false, reason: "current conversation key is unavailable" };
+  }
+
+  const encrypted = await encryptMessage({
+    message: decrypted.decryptMessage,
+    decryptedConversationKey: current.conversationKey,
+  });
+
+  const updated = await updatePendingMessageEncryption({
+    messageId: pendingMessage.id,
+    message: encrypted.encryptedMessage,
+    nonce: encrypted.nonce,
+    keyEpoch: current.epoch,
+  });
+  if (!updated) {
+    return { ok: false, reason: "queued message could not be updated" };
+  }
+
+  notifyPendingMessageUpdated({
+    pendingId: pendingMessage.id,
+    conversationId: Number(pendingMessage.conversationId),
+    nonce: encrypted.nonce,
+  });
+
+  return {
+    ok: true,
+    message: encrypted.encryptedMessage,
+    nonce: encrypted.nonce,
+    keyEpoch: current.epoch,
+  };
 }
 
 /**
@@ -91,13 +208,70 @@ export async function flushPendingMessages(): Promise<void> {
           continue;
         }
 
-        const result = await api.post("/api/conversations/messages", {
-          messageText: pendingMessage.text,
-          conversationId: pendingMessage.conversationId,
-          nonce: pendingMessage.nonce,
-          replyToId: pendingMessage.replyToId ?? null,
-          forwardedFromMsgId: pendingMessage.forwardedFromMsgId ?? null,
-        });
+        const storedKeyEpoch = pendingMessage.keyEpoch;
+        if (
+          typeof storedKeyEpoch !== "number" ||
+          !Number.isInteger(storedKeyEpoch) ||
+          storedKeyEpoch < 1
+        ) {
+          console.warn(
+            "Skipping pending message with missing key epoch:",
+            pendingMessage.id,
+          );
+          remaining.shift();
+          continue;
+        }
+
+        let keyEpoch = storedKeyEpoch;
+        let messageText = pendingMessage.text;
+        let nonce = pendingMessage.nonce;
+        let result;
+
+        try {
+          result = await api.post("/api/conversations/messages", {
+            messageText,
+            conversationId: pendingMessage.conversationId,
+            nonce,
+            replyToId: pendingMessage.replyToId ?? null,
+            forwardedFromMsgId: pendingMessage.forwardedFromMsgId ?? null,
+            keyEpoch,
+          });
+        } catch (err) {
+          if (!isEpochConflict(err)) throw err;
+
+          const rotated = await rotatePendingMessageToCurrentEpoch(
+            pendingMessage,
+            keyEpoch,
+          );
+          if (!rotated.ok) {
+            reportPendingFailure(pendingMessage, rotated.reason);
+            remaining.shift();
+            continue;
+          }
+
+          keyEpoch = rotated.keyEpoch;
+          messageText = rotated.message;
+          nonce = rotated.nonce;
+
+          try {
+            result = await api.post("/api/conversations/messages", {
+              messageText,
+              conversationId: pendingMessage.conversationId,
+              nonce,
+              replyToId: pendingMessage.replyToId ?? null,
+              forwardedFromMsgId: pendingMessage.forwardedFromMsgId ?? null,
+              keyEpoch,
+            });
+          } catch (retryErr) {
+            if (!isEpochConflict(retryErr)) throw retryErr;
+            reportPendingFailure(
+              pendingMessage,
+              "conversation key changed again while retrying",
+            );
+            remaining.shift();
+            continue;
+          }
+        }
 
         if (result.data?.id == null) {
           throw new Error("No message id returned");
@@ -113,12 +287,14 @@ export async function flushPendingMessages(): Promise<void> {
           sentAt: result.data.sentAt,
           SenderId: result.data.senderId,
           ConversationId: result.data.conversationId,
-          nonce: pendingMessage.nonce,
+          nonce,
           replyToId: pendingMessage.replyToId ?? undefined,
           repliedTo: pendingMessage.repliedTo ?? undefined,
           forwardedFromMsgId: pendingMessage.forwardedFromMsgId ?? undefined,
+          keyEpoch,
         });
 
+        reportedFailures.delete(pendingMessage.id);
         notifyFlushed(Number(pendingMessage.conversationId));
 
         updateConversationPreview({

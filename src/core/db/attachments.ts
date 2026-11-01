@@ -11,6 +11,7 @@ type Attachment = {
   keyNonce: string;
   encryptedHeader: string;
   headerNonce: string;
+  keyEpoch: number | null;
   uploadStatus: string;
   downloadStatus: string;
 };
@@ -25,6 +26,7 @@ type CreateAttachmentParams = {
   encryptedHeader: string;
   keyNonce: string;
   headerNonce: string;
+  keyEpoch?: number | null;
 };
 
 const ATTACHMENT_CREATE_SQL = `
@@ -37,8 +39,9 @@ const ATTACHMENT_CREATE_SQL = `
     encryptedKey,
     encryptedHeader,
     headerNonce,
-    keyNonce
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+    keyNonce,
+    keyEpoch
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 `;
 
 const ATTACHMENT_CREATE_PARAMS = ({
@@ -51,6 +54,7 @@ const ATTACHMENT_CREATE_PARAMS = ({
   encryptedHeader,
   headerNonce,
   keyNonce,
+  keyEpoch,
 }: CreateAttachmentParams) => [
   uuid,
   messageId,
@@ -61,6 +65,7 @@ const ATTACHMENT_CREATE_PARAMS = ({
   encryptedHeader,
   headerNonce,
   keyNonce,
+  keyEpoch ?? null,
 ];
 
 export async function createAttachment(params: CreateAttachmentParams) {
