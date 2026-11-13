@@ -20,16 +20,23 @@ export async function getConversationKeyCache(
 export async function setConversationKeyCache(
   conversationId: number,
   keyBase64: string,
-) {
+): Promise<boolean> {
   try {
     const db = await getDb();
+<<<<<<< Updated upstream
     if (!db) return;
+=======
+    if (!db) return false;
+
+>>>>>>> Stashed changes
     await db.runAsync(
       `INSERT OR REPLACE INTO ConversationKey (conversationId, keyBase64) VALUES (?, ?)`,
       [conversationId, keyBase64],
     );
+    return true;
   } catch (err) {
     console.warn("setConversationKeyCache skipped:", err);
+    return false;
   }
 }
 
@@ -44,3 +51,25 @@ export async function clearConversationKeyCache(conversationId: number) {
     console.warn("clearConversationKeyCache skipped:", err);
   }
 }
+
+
+
+// export async function getConversationKeyForEpoch(
+//   conversationId: number,
+//   epoch: number,
+// ) {
+//   try {
+//     const db = await getDb();
+//     if (!db) return;
+
+//     const row = await db.getFirstAsync<{ keyBase64: string }>(
+//       `SELECT keyBase64 FROM ConversationKey
+//        WHERE conversationId = ? AND epoch = ?`,
+//       [conversationId, epoch],
+//     );
+
+//     return row?.keyBase64 ?? null;
+//   } catch (err) {
+//     console.warn("getconversationKeyForEpoch skipped:", err);
+//   }
+// }

@@ -1,10 +1,14 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useFocusEffect } from "expo-router";
 import { getCurrentUserId } from "@/features/auth/services";
 import { getConversationOtherUser, getUser, upsertUser } from "@/core/db";
 import { api } from "@/core/api";
 import { getOrCreateConversationKey } from "@/core/crypto";
-import { listenForPresence } from "@/core/socket";
+import {
+  listenForKeyRotation,
+  listenForPresence,
+  listenForSocketEvent,
+} from "@/core/socket";
 import { reportPresence } from "@/shared/providers/presence-provider";
 
 type ChatParticipant = {
@@ -34,26 +38,37 @@ export default function useChatParticipant(
   const [conversationName, setConversationName] = useState<string | null>(null);
   const [members, setMembers] = useState<ChatMember[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     getCurrentUserId().then(setCurrentUserId);
   }, []);
 
-  useEffect(() => {
-    let mounted = true;
+  const loadKey = useCallback(
+    async (rotationMemberIds?: number[]) => {
+      if (!conversationId) return false;
 
-    async function loadKey() {
-      if (!conversationId || !memberIds) return;
+      const members =
+        rotationMemberIds ??
+        (memberIds ?? "")
+          .split(",")
+          .map(Number)
+          .filter(Number.isFinite);
+
+      if (members.length === 0) return false;
 
       setUpKeys().catch(() => {});
 
       try {
         const userId = await getCurrentUserId();
-
-        const members = memberIds
-          .split(",")
-          .map(Number)
-          .filter(Number.isFinite);
 
         const allMembers = Array.from(
           new Set(
@@ -68,20 +83,79 @@ export default function useChatParticipant(
           allMembers,
         );
 
-        if (mounted) {
-          setConversationKey(key ?? undefined);
+        if (key && mountedRef.current) {
+          setConversationKey(key);
         }
+
+        return Boolean(key);
       } catch (error) {
         console.error("Failed to load conversation key:", error);
+        return false;
       }
-    }
+    },
+    [conversationId, memberIds, setUpKeys],
+  );
 
-    loadKey();
+  const refreshKey = useCallback(
+    async (rotationMemberIds?: number[]) => {
+      let refreshed = await loadKey(rotationMemberIds);
+
+      for (let attempt = 0; !refreshed && attempt < 3; attempt++) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 400));
+        if (!mountedRef.current) return false;
+        refreshed = await loadKey(rotationMemberIds);
+      }
+
+      return refreshed;
+    },
+    [loadKey],
+  );
+
+  useEffect(() => {
+    void refreshKey();
+  }, [refreshKey, keyReadyVersion]);
+
+  useEffect(() => {
+    if (!conversationId) return;
+
+    const unsubscribeRotation = listenForKeyRotation((data) => {
+      if (Number(data.conversationId) !== Number(conversationId)) return;
+
+      const rotatedMemberIds = (data.memberIds ?? [])
+        .map(Number)
+        .filter(Number.isFinite);
+      if (rotatedMemberIds.length === 0) return;
+
+      void refreshKey(rotatedMemberIds);
+    });
+
+    const unsubscribeConnect = listenForSocketEvent("connect", () => {
+      void (async () => {
+        try {
+          const response = await api.get("/api/conversations");
+          const conversations: any[] = response.data;
+          const conversation = conversations.find(
+            (item) =>
+              String(item.conversationId ?? item.id) === String(conversationId),
+          );
+          const freshMemberIds: number[] = (conversation?.members ?? [])
+            .map((member: any) => Number(member.id ?? member.userId))
+            .filter((value: number) => Number.isFinite(value));
+
+          if (freshMemberIds.length > 0) {
+            await refreshKey(freshMemberIds);
+          }
+        } catch {
+          // Keep the existing key; the next reconnect/rotation will retry.
+        }
+      })();
+    });
 
     return () => {
-      mounted = false;
+      unsubscribeRotation();
+      unsubscribeConnect();
     };
-  }, [conversationId, memberIds, keyReadyVersion, setUpKeys]);
+  }, [conversationId, refreshKey]);
 
   useEffect(() => {
     if (otherUser?.userId != null) {

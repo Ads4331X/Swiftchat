@@ -10,7 +10,10 @@ import MemberPicker, {
   PickedMember,
 } from "@/features/groups/components";
 import { api } from "@/core/api";
-import { shareConversationKeyWithMembers } from "@/core/crypto";
+import {
+  sendHistoricalKeysToMember,
+  shareConversationKeyWithMembers,
+} from "@/core/crypto";
 
 export default function AddMembers() {
   const { id, memberIds } = useLocalSearchParams<{
@@ -45,6 +48,16 @@ export default function AddMembers() {
           memberIds: [...excludeIds, ...selected.map((m) => m.id)],
         });
       } catch {
+      }
+
+      for (const member of selected) {
+        try {
+          await sendHistoricalKeysToMember({
+            conversationId: Number(id),
+            userId: member.id,
+          });
+        } catch {
+        }
       }
 
       router.back();

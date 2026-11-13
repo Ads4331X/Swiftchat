@@ -70,13 +70,53 @@ export async function decryptMessages({
 
   return Promise.all(
     serverMessages.map(async (message) => {
+<<<<<<< Updated upstream
+=======
+      const conversationId = Number(message.conversationId);
+      const epoch = getMessageEpoch(message);
+      const cacheId = `${conversationId}:${epoch}`;
+
+      let conversationKey = resolvedKeys.get(cacheId);
+      if (conversationKey === undefined) {
+        conversationKey = await getConversationKeyForEpoch(
+          conversationId,
+          epoch,
+        );
+
+        if (!conversationKey && decryptedConversationKey) {
+          let currentEpoch = currentEpochs.get(conversationId);
+          if (currentEpoch === undefined) {
+            currentEpoch = await getConversationEpoch(conversationId);
+            currentEpochs.set(conversationId, currentEpoch);
+          }
+          if (epoch === currentEpoch) {
+            conversationKey = decryptedConversationKey;
+          }
+        }
+
+        resolvedKeys.set(cacheId, conversationKey);
+      }
+
+      if (!conversationKey) {
+        return {
+          ...message,
+          encryptedText: message.encryptedText ?? message.text,
+          text: "[Encrypted Message]",
+        };
+      }
+
+>>>>>>> Stashed changes
       const { decryptMessage: decryptedText } = await decryptMessage({
         encryptedMessage: message.text,
         nonce: message.nonce,
         decryptedConversationKey,
       });
 
-      return { ...message, text: decryptedText };
+      return {
+        ...message,
+        encryptedText: message.encryptedText ?? message.text,
+        text: decryptedText,
+      };
     }),
   );
 }

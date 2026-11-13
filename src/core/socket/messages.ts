@@ -1,4 +1,4 @@
-import { getSocket } from "@/core/socket/client";
+import { getSocket, listenForSocketEvent } from "@/core/socket/client";
 
 export function listenForNewMessages(callback: (message: any) => void) {
   getSocket()?.on("new-message", callback);
@@ -70,4 +70,10 @@ export function listenForGroupDelete(
   return () => {
     getSocket()?.off("group-deleted", callback);
   };
+}
+
+export function listenForKeyRotation(
+  callback: (data: { conversationId: number; memberIds: number[] }) => void,
+) {
+  return listenForSocketEvent("conversation-key-rotated", callback);
 }

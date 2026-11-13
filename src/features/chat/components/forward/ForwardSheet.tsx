@@ -25,7 +25,16 @@ import {
   savePendingMessage,
 } from "@/core/db";
 import { acquireFlushLock, releaseFlushLock } from "@/features/chat/services/sync";
+<<<<<<< Updated upstream
 import { encryptMessage, getOrCreateConversationKey } from "@/core/crypto";
+=======
+import {
+  encryptMessage,
+  getConversationEpoch,
+  getConversationKeyForEpoch,
+  getOrCreateConversationKey,
+} from "@/core/crypto";
+>>>>>>> Stashed changes
 import {
   SelectionCheckbox,
   UserListItem,
@@ -183,9 +192,16 @@ export default function ForwardSheet({
         );
         if (!conversationKey) continue;
 
+<<<<<<< Updated upstream
+=======
+        const keyEpoch = await getConversationEpoch(chat.id);
+        const epochKey =
+          (await getConversationKeyForEpoch(chat.id, keyEpoch)) ??
+          conversationKey;
+>>>>>>> Stashed changes
         const { encryptedMessage, nonce } = await encryptMessage({
           message: originalText,
-          decryptedConversationKey: conversationKey,
+          decryptedConversationKey: epochKey,
         });
         const sentAt = new Date().toISOString();
         const messageId = -(nowBase + index);

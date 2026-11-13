@@ -17,6 +17,11 @@ export type Message = {
   senderId: number;
   conversationId: number;
   nonce: string;
+<<<<<<< Updated upstream
+=======
+  keyEpoch?: number | null;
+  encryptedText?: string;
+>>>>>>> Stashed changes
 
   /** Stable client key so optimistic rows keep their position when confirmed. */
   key?: string;

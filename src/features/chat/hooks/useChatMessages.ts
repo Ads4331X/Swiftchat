@@ -10,6 +10,8 @@ import useChatMessageSync from "@/features/chat/hooks/useChatMessageSync";
 import useChatSocketEvents from "@/features/chat/hooks/useChatSocketEvents";
 import { Message } from "@/types/message";
 import { getPendingMessages } from "@/core/db";
+import { decryptHistoricalKeyPackages } from "@/core/crypto/keys/conversation";
+import { decryptMessages } from "@/features/chat/services/messages";
 
 export type { Message, MessageReaction, RepliedTo } from "@/types/message";
 
@@ -45,6 +47,7 @@ export default function useChatMessages(
   }, [id]);
   const showSkeleton = firstLoad && !initialized;
   const tempIdRef = useRef(-1);
+  const historicalEpochRequestRef = useRef(new Set<string>());
 
   // Optimistic sends claim descending negative ids, and that number becomes the
   // queued row's `PendingMessage.id`. The counter used to restart at -1 on every
@@ -91,6 +94,73 @@ export default function useChatMessages(
     setHasMore,
     setServerLoaded,
   });
+
+  useEffect(() => {
+    if (!serverLoaded || messages.length === 0) return;
+
+    const conversationId = Number(id);
+    const epochs = [
+      ...new Set(
+        messages
+          .filter(
+            (message) =>
+              message.id > 0 &&
+              typeof message.encryptedText === "string" &&
+              message.encryptedText.length > 0,
+          )
+          .map((message) => Number(message.keyEpoch ?? 1))
+          .filter((epoch) => Number.isInteger(epoch) && epoch > 0),
+      ),
+    ].sort((a, b) => a - b);
+    if (epochs.length === 0) return;
+
+    const signature = epochs.join(",");
+    const requestKey = `${conversationId}:${signature}`;
+    if (historicalEpochRequestRef.current.has(requestKey)) {
+      return;
+    }
+    historicalEpochRequestRef.current.add(requestKey);
+
+    decryptHistoricalKeyPackages({ conversationId, messages })
+      .then(async (storedEpochs) => {
+        if (storedEpochs.length === 0) return;
+
+        const storedEpochSet = new Set(storedEpochs);
+        const decryptedMessages = await decryptMessages({
+          serverMessages: messages
+            .filter((message) =>
+              storedEpochSet.has(Number(message.keyEpoch ?? 1)),
+            )
+            .map((message) => ({
+              ...message,
+              text: message.encryptedText ?? message.text,
+            })),
+          decryptedConversationKey,
+        });
+        const decryptedById = new Map(
+          decryptedMessages.map((message) => [message.id, message]),
+        );
+
+        setMessages((currentMessages) =>
+          currentMessages.map((message) => {
+            const decrypted = decryptedById.get(message.id);
+            return decrypted &&
+              decrypted.encryptedText === message.encryptedText
+              ? { ...message, text: decrypted.text }
+              : message;
+          }),
+        );
+      })
+      .catch((error) => {
+        console.warn(
+          `Could not process historical keys for conversation ${conversationId}:`,
+          error,
+        );
+      })
+      .finally(() => {
+        historicalEpochRequestRef.current.delete(requestKey);
+      });
+  }, [decryptedConversationKey, id, messages, serverLoaded]);
 
   useChatSocketEvents({
     id,

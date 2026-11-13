@@ -14,5 +14,6 @@ export {
   generateEncryptedKey,
   getEncryptedConversationKey,
   getOrCreateConversationKey,
+  sendHistoricalKeysToMember,
   shareConversationKeyWithMembers,
 } from "@/core/crypto/keys/conversation";

@@ -123,9 +123,16 @@ export default function useChatMessageActions({
     const held = await acquireFlushLock();
     let queued = false;
     try {
+<<<<<<< Updated upstream
+=======
+      const keyEpoch = await getConversationEpoch(Number(conversationId));
+      const conversationKey =
+        (await getConversationKeyForEpoch(conversationId, keyEpoch)) ??
+        decryptedConversationKey;
+>>>>>>> Stashed changes
       const { encryptedMessage, nonce: replyNonce } = await encryptMessage({
         message: trimmed,
-        decryptedConversationKey,
+        decryptedConversationKey: conversationKey,
       });
 
       setMessages((prev) =>
@@ -156,7 +163,7 @@ export default function useChatMessageActions({
 
       const [confirmedMessage] = await decryptMessages({
         serverMessages: [response.data],
-        decryptedConversationKey,
+        decryptedConversationKey: conversationKey,
       });
       if (!confirmedMessage) return;
 
@@ -214,9 +221,16 @@ export default function useChatMessageActions({
     const held = await acquireFlushLock();
     let queued = false;
     try {
+<<<<<<< Updated upstream
+=======
+      const keyEpoch = await getConversationEpoch(Number(id));
+      const conversationKey =
+        (await getConversationKeyForEpoch(id, keyEpoch)) ??
+        decryptedConversationKey;
+>>>>>>> Stashed changes
       const { encryptedMessage, nonce: encryptedNonce } = await encryptMessage({
         message: trimmed,
-        decryptedConversationKey,
+        decryptedConversationKey: conversationKey,
       });
 
       setMessages((prev) =>
@@ -244,7 +258,7 @@ export default function useChatMessageActions({
 
       const [confirmedMessage] = await decryptMessages({
         serverMessages: [response.data],
-        decryptedConversationKey,
+        decryptedConversationKey: conversationKey,
       });
       if (!confirmedMessage) return;
 
