@@ -1,0 +1,1301 @@
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { AppState } from "react-native";
+import Toast from "react-native-toast-message";
+import type { MediaStream } from "react-native-webrtc";
+
+import { api } from "@/core/api";
+import { getUser } from "@/core/db";
+import {
+  sendCallCameraState,
+  sendCallScreenShareState,
+} from "@/core/socket/call-signaling";
+
+import {
+  acceptIncomingCall,
+  createOutgoingOffer,
+  endCall as signalEndCall,
+  handleCallAnswer,
+  handleIncomingIce,
+  handleIncomingOffer,
+  handleParticipantLeft as closeCallParticipant,
+  prepareCall,
+  renegotiateCallVideo,
+  rejectIncomingCall,
+  restartCallIce,
+  setupCallListeners,
+  startCall as signalStartCall,
+} from "./call-manager";
+import {
+  closeAllPeerConnections,
+  getLocalVideoMedia,
+  getPeerConnections,
+  isScreenSharing as checkScreenSharing,
+  mergeRemoteStreams,
+  requestPermissions,
+  setCallSpeakerphone,
+  startScreenShare,
+  stopCallAudio,
+  stopLocalMedia,
+  stopScreenShare,
+  switchCamera,
+  toggleCamera,
+  toggleMicrophone,
+} from "./webrtc";
+import {
+  collectDiagnostics,
+  formatDiagnostics,
+} from "./call-diagnostics";
+import { hasTurnCredentials } from "./webrtc-config";
+import { describeTrack } from "./call-debug";
+import type {
+  CallType,
+  OngoingCall,
+  ParticipantCallStatus,
+} from "./types";
+
+type IncomingCallData = {
+  callId: string;
+  conversationId: number;
+  callerId: number;
+  callType: CallType;
+  participantCount: number;
+  participantStatuses: Record<number, ParticipantCallStatus>;
+};
+
+type StartCallArgs = {
+  callType: CallType;
+  conversationId: number;
+  participantId: number;
+  participantName?: string;
+};
+
+type CallContextValue = {
+  call: OngoingCall | null;
+  localStream: MediaStream | null;
+  remoteStreams: { participantId: number; stream: MediaStream }[];
+  remoteCameraStates: Record<number, boolean>;
+  remoteScreenShareStates: Record<number, boolean>;
+  isMuted: boolean;
+  isSpeakerOn: boolean;
+  isCameraOn: boolean;
+  isCameraBusy: boolean;
+  isSharingScreen: boolean;
+  startCall: (args: StartCallArgs) => Promise<void>;
+  acceptCall: () => Promise<void>;
+  declineCall: () => Promise<void>;
+  endCall: () => Promise<void>;
+  toggleMute: () => void;
+  toggleSpeaker: () => void;
+  toggleVideo: () => Promise<void>;
+  flipCamera: () => Promise<void>;
+  toggleScreenShare: () => Promise<void>;
+  getStats: () => Promise<string>;
+};
+
+const CallContext = createContext<CallContextValue | null>(null);
+
+function isPeerConnectionHealthy(peerConnection: {
+  connectionState: RTCPeerConnectionState;
+  iceConnectionState: RTCIceConnectionState;
+}) {
+  return (
+    peerConnection.connectionState === "connected" ||
+    peerConnection.iceConnectionState === "connected" ||
+    peerConnection.iceConnectionState === "completed"
+  );
+}
+
+export function CallProvider({ children }: { children: React.ReactNode }) {
+  const [call, setCall] = useState<OngoingCall | null>(null);
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [remoteStreams, setRemoteStreams] = useState<
+    { participantId: number; stream: MediaStream }[]
+  >([]);
+  const [remoteCameraStates, setRemoteCameraStates] = useState<
+    Record<number, boolean>
+  >({});
+  const [remoteScreenShareStates, setRemoteScreenShareStates] = useState<
+    Record<number, boolean>
+  >({});
+  const [isMuted, setIsMuted] = useState(false);
+  const [isSpeakerOn, setIsSpeakerOn] = useState(false);
+  const [isCameraOn, setIsCameraOn] = useState(true);
+  const [isCameraBusy, setIsCameraBusy] = useState(false);
+  const [isSharingScreen, setIsSharingScreen] = useState(false);
+
+  const callRef = useRef<OngoingCall | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const cameraOperationRef = useRef(false);
+  const screenShareCleanupRef = useRef(false);
+  const iceRestartAttemptsRef = useRef(new Map<number, number>());
+  const iceRestartInFlightRef = useRef(new Set<number>());
+  const iceRecoveryTimersRef = useRef(
+    new Map<number, ReturnType<typeof setTimeout>>(),
+  );
+
+  const commitCall = useCallback((next: OngoingCall | null) => {
+    callRef.current = next;
+    setCall(next);
+  }, []);
+
+  const patchCall = useCallback((patch: Partial<OngoingCall>) => {
+    const current = callRef.current;
+    if (!current) return;
+
+    const next = { ...current, ...patch };
+    callRef.current = next;
+    setCall(next);
+  }, []);
+
+  const commitLocalStream = useCallback((stream: MediaStream | null) => {
+    localStreamRef.current = stream;
+    setLocalStream(stream);
+  }, []);
+
+  const resetCall = useCallback(() => {
+    for (const timer of iceRecoveryTimersRef.current.values()) {
+      clearTimeout(timer);
+    }
+    iceRecoveryTimersRef.current.clear();
+    iceRestartAttemptsRef.current.clear();
+    iceRestartInFlightRef.current.clear();
+    if (!callRef.current && !localStreamRef.current) return;
+
+    const stream = localStreamRef.current;
+
+    if (stream) {
+      void stopLocalMedia({ stream });
+    }
+
+    try {
+      closeAllPeerConnections();
+    } finally {
+      void stopCallAudio();
+      commitLocalStream(null);
+      setRemoteStreams([]);
+      setRemoteCameraStates({});
+      setRemoteScreenShareStates({});
+      setIsMuted(false);
+      setIsSpeakerOn(false);
+      setIsCameraOn(true);
+      setIsSharingScreen(false);
+      commitCall(null);
+    }
+  }, [commitCall, commitLocalStream]);
+
+  const finishCall = useCallback(async () => {
+    const current = callRef.current;
+
+    if (current) {
+      try {
+        await signalEndCall({ callId: current.callId });
+      } catch (err) {
+        console.warn("Failed to signal call end:", err);
+      }
+    }
+
+    resetCall();
+  }, [resetCall]);
+
+  const handleRemoteStream = useCallback(
+    (participantId: number, stream: MediaStream) => {
+      console.info("[call][render] remote stream updated", {
+        participantId,
+        audioTracks: stream.getAudioTracks().map(describeTrack),
+        videoTracks: stream.getVideoTracks().map(describeTrack),
+      });
+
+      setRemoteStreams((current) => {
+        const existing = current.findIndex(
+          (entry) => entry.participantId === participantId,
+        );
+        if (existing < 0) return [...current, { participantId, stream }];
+
+        const next = [...current];
+        const merged = mergeRemoteStreams(next[existing].stream, stream);
+        next[existing] = { participantId, stream: merged };
+        return next;
+      });
+    },
+    [],
+  );
+
+  const publishCameraState = useCallback(
+    (callId: string, cameraOn: boolean) => {
+      void sendCallCameraState({ callId, cameraOn }).catch((err: unknown) => {
+        console.warn("Could not publish camera state:", err);
+      });
+    },
+    [],
+  );
+
+  const publishScreenShareState = useCallback(
+    (callId: string, isSharing: boolean) => {
+      void sendCallScreenShareState({ callId, isSharing }).catch(
+        (err: unknown) => {
+          console.warn("Could not publish screen-share state:", err);
+        },
+      );
+    },
+    [],
+  );
+
+  const removeParticipantFromCall = useCallback(
+    (participantId: number) => {
+      closeCallParticipant({ participantId });
+      setRemoteStreams((entries) =>
+        entries.filter((entry) => entry.participantId !== participantId),
+      );
+      setRemoteCameraStates((states) => {
+        const next = { ...states };
+        delete next[participantId];
+        return next;
+      });
+      setRemoteScreenShareStates((states) => {
+        const next = { ...states };
+        delete next[participantId];
+        return next;
+      });
+      patchCall({
+        participantIds: callRef.current?.participantIds.filter(
+          (id) => id !== participantId,
+        ),
+        participantStatuses: {
+          ...callRef.current?.participantStatuses,
+          [participantId]: "disconnected",
+        },
+      });
+    },
+    [patchCall],
+  );
+
+  const handleIceConnectionFailure = useCallback(
+    (participantId: number, iceState: RTCIceConnectionState) => {
+      const current = callRef.current;
+      if (!current) return;
+
+      if (current.participantCount > 2) {
+        removeParticipantFromCall(participantId);
+        Toast.show({
+          type: "error",
+          text1: "Participant connection failed",
+          text2: `Could not reconnect participant ${participantId}.`,
+        });
+        return;
+      }
+
+      const connectionHelp = hasTurnCredentials()
+        ? `ICE connection failed (${iceState}). Check the network or TURN relay availability.`
+        : "TURN relay is not configured. Add EXPO_PUBLIC_TURN_URLS, EXPO_PUBLIC_TURN_USERNAME, and EXPO_PUBLIC_TURN_CREDENTIAL, then restart Metro.";
+      Toast.show({
+        type: "error",
+        text1: "Call failed",
+        text2: connectionHelp,
+      });
+      void finishCall();
+    },
+    [finishCall, removeParticipantFromCall],
+  );
+
+  const recoverIceConnection = useCallback(
+    async (
+      participantId: number,
+      iceState: RTCIceConnectionState,
+      callId: string,
+    ) => {
+      if (iceRestartInFlightRef.current.has(participantId)) return;
+      iceRestartInFlightRef.current.add(participantId);
+
+      try {
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          if (callRef.current?.callId !== callId) return;
+
+          const peerConnection = getPeerConnections().get(participantId);
+          if (!peerConnection || isPeerConnectionHealthy(peerConnection)) {
+            iceRestartAttemptsRef.current.delete(participantId);
+            return;
+          }
+
+          iceRestartAttemptsRef.current.set(participantId, attempt + 1);
+          try {
+            await restartCallIce({ callId, participantId });
+          } catch (error) {
+            console.warn("Could not restart the call ICE connection:", error);
+          }
+
+          await new Promise((resolve) =>
+            setTimeout(resolve, attempt === 0 ? 4_000 : 6_000),
+          );
+        }
+
+        if (callRef.current?.callId !== callId) return;
+        const peerConnection = getPeerConnections().get(participantId);
+        if (peerConnection && !isPeerConnectionHealthy(peerConnection)) {
+          handleIceConnectionFailure(participantId, iceState);
+        }
+      } finally {
+        if (callRef.current?.callId === callId) {
+          iceRestartInFlightRef.current.delete(participantId);
+        }
+      }
+    },
+    [handleIceConnectionFailure],
+  );
+
+  const scheduleIceRecovery = useCallback(
+    (
+      participantId: number,
+      iceState: RTCIceConnectionState,
+      delayMs: number,
+    ) => {
+      if (
+        iceRestartInFlightRef.current.has(participantId) ||
+        iceRecoveryTimersRef.current.has(participantId)
+      ) {
+        return;
+      }
+
+      const timer = setTimeout(() => {
+        iceRecoveryTimersRef.current.delete(participantId);
+        const current = callRef.current;
+        if (!current) return;
+
+        const peerConnection = getPeerConnections().get(participantId);
+        if (!peerConnection || isPeerConnectionHealthy(peerConnection)) {
+          return;
+        }
+
+        void recoverIceConnection(participantId, iceState, current.callId);
+      }, delayMs);
+
+      iceRecoveryTimersRef.current.set(participantId, timer);
+    },
+    [recoverIceConnection],
+  );
+
+  const handleConnectionStateChange = useCallback(
+    (
+      state: RTCPeerConnectionState,
+      iceState: RTCIceConnectionState,
+      participantId: number,
+    ) => {
+      if (state === "connected") {
+        const timer = iceRecoveryTimersRef.current.get(participantId);
+        if (timer) clearTimeout(timer);
+        iceRecoveryTimersRef.current.delete(participantId);
+        iceRestartAttemptsRef.current.delete(participantId);
+        iceRestartInFlightRef.current.delete(participantId);
+        const current = callRef.current;
+        patchCall({
+          status: "active",
+          connectedAt: current?.connectedAt ?? Date.now(),
+        });
+        return;
+      }
+
+      if (state === "connecting") {
+        const current = callRef.current;
+        if (current?.status !== "active") patchCall({ status: "connecting" });
+        return;
+      }
+
+      const isFailed = state === "failed" || iceState === "failed";
+      const isDisconnected = iceState === "disconnected";
+      if (!isFailed && !isDisconnected) return;
+
+      scheduleIceRecovery(
+        participantId,
+        iceState,
+        isFailed ? 0 : 2_500,
+      );
+    },
+    [patchCall, scheduleIceRecovery],
+  );
+
+  const handleIncoming = useCallback(
+    (data: IncomingCallData) => {
+      if (callRef.current) {
+        void rejectIncomingCall({ callId: data.callId }).catch(() => {});
+        Toast.show({
+          type: "info",
+          text1: "Incoming call declined",
+          text2: "You are already on another call.",
+        });
+        return;
+      }
+
+      setIsMuted(false);
+      setIsSpeakerOn(data.callType === "video");
+      setIsCameraOn(data.callType === "video");
+      setRemoteCameraStates({
+        [data.callerId]: data.callType === "video",
+      });
+      setRemoteScreenShareStates({});
+      commitCall({
+        callId: data.callId,
+        callType: data.callType,
+        conversationId: data.conversationId,
+        participantId: data.callerId,
+        participantName: "Incoming call",
+        direction: "incoming",
+        status: "incoming",
+        participantIds: [data.callerId],
+        participantCount: data.participantCount,
+        participantStatuses: data.participantStatuses,
+      });
+
+      void (async () => {
+        let name = "";
+
+        try {
+          const cached = await getUser(data.callerId);
+
+          if (cached?.username) {
+            name = cached.username;
+          } else {
+            const response = await api.get(`/api/user/${data.callerId}`);
+            name = response.data?.username ?? "";
+          }
+        } catch {
+          // Name lookup is best-effort; the call must not wait on it.
+        }
+
+        if (name && callRef.current?.callId === data.callId) {
+          patchCall({ participantName: name });
+        }
+      })();
+    },
+    [commitCall, patchCall],
+  );
+
+  const startCall = useCallback(
+    async ({
+      callType,
+      conversationId,
+      participantId,
+      participantName,
+    }: StartCallArgs) => {
+      if (callRef.current) {
+        throw new Error("You are already on a call.");
+      }
+
+      const stream = await prepareCall({ callType });
+      let callId: string;
+      let participantCount: number;
+      let participantStatuses: Record<number, ParticipantCallStatus>;
+      try {
+        const result = await signalStartCall({ callType, conversationId });
+        callId = result.callId;
+        participantCount = result.participantCount;
+        participantStatuses = result.participantStatuses;
+      } catch (err) {
+        await stopLocalMedia({ stream });
+        await stopCallAudio();
+        throw err;
+      }
+
+      setIsMuted(false);
+      setIsSpeakerOn(callType === "video");
+      setRemoteScreenShareStates({});
+      const cameraOn = stream.getVideoTracks().some((track) => track.enabled);
+      setIsCameraOn(cameraOn);
+      commitLocalStream(stream);
+      commitCall({
+        callId,
+        callType,
+        conversationId,
+        participantId,
+        participantName: participantName ?? "Unknown",
+        direction: "outgoing",
+        status: "outgoing",
+        participantIds: [],
+        participantCount,
+        participantStatuses,
+      });
+      publishCameraState(callId, cameraOn);
+    },
+    [commitCall, commitLocalStream, publishCameraState],
+  );
+
+  const acceptCall = useCallback(async () => {
+    const current = callRef.current;
+
+    if (
+      !current ||
+      current.direction !== "incoming" ||
+      current.status !== "incoming"
+    ) {
+      return;
+    }
+
+    let stream: MediaStream | undefined;
+    try {
+      stream = await prepareCall({ callType: current.callType });
+      commitLocalStream(stream);
+      setIsCameraOn(stream.getVideoTracks().some((track) => track.enabled));
+      patchCall({ status: "connecting" });
+      await acceptIncomingCall({ callId: current.callId });
+      publishCameraState(
+        current.callId,
+        stream.getVideoTracks().some((track) => track.enabled),
+      );
+    } catch (err) {
+      if (stream) {
+        await stopLocalMedia({ stream });
+        commitLocalStream(null);
+      }
+      await rejectIncomingCall({ callId: current.callId }).catch(() => {});
+      resetCall();
+      Toast.show({
+        type: "error",
+        text1: "Could not accept call",
+        text2: err instanceof Error ? err.message : "Please try again.",
+      });
+    }
+  }, [
+    commitLocalStream,
+    patchCall,
+    publishCameraState,
+    resetCall,
+  ]);
+
+  const declineCall = useCallback(async () => {
+    const current = callRef.current;
+
+    if (!current) return;
+
+    try {
+      await rejectIncomingCall({ callId: current.callId });
+    } catch (err) {
+      console.warn("Failed to decline call:", err);
+    }
+
+    resetCall();
+  }, [resetCall]);
+
+  const handleAccepted = useCallback(
+    async ({
+      callId,
+      userId,
+      peerIds,
+      offerPeerIds,
+    }: {
+      callId: string;
+      userId: number;
+      peerIds: number[];
+      offerPeerIds: number[];
+    }) => {
+      const current = callRef.current;
+
+      if (!current || current.callId !== callId) return;
+
+      const participantIds = new Set(current.participantIds);
+      peerIds.forEach((peerId) => participantIds.add(peerId));
+      patchCall({
+        status: current.status === "active" ? "active" : "connecting",
+        participantIds: [...participantIds],
+        participantStatuses: {
+          ...current.participantStatuses,
+          [userId]: "accepted",
+          ...Object.fromEntries(
+            peerIds.map((peerId) => [peerId, "accepted" as const]),
+          ),
+        },
+      });
+
+      const stream = localStreamRef.current;
+      if (!stream) {
+        Toast.show({
+          type: "error",
+          text1: "Call media is not ready",
+          text2: "Please leave the call and try again.",
+        });
+        return;
+      }
+
+      await Promise.all(
+        offerPeerIds.map(async (participantId) => {
+          try {
+            await createOutgoingOffer({
+              callType: current.callType,
+              participantId,
+              callId,
+              localStream: stream,
+              onRemoteStream: handleRemoteStream,
+              onConnectionStateChange: handleConnectionStateChange,
+            });
+          } catch (err) {
+            Toast.show({
+              type: "error",
+              text1: "Could not connect a participant",
+              text2:
+                err instanceof Error ? err.message : "Please try again.",
+            });
+            setRemoteStreams((entries) =>
+              entries.filter((entry) => entry.participantId !== participantId),
+            );
+            patchCall({
+              participantIds: callRef.current?.participantIds.filter(
+                (id) => id !== participantId,
+              ),
+            });
+          }
+        }),
+      );
+    },
+    [
+      handleConnectionStateChange,
+      handleRemoteStream,
+      patchCall,
+    ],
+  );
+
+  const handleOffer = useCallback(
+    async (data: {
+      callId: string;
+      senderId: number;
+      offer: RTCSessionDescriptionInit;
+      callType: CallType;
+    }) => {
+      const current = callRef.current;
+
+      if (!current || current.callId !== data.callId) return;
+
+      if (current.status !== "active") {
+        patchCall({ status: "connecting" });
+      }
+
+      try {
+        const { stream } = await handleIncomingOffer({
+          callId: data.callId,
+          senderId: data.senderId,
+          callType: data.callType,
+          offer: data.offer,
+          localStream: localStreamRef.current ?? undefined,
+          onRemoteStream: handleRemoteStream,
+          onConnectionStateChange: handleConnectionStateChange,
+        });
+
+        if (callRef.current?.callId !== data.callId) {
+          if (stream) void stopLocalMedia({ stream });
+          return;
+        }
+
+        if (!localStreamRef.current && stream) {
+          commitLocalStream(stream);
+          setIsCameraOn(stream.getVideoTracks().some((track) => track.enabled));
+        }
+      } catch (err) {
+        closeCallParticipant({ participantId: data.senderId });
+        setRemoteStreams((entries) =>
+          entries.filter((entry) => entry.participantId !== data.senderId),
+        );
+        setRemoteScreenShareStates((states) => {
+          const next = { ...states };
+          delete next[data.senderId];
+          return next;
+        });
+        patchCall({
+          participantIds: callRef.current?.participantIds.filter(
+            (id) => id !== data.senderId,
+          ),
+        });
+        Toast.show({
+          type: "error",
+          text1: "Could not connect participant",
+          text2: err instanceof Error ? err.message : "Please try again.",
+        });
+        if (current.participantCount <= 2) await finishCall();
+      }
+    },
+    [
+      commitLocalStream,
+      finishCall,
+      handleConnectionStateChange,
+      handleRemoteStream,
+      patchCall,
+    ],
+  );
+
+  const handleAnswer = useCallback(
+    async (data: {
+      callId: string;
+      senderId: number;
+      answer: RTCSessionDescriptionInit;
+    }) => {
+      const current = callRef.current;
+
+      if (!current || current.callId !== data.callId) return;
+
+      try {
+        await handleCallAnswer({
+          participantId: data.senderId,
+          answer: data.answer,
+        });
+      } catch (err) {
+        closeCallParticipant({ participantId: data.senderId });
+        Toast.show({
+          type: "error",
+          text1: "Could not connect participant",
+          text2: err instanceof Error ? err.message : "Please try again.",
+        });
+        if (current.participantCount <= 2) await finishCall();
+      }
+    },
+    [finishCall],
+  );
+
+  const handleIce = useCallback(
+    async (data: {
+      callId: string;
+      senderId: number;
+      candidate: RTCIceCandidateInit;
+    }) => {
+      const current = callRef.current;
+
+      if (!current || current.callId !== data.callId) return;
+
+      try {
+        await handleIncomingIce({
+          senderId: data.senderId,
+          candidate: data.candidate,
+        });
+      } catch (err) {
+        console.warn("Failed to add ICE candidate:", err);
+      }
+    },
+    [],
+  );
+
+  const handleCameraState = useCallback(
+    (data: { callId: string; userId: number; cameraOn: boolean }) => {
+      if (
+        callRef.current?.callId !== data.callId ||
+        !Number.isSafeInteger(data.userId) ||
+        typeof data.cameraOn !== "boolean"
+      ) {
+        return;
+      }
+
+      setRemoteCameraStates((current) => ({
+        ...current,
+        [data.userId]: data.cameraOn,
+      }));
+    },
+    [],
+  );
+
+  const handleScreenShareState = useCallback(
+    (data: { callId: string; userId: number; isSharing: boolean }) => {
+      if (
+        callRef.current?.callId !== data.callId ||
+        !Number.isSafeInteger(data.userId) ||
+        typeof data.isSharing !== "boolean"
+      ) {
+        return;
+      }
+
+      console.info("[call][render] remote screen-share state", {
+        callId: data.callId,
+        participantId: data.userId,
+        isSharing: data.isSharing,
+      });
+
+      setRemoteScreenShareStates((current) => ({
+        ...current,
+        [data.userId]: data.isSharing,
+      }));
+    },
+    [],
+  );
+
+  const handleDeclined = useCallback(
+    ({ callId, userId }: { callId: string; userId: number }) => {
+      const current = callRef.current;
+
+      if (!current || current.callId !== callId) return;
+      patchCall({
+        participantStatuses: {
+          ...current.participantStatuses,
+          [userId]: "declined",
+        },
+      });
+
+      if (current.participantCount > 2) {
+        closeCallParticipant({ participantId: userId });
+        setRemoteStreams((entries) =>
+          entries.filter((entry) => entry.participantId !== userId),
+        );
+        setRemoteScreenShareStates((states) => {
+          const next = { ...states };
+          delete next[userId];
+          return next;
+        });
+        patchCall({
+          participantIds: current.participantIds.filter(
+            (participantId) => participantId !== userId,
+          ),
+        });
+        Toast.show({
+          type: "info",
+          text1: "Participant declined",
+          text2: "The group call can continue.",
+        });
+        return;
+      }
+
+      Toast.show({
+        type: "info",
+        text1: "Call declined",
+        text2: "The call was declined.",
+      });
+      resetCall();
+    },
+    [patchCall, resetCall],
+  );
+
+  const handleEnded = useCallback(
+    ({ callId }: { callId: string; userId: number }) => {
+      const current = callRef.current;
+
+      if (!current || current.callId !== callId) return;
+
+      Toast.show({ type: "info", text1: "Call ended" });
+      resetCall();
+    },
+    [resetCall],
+  );
+
+  const handleParticipantLeft = useCallback(
+    ({ callId, userId }: { callId: string; userId: number }) => {
+      if (callRef.current?.callId !== callId) return;
+      patchCall({
+        participantStatuses: {
+          ...callRef.current.participantStatuses,
+          [userId]: "disconnected",
+        },
+      });
+      closeCallParticipant({ participantId: userId });
+      setRemoteStreams((entries) =>
+        entries.filter((entry) => entry.participantId !== userId),
+      );
+      setRemoteScreenShareStates((states) => {
+        const next = { ...states };
+        delete next[userId];
+        return next;
+      });
+      patchCall({
+        participantIds: callRef.current.participantIds.filter(
+          (participantId) => participantId !== userId,
+        ),
+      });
+    },
+    [patchCall],
+  );
+
+  const handleParticipantStatus = useCallback(
+    (data: {
+      callId: string;
+      userId: number;
+      status: ParticipantCallStatus;
+    }) => {
+      const current = callRef.current;
+      if (
+        !current ||
+        current.callId !== data.callId ||
+        !Number.isSafeInteger(data.userId)
+      ) {
+        return;
+      }
+      patchCall({
+        participantStatuses: {
+          ...current.participantStatuses,
+          [data.userId]: data.status,
+        },
+        ...(data.status === "accepted" && current.status === "outgoing"
+          ? { status: "connecting" }
+          : {}),
+      });
+    },
+    [patchCall],
+  );
+
+  useEffect(() => {
+    return setupCallListeners({
+      onIncoming: handleIncoming,
+      onAccepted: handleAccepted,
+      onDeclined: handleDeclined,
+      onEnded: handleEnded,
+      onParticipantLeft: handleParticipantLeft,
+      onParticipantStatus: handleParticipantStatus,
+      onOffer: handleOffer,
+      onAnswer: handleAnswer,
+      onIce: handleIce,
+      onCameraState: handleCameraState,
+      onScreenShareState: handleScreenShareState,
+    });
+  }, [
+    handleAccepted,
+    handleAnswer,
+    handleCameraState,
+    handleScreenShareState,
+    handleDeclined,
+    handleEnded,
+    handleParticipantLeft,
+    handleParticipantStatus,
+    handleIce,
+    handleIncoming,
+    handleOffer,
+  ]);
+
+  useEffect(() => {
+    const reconcileScreenShare = () => {
+      if (!isSharingScreen || screenShareCleanupRef.current) return;
+      const currentCall = callRef.current;
+      const stream = localStreamRef.current;
+      if (!currentCall || !stream || checkScreenSharing()) return;
+
+      screenShareCleanupRef.current = true;
+      void stopScreenShare({ localStream: stream }).then(
+        () => {
+          if (callRef.current?.callId !== currentCall.callId) return;
+          setIsSharingScreen(false);
+          const cameraOn = stream.getVideoTracks().some((track) => track.enabled);
+          setIsCameraOn(cameraOn);
+          publishCameraState(currentCall.callId, cameraOn);
+          publishScreenShareState(currentCall.callId, false);
+        },
+        (error: unknown) => {
+          console.error("Could not clean up screen sharing after resuming:", error);
+          Toast.show({
+            type: "error",
+            text1: "Screen sharing stopped",
+            text2: "The captured screen could not be restored after resuming.",
+          });
+          setIsSharingScreen(false);
+          publishScreenShareState(currentCall.callId, false);
+        },
+      ).finally(() => {
+        screenShareCleanupRef.current = false;
+      });
+    };
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active") reconcileScreenShare();
+    });
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") reconcileScreenShare();
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+    }
+
+    return () => {
+      subscription.remove();
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", handleVisibilityChange);
+      }
+    };
+  }, [isSharingScreen, publishCameraState, publishScreenShareState]);
+
+  useEffect(() => {
+    return () => {
+      if (localStreamRef.current) {
+        void stopLocalMedia({ stream: localStreamRef.current });
+      }
+      closeAllPeerConnections();
+    };
+  }, []);
+
+  const toggleMute = useCallback(() => {
+    const stream = localStreamRef.current;
+
+    if (!stream) return;
+
+    const enabled = toggleMicrophone({ stream });
+    setIsMuted(!enabled);
+  }, []);
+
+  const toggleSpeaker = useCallback(() => {
+    const enabled = !isSpeakerOn;
+    try {
+      setCallSpeakerphone(enabled);
+      setIsSpeakerOn(enabled);
+    } catch (err) {
+      Toast.show({
+        type: "error",
+        text1: "Could not change audio output",
+        text2: err instanceof Error ? err.message : "Please try again.",
+      });
+    }
+  }, [isSpeakerOn]);
+
+  const toggleVideo = useCallback(async () => {
+    const stream = localStreamRef.current;
+    if (!stream) return;
+
+    if (stream.getVideoTracks().length > 0) {
+      const enabled = toggleCamera({ stream });
+      if (enabled !== null) {
+        setIsCameraOn(enabled);
+        const currentCall = callRef.current;
+        if (currentCall) publishCameraState(currentCall.callId, enabled);
+        return;
+      }
+    }
+    if (checkScreenSharing()) return;
+
+    const currentCall = callRef.current;
+    if (!currentCall || cameraOperationRef.current) return;
+
+    cameraOperationRef.current = true;
+    setIsCameraBusy(true);
+    let captureStream: MediaStream | null = null;
+    let videoTrack: ReturnType<MediaStream["getVideoTracks"]>[number] | undefined;
+    let addedToCallStream = false;
+
+    try {
+      const granted = await requestPermissions({ callType: "video" });
+      if (!granted) {
+        throw new Error("Camera permission denied.");
+      }
+      if (
+        callRef.current?.callId !== currentCall.callId ||
+        localStreamRef.current !== stream
+      ) {
+        return;
+      }
+
+      captureStream = await getLocalVideoMedia();
+      if (
+        callRef.current?.callId !== currentCall.callId ||
+        localStreamRef.current !== stream
+      ) {
+        captureStream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+
+      videoTrack = captureStream.getVideoTracks()[0];
+      if (!videoTrack) {
+        throw new Error("No camera is available on this device.");
+      }
+
+      for (const audioTrack of captureStream.getAudioTracks()) {
+        audioTrack.stop();
+      }
+
+      videoTrack.enabled = true;
+      stream.addTrack(videoTrack);
+      captureStream.removeTrack(videoTrack);
+      addedToCallStream = true;
+
+      await renegotiateCallVideo({
+        callId: currentCall.callId,
+        participantIds: currentCall.participantIds,
+        localStream: stream,
+      });
+      if (callRef.current?.callId !== currentCall.callId) {
+        await stopLocalMedia({ stream });
+        return;
+      }
+      setIsCameraOn(true);
+      publishCameraState(currentCall.callId, true);
+    } catch (err) {
+      if (addedToCallStream && videoTrack) {
+        stream.removeTrack(videoTrack);
+      }
+      videoTrack?.stop();
+      setIsCameraOn(false);
+      if (callRef.current?.callId === currentCall.callId) {
+        publishCameraState(currentCall.callId, false);
+      }
+      Toast.show({
+        type: "error",
+        text1: "Could not enable camera",
+        text2: err instanceof Error ? err.message : "Please try again.",
+      });
+    } finally {
+      cameraOperationRef.current = false;
+      setIsCameraBusy(false);
+    }
+  }, [publishCameraState]);
+
+  const flipCamera = useCallback(async () => {
+    const stream = localStreamRef.current;
+    const callId = callRef.current?.callId;
+    if (
+      !stream ||
+      !callId ||
+      cameraOperationRef.current
+    ) {
+      return;
+    }
+
+    cameraOperationRef.current = true;
+    setIsCameraBusy(true);
+    try {
+      await switchCamera({ stream });
+      if (callRef.current?.callId !== callId) {
+        await stopLocalMedia({ stream });
+      }
+    } catch (err) {
+      Toast.show({
+        type: "error",
+        text1: "Could not switch camera",
+        text2: err instanceof Error ? err.message : "Please try again.",
+      });
+    } finally {
+      cameraOperationRef.current = false;
+      setIsCameraBusy(false);
+    }
+  }, []);
+
+  const toggleScreenShare = useCallback(async () => {
+    const stream = localStreamRef.current;
+    const currentCall = callRef.current;
+    if (!stream || !currentCall || cameraOperationRef.current) return;
+
+    cameraOperationRef.current = true;
+    setIsCameraBusy(true);
+    try {
+      if (checkScreenSharing()) {
+        await stopScreenShare({ localStream: stream });
+        setIsSharingScreen(false);
+        const cameraOn = stream.getVideoTracks().some((track) => track.enabled);
+        setIsCameraOn(cameraOn);
+        publishCameraState(currentCall.callId, cameraOn);
+        publishScreenShareState(currentCall.callId, false);
+      } else {
+        const needsRenegotiation = await startScreenShare({
+          localStream: stream,
+          onStopped: () => {
+            if (callRef.current?.callId !== currentCall.callId) return;
+            setIsSharingScreen(false);
+            const cameraOn = stream.getVideoTracks().some((track) => track.enabled);
+            setIsCameraOn(cameraOn);
+            publishCameraState(currentCall.callId, cameraOn);
+            publishScreenShareState(currentCall.callId, false);
+          },
+        });
+        if (callRef.current?.callId !== currentCall.callId) {
+          await stopScreenShare({ localStream: stream });
+          return;
+        }
+        if (needsRenegotiation) {
+          const connectedParticipantIds = currentCall.participantIds.filter(
+            (participantId) => getPeerConnections().has(participantId),
+          );
+          try {
+            await renegotiateCallVideo({
+              callId: currentCall.callId,
+              participantIds: connectedParticipantIds,
+              localStream: stream,
+            });
+          } catch (error) {
+            await stopScreenShare({ localStream: stream });
+            throw error;
+          }
+        }
+        if (!checkScreenSharing()) {
+          setIsSharingScreen(false);
+          return;
+        }
+        setIsSharingScreen(true);
+        publishScreenShareState(currentCall.callId, true);
+      }
+    } catch (err) {
+      setIsSharingScreen(checkScreenSharing());
+      if (
+        err instanceof Error &&
+        err.name === "AbortError"
+      ) {
+        return;
+      }
+      Toast.show({
+        type: "error",
+        text1: "Screen sharing",
+        text2: err instanceof Error ? err.message : "Please try again.",
+      });
+    } finally {
+      cameraOperationRef.current = false;
+      setIsCameraBusy(false);
+    }
+  }, [publishCameraState, publishScreenShareState]);
+
+  const getStats = useCallback(async () => {
+    const connections = getPeerConnections();
+    if (connections.size === 0) return "No active peer connections.";
+    const diag = await collectDiagnostics(
+      connections as unknown as Map<number, RTCPeerConnection>,
+    );
+    const text = formatDiagnostics(diag);
+    console.log(text);
+    return text;
+  }, []);
+
+  const value = useMemo<CallContextValue>(
+    () => ({
+      call,
+      localStream,
+      remoteStreams,
+      remoteCameraStates,
+      remoteScreenShareStates,
+      isMuted,
+      isSpeakerOn,
+      isCameraOn,
+      isCameraBusy,
+      isSharingScreen,
+      startCall,
+      acceptCall,
+      declineCall,
+      endCall: finishCall,
+      toggleMute,
+      toggleSpeaker,
+      toggleVideo,
+      flipCamera,
+      toggleScreenShare,
+      getStats,
+    }),
+    [
+      acceptCall,
+      call,
+      declineCall,
+      finishCall,
+      getStats,
+      isCameraOn,
+      isCameraBusy,
+      isMuted,
+      isSharingScreen,
+      isSpeakerOn,
+      localStream,
+      remoteStreams,
+      remoteCameraStates,
+      remoteScreenShareStates,
+      startCall,
+      toggleMute,
+      toggleScreenShare,
+      toggleSpeaker,
+      toggleVideo,
+      flipCamera,
+    ],
+  );
+
+  return <CallContext.Provider value={value}>{children}</CallContext.Provider>;
+}
+
+export function useCall(): CallContextValue {
+  const context = useContext(CallContext);
+
+  if (!context) {
+    throw new Error("useCall must be used within a CallProvider");
+  }
+
+  return context;
+}

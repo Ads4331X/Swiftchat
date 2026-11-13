@@ -50,7 +50,7 @@ export default function ChatHome() {
   return (
     <View className="w-full">
       <View className="w-full px-4 flex-row items-center justify-between">
-        <Pressable onPress={() => router.push("/settings/index" as any as any)}>
+        <Pressable onPress={() => router.push("/settings")}>
           <Avatar
             username={user?.username ?? "?"}
             avatarUrl={user?.avatar ?? undefined}

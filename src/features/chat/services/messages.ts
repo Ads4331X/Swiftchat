@@ -1,4 +1,8 @@
-import { decryptMessage } from "@/core/crypto";
+import {
+  decryptMessage,
+  getConversationEpoch,
+  getConversationKeyForEpoch,
+} from "@/core/crypto";
 import { saveMessage } from "@/core/db";
 import { indexMessage } from "@/core/db/search";
 import {
@@ -50,6 +54,11 @@ export function parseLocalMessage(row: LocalMessageRow): Message {
   return out;
 }
 
+function getMessageEpoch(message: Message): number {
+  const epoch = Number(message.keyEpoch);
+  return Number.isInteger(epoch) && epoch >= 1 ? epoch : 1;
+}
+
 export async function decryptMessages({
   serverMessages,
   decryptedConversationKey,
@@ -57,21 +66,11 @@ export async function decryptMessages({
   serverMessages: Message[];
   decryptedConversationKey: Uint8Array | null | undefined;
 }): Promise<Message[]> {
-  // No conversation key on this device (private key not restored yet). We
-  // still surface the messages so the user sees them, but as placeholders —
-  // and we must NEVER generate a key here (that would break decryption for
-  // other members).
-  if (!decryptedConversationKey) {
-    return serverMessages.map((message) => ({
-      ...message,
-      text: "[Encrypted Message]",
-    }));
-  }
+  const resolvedKeys = new Map<string, Uint8Array | null>();
+  const currentEpochs = new Map<number, number>();
 
   return Promise.all(
     serverMessages.map(async (message) => {
-<<<<<<< Updated upstream
-=======
       const conversationId = Number(message.conversationId);
       const epoch = getMessageEpoch(message);
       const cacheId = `${conversationId}:${epoch}`;
@@ -105,11 +104,10 @@ export async function decryptMessages({
         };
       }
 
->>>>>>> Stashed changes
       const { decryptMessage: decryptedText } = await decryptMessage({
         encryptedMessage: message.text,
         nonce: message.nonce,
-        decryptedConversationKey,
+        decryptedConversationKey: conversationKey,
       });
 
       return {
@@ -126,6 +124,7 @@ export type PersistLocallyOptions = {
   nonce?: string;
   replyToId?: number;
   repliedTo?: string;
+  keyEpoch?: number;
 };
 
 // Persist one message to the local cache (raw encrypted text for the DB) and
@@ -150,6 +149,7 @@ export async function persistMessageLocally(
       options?.repliedTo ??
       (message.repliedTo ? JSON.stringify(message.repliedTo) : undefined),
     forwardedFromMsgId: message.forwardedFromMsgId,
+    keyEpoch: options?.keyEpoch ?? message.keyEpoch ?? undefined,
     attachment: message.attachment
       ? JSON.stringify(message.attachment)
       : undefined,

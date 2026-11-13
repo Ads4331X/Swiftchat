@@ -51,7 +51,7 @@ export default function AppearanceName() {
       >
         <Pressable
           onPress={() =>
-            router.canGoBack() ? router.back() : router.replace("/settings/index" as any)
+            router.canGoBack() ? router.back() : router.replace("/settings")
           }
           className="p-1"
         >

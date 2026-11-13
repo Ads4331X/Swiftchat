@@ -17,7 +17,12 @@ import {
   onChatCleared,
 } from "@/features/chat/services/sync";
 import { getCurrentUserId } from "@/features/auth/services";
-import { decryptMessage, getOrCreateConversationKey } from "@/core/crypto";
+import {
+  decryptMessage,
+  getConversationEpoch,
+  getConversationKeyForEpoch,
+  getOrCreateConversationKey,
+} from "@/core/crypto";
 import NetInfo from "@react-native-community/netinfo";
 import Toast from "react-native-toast-message";
 import { reportPresence } from "@/shared/providers/presence-provider";
@@ -40,6 +45,7 @@ export type Chat = {
     nonce?: string;
     sentAt: string;
     senderId: number;
+    keyEpoch?: number;
   } | null;
   unread?: number;
 };
@@ -60,6 +66,39 @@ function dedupe(chats: Chat[]): Chat[] {
     seen.add(key);
     return true;
   });
+}
+
+async function decryptMessagePreview({
+  conversationId,
+  encryptedMessage,
+  nonce,
+  keyEpoch,
+  fallbackKey,
+}: {
+  conversationId: number | string;
+  encryptedMessage: string;
+  nonce: string;
+  keyEpoch: unknown;
+  fallbackKey: Uint8Array | null;
+}): Promise<string> {
+  if (!fallbackKey) return "[Encrypted Message]";
+
+  const epoch = Number(keyEpoch);
+  const messageEpoch = Number.isInteger(epoch) && epoch >= 1 ? epoch : 1;
+  const messageKey =
+    (await getConversationKeyForEpoch(conversationId, messageEpoch)) ??
+    (messageEpoch === (await getConversationEpoch(conversationId))
+      ? fallbackKey
+      : null);
+
+  if (!messageKey) return "[Encrypted Message]";
+
+  const { decryptMessage: text } = await decryptMessage({
+    encryptedMessage,
+    nonce,
+    decryptedConversationKey: messageKey,
+  });
+  return text;
 }
 
 export function normalizeChat(value: unknown): Chat | null {
@@ -114,12 +153,15 @@ export function normalizeChat(value: unknown): Chat | null {
       typeof message.text === "string" &&
       typeof message.sentAt === "string"
     ) {
+      const keyEpoch = Number(message.keyEpoch);
       lastMessage = {
         id: messageId,
         text: message.text,
         nonce: typeof message.nonce === "string" ? message.nonce : undefined,
         sentAt: message.sentAt,
         senderId,
+        keyEpoch:
+          Number.isInteger(keyEpoch) && keyEpoch >= 1 ? keyEpoch : undefined,
       };
     }
   }
@@ -235,19 +277,19 @@ export default function useChats() {
             // Key exists but this device can't decrypt it (no private key yet).
             // Show a placeholder — regenerating is handled inside crypto and
             // will NOT be done, so other devices keep their working key.
-            const decrypted = conversationKey
-              ? await decryptMessage({
-                  encryptedMessage: chat.lastMessage.text,
-                  nonce: chat.lastMessage.nonce,
-                  decryptedConversationKey: conversationKey,
-                })
-              : { decryptMessage: "[Encrypted Message]" };
+            const decryptedText = await decryptMessagePreview({
+              conversationId: chat.id,
+              encryptedMessage: chat.lastMessage.text,
+              nonce: chat.lastMessage.nonce,
+              keyEpoch: chat.lastMessage.keyEpoch,
+              fallbackKey: conversationKey,
+            });
 
             return {
               ...chat,
               lastMessage: {
                 ...chat.lastMessage,
-                text: decrypted.decryptMessage,
+                text: decryptedText,
               },
             };
           } catch {
@@ -361,15 +403,13 @@ export default function useChats() {
           memberIds,
         );
 
-        const decrypted = conversationKey
-          ? await decryptMessage({
-              encryptedMessage: message.text,
-              nonce: message.nonce,
-              decryptedConversationKey: conversationKey,
-            })
-          : { decryptMessage: "[Encrypted Message]" };
-
-        const decryptedText = decrypted.decryptMessage;
+        const decryptedText = await decryptMessagePreview({
+          conversationId: message.conversationId,
+          encryptedMessage: message.text,
+          nonce: message.nonce,
+          keyEpoch: message.keyEpoch,
+          fallbackKey: conversationKey,
+        });
 
         setChats((currentChats) => {
           const currentChat = currentChats.find(

@@ -13,13 +13,14 @@ type SaveMsgParams = {
   repliedTo?: string;
   forwardedFromMsgId?: number;
   attachment?: string;
+  keyEpoch?: number | null;
 };
 
 // Shared by `saveMessage` and `confirmPendingMessage`. Upsert rather than
 // INSERT OR REPLACE: `readAt`/`read` are only meaningful on first insert, and a
 // blind REPLACE wiped them every time a message was re-cached (edits, socket
 // refreshes, background flushes), making already-read messages look unread.
-const MESSAGE_UPSERT_SQL = `INSERT INTO Message (id, text, sentAt, senderId, conversationId, nonce, reactions, readAt, read, replyToId, repliedTo, forwardedFromMsgId, attachment) VALUES (?, ?, ?, ?, ?, ?, ?, '', 0, ?, ?, ?, ?)
+const MESSAGE_UPSERT_SQL = `INSERT INTO Message (id, text, sentAt, senderId, conversationId, nonce, reactions, readAt, read, replyToId, repliedTo, forwardedFromMsgId, keyEpoch, attachment) VALUES (?, ?, ?, ?, ?, ?, ?, '', 0, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          text = excluded.text,
          sentAt = excluded.sentAt,
@@ -30,6 +31,7 @@ const MESSAGE_UPSERT_SQL = `INSERT INTO Message (id, text, sentAt, senderId, con
          replyToId = excluded.replyToId,
          repliedTo = excluded.repliedTo,
          forwardedFromMsgId = excluded.forwardedFromMsgId,
+         keyEpoch = COALESCE(excluded.keyEpoch, Message.keyEpoch),
          attachment = COALESCE(excluded.attachment, Message.attachment)`;
 
 const MESSAGE_UPSERT_PARAMS = ({
@@ -43,6 +45,7 @@ const MESSAGE_UPSERT_PARAMS = ({
   replyToId,
   repliedTo,
   forwardedFromMsgId,
+  keyEpoch,
   attachment,
 }: SaveMsgParams) => [
   messageId,
@@ -55,6 +58,7 @@ const MESSAGE_UPSERT_PARAMS = ({
   replyToId ?? null,
   repliedTo ?? null,
   forwardedFromMsgId ?? null,
+  keyEpoch ?? null,
   attachment ?? null,
 ];
 
@@ -203,12 +207,13 @@ export async function savePendingMessage({
   replyToId,
   repliedTo,
   forwardedFromMsgId,
+  keyEpoch,
 }: SaveMsgParams) {
   try {
     const db = await getDb();
     if (!db) return;
     await db.runAsync(
-      `INSERT OR REPLACE INTO PendingMessage (id, text, sentAt, senderId, conversationId, nonce, replyToId, repliedTo, forwardedFromMsgId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR REPLACE INTO PendingMessage (id, text, sentAt, senderId, conversationId, nonce, replyToId, repliedTo, forwardedFromMsgId, keyEpoch) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         messageId,
         message,
@@ -219,6 +224,7 @@ export async function savePendingMessage({
         replyToId ?? null,
         repliedTo ?? null,
         forwardedFromMsgId ?? null,
+        keyEpoch ?? null,
       ],
     );
   } catch (err) {
@@ -244,6 +250,31 @@ export async function updatePendingMessage({
   }
 }
 
+export async function updatePendingMessageEncryption({
+  messageId,
+  message,
+  nonce,
+  keyEpoch,
+}: {
+  messageId: number;
+  message: string;
+  nonce: string;
+  keyEpoch: number;
+}) {
+  try {
+    const db = await getDb();
+    if (!db) return false;
+    await db.runAsync(
+      `UPDATE PendingMessage SET text = ?, nonce = ?, keyEpoch = ? WHERE id = ?`,
+      [message, nonce, keyEpoch, messageId],
+    );
+    return true;
+  } catch (err) {
+    console.warn("updatePendingMessageEncryption skipped:", err);
+    return false;
+  }
+}
+
 export async function deletePendingMessage({ messageId }: DeleteMsg) {
   try {
     const db = await getDb();
@@ -265,6 +296,7 @@ export type PendingMessage = {
   replyToId?: number | null;
   repliedTo?: string | null;
   forwardedFromMsgId?: number | null;
+  keyEpoch: number | null;
 };
 
 export async function getPendingMessages(): Promise<PendingMessage[]> {

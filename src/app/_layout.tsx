@@ -6,10 +6,11 @@ import {
   ThemeProvider,
 } from "@react-navigation/native";
 
-import { View, Easing } from "react-native";
+import { View, Easing, Platform } from "react-native";
 
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import * as ScreenOrientation from "expo-screen-orientation";
 import * as SystemUI from "expo-system-ui";
 import "react-native-reanimated";
 
@@ -20,6 +21,8 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { AppThemeProvider, useTheme } from "@/shared/providers/theme-provider";
 import { PresenceProvider } from "@/shared/providers/presence-provider";
+import { CallProvider } from "@/features/calls/use-call";
+import CallOverlay from "@/features/calls/components/CallOverlay";
 
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
@@ -75,6 +78,16 @@ function AppNavigator() {
   }, []);
 
   useEffect(() => {
+    if (Platform.OS === "web") return;
+
+    void ScreenOrientation.lockAsync(
+      ScreenOrientation.OrientationLock.PORTRAIT_UP,
+    ).catch((error: unknown) => {
+      console.warn("Could not set the default screen orientation:", error);
+    });
+  }, []);
+
+  useEffect(() => {
     SystemUI.setBackgroundColorAsync(colors.background);
   }, [colors.background]);
 
@@ -102,9 +115,9 @@ function AppNavigator() {
         }}
       >
         <Stack.Screen name="index" />
-        <Stack.Screen name="auth" />
+        <Stack.Screen name="(auth)" />
         <Stack.Screen name="chat/index" />
-        <Stack.Screen name="chat/[id]" />
+        <Stack.Screen name="chat/[id]/index" />
       </Stack>
 
       <ToastProvider />
@@ -121,7 +134,10 @@ export default function RootLayout() {
         <AppThemeProvider>
           <PresenceProvider>
             <KeyboardProvider>
-              <AppNavigator />
+              <CallProvider>
+                <AppNavigator />
+                <CallOverlay />
+              </CallProvider>
             </KeyboardProvider>
           </PresenceProvider>
         </AppThemeProvider>

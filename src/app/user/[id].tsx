@@ -29,6 +29,7 @@ import { formatPresence } from "@/shared/utils/formatPresence";
 import { listenForPresence } from "@/core/socket";
 import { reportPresence } from "@/shared/providers/presence-provider";
 import { useBlockedUsers } from "@/features/security/hooks/useBlockedUsers";
+import { useCall } from "@/features/calls/use-call";
 
 type User = {
   id: number;
@@ -47,6 +48,7 @@ export default function OtherProfile() {
 
   const router = useRouter();
   const { colors } = useTheme();
+  const { startCall } = useCall();
   const [user, setUser] = useState<User>();
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [myId, setMyId] = useState<number>();
@@ -181,6 +183,45 @@ export default function OtherProfile() {
       setRenameVisible(false);
     } catch {
       Alert.alert("Rename failed", "Could not rename the conversation.");
+    }
+  };
+
+  const handleStartCall = async (callType: "audio" | "video") => {
+    if (isGroup || id == null) return;
+
+    try {
+      let conversationId = chatId ? Number(chatId) : NaN;
+
+      if (!Number.isSafeInteger(conversationId) || conversationId <= 0) {
+        const targetUsername = user?.username;
+
+        if (!targetUsername) {
+          throw new Error("Could not resolve this contact.");
+        }
+
+        const response = await api.post(
+          "/api/conversations/new-conversation",
+          { targetUsername },
+        );
+        const conversation = (response.data as any)?.conversation;
+        conversationId = Number(conversation?.id);
+      }
+
+      if (!Number.isSafeInteger(conversationId) || conversationId <= 0) {
+        throw new Error("Could not open a conversation for this call.");
+      }
+
+      await startCall({
+        callType,
+        conversationId,
+        participantId: Number(id),
+        participantName: user?.username ?? username,
+      });
+    } catch (err) {
+      Alert.alert(
+        "Could not start call",
+        err instanceof Error ? err.message : "Please try again.",
+      );
     }
   };
 
@@ -484,8 +525,8 @@ export default function OtherProfile() {
                   }
                 : undefined
           }
-          onVideoCall={() => console.log("Video call")}
-          onAudioCall={() => console.log("Audio call")}
+          onVideoCall={() => void handleStartCall("video")}
+          onAudioCall={() => void handleStartCall("audio")}
           onSearch={() => {
             router.push({
               pathname: "/user/search" as any,

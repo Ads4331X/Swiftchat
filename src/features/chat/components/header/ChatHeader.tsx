@@ -1,9 +1,11 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import Feather from "@expo/vector-icons/Feather";
+import Toast from "react-native-toast-message";
 import { BRAND_COLOR } from "@/shared/theme/theme";
 import { useTheme } from "@/shared/providers/theme-provider";
 import Avatar from "@/features/profile/components/Avatar";
+import { useCall } from "@/features/calls/use-call";
 
 type ChatHeaderProps = {
   userId?: number;
@@ -32,10 +34,43 @@ export default function ChatHeader({
 }: ChatHeaderProps) {
   const router = useRouter();
   const { colors, subtleText, dividerColor } = useTheme();
+  const { startCall } = useCall();
 
   const handleBack = () => {
     if (router.canGoBack()) router.back();
     else router.replace("/");
+  };
+
+  const handleCall = (callType: "audio" | "video") => {
+    const participantId = isGroup
+      ? Number(memberIds?.split(",")[0])
+      : userId;
+
+    if (
+      !Number.isSafeInteger(participantId) ||
+      participantId == null ||
+      participantId <= 0
+    ) {
+      Toast.show({
+        type: "error",
+        text1: "Could not start call",
+        text2: "This conversation has no valid participants.",
+      });
+      return;
+    }
+
+    void startCall({
+      callType,
+      conversationId: Number(chatId),
+      participantId,
+      participantName: username,
+    }).catch((err) => {
+      Toast.show({
+        type: "error",
+        text1: "Could not start call",
+        text2: err instanceof Error ? err.message : "Please try again.",
+      });
+    });
   };
 
   return (
@@ -134,11 +169,21 @@ export default function ChatHeader({
           <Feather name="search" size={22} color={BRAND_COLOR} />
         </Pressable>
 
-        <Pressable hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={isGroup ? "Start group audio call" : "Start audio call"}
+          onPress={() => handleCall("audio")}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
           <Feather name="phone" size={22} color={BRAND_COLOR} />
         </Pressable>
 
-        <Pressable hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={isGroup ? "Start group video call" : "Start video call"}
+          onPress={() => handleCall("video")}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
           <Feather name="video" size={24} color={BRAND_COLOR} />
         </Pressable>
       </View>

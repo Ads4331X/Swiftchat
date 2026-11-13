@@ -84,9 +84,11 @@ function emit(messageId: number, next: AttachmentState) {
 export function ensureAttachmentLoaded({
   messageId,
   conversationId,
+  keyEpoch,
 }: {
   messageId: number;
   conversationId: number;
+  keyEpoch: number | null | undefined;
 }): Promise<AttachmentState> {
   const existing = states.get(messageId);
   if (existing?.status === "ready") return Promise.resolve(existing);
@@ -94,7 +96,7 @@ export function ensureAttachmentLoaded({
   const pending = inflight.get(messageId);
   if (pending) return pending;
 
-  const promise = runLoad({ messageId, conversationId })
+  const promise = runLoad({ messageId, conversationId, keyEpoch })
     .catch((err) => {
       console.error("loadAttachment failed", err);
       const failed: AttachmentState = {
@@ -117,6 +119,7 @@ export function prefetchAttachments(
   messages: {
     id: number;
     conversationId: number;
+    keyEpoch?: number | null;
     attachment?: unknown;
   }[],
   concurrency = 3,
@@ -137,6 +140,7 @@ export function prefetchAttachments(
         await ensureAttachmentLoaded({
           messageId: target.id,
           conversationId: target.conversationId,
+          keyEpoch: target.keyEpoch,
         });
       } catch {
         // error state is already recorded.
@@ -154,10 +158,21 @@ export function prefetchAttachments(
 async function runLoad({
   messageId,
   conversationId,
+  keyEpoch,
 }: {
   messageId: number;
   conversationId: number;
+  keyEpoch: number | null | undefined;
 }): Promise<AttachmentState> {
+  if (
+    typeof keyEpoch !== "number" ||
+    !Number.isInteger(keyEpoch) ||
+    keyEpoch < 1
+  ) {
+    throw new Error("Attachment key epoch unavailable");
+  }
+
+  const epoch = keyEpoch;
   let lastProgress = -1;
   const set = (patch: Partial<AttachmentState>): AttachmentState => {
     const next = { ...getAttachmentState(messageId), ...patch };
@@ -196,6 +211,7 @@ async function runLoad({
       encryptedHeader,
       keyNonce: meta.keyNonce,
       headerNonce: meta.headerNonce,
+      keyEpoch: epoch,
     });
 
     attachment = {
@@ -216,6 +232,7 @@ async function runLoad({
     const header = await readAttachmentHeader({
       messageId,
       conversationId,
+      epoch,
       attachment,
     });
     return set({
@@ -237,6 +254,7 @@ async function runLoad({
       attachment,
       messageId,
       conversationId,
+      epoch,
       encryptedSize: encryptedFile.size,
       onProgress: reportDecrypt,
     });
@@ -293,6 +311,7 @@ async function runLoad({
     attachment,
     messageId,
     conversationId,
+    epoch,
     encryptedSize: received || encryptedFile.size,
     onProgress: reportDecrypt,
   });
@@ -309,12 +328,14 @@ async function decryptToCache({
   attachment,
   messageId,
   conversationId,
+  epoch,
   encryptedSize,
   onProgress,
 }: {
   attachment: Attachment;
   messageId: number;
   conversationId: number;
+  epoch: number;
   encryptedSize: number;
   onProgress: (fraction: number) => void;
 }): Promise<{
@@ -325,6 +346,7 @@ async function decryptToCache({
   const { cacheFile, waveform, durationMs } = await decryptAttachment({
     messageId,
     conversationId,
+    epoch,
     attachment,
     encryptedSize,
     onProgress,

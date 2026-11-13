@@ -1,7 +1,7 @@
 import { Keyboard, Image, Pressable, Text, View } from "react-native";
 import { type Message, type RepliedTo } from "@/features/chat/hooks/useChatMessages";
 import { BRAND_COLOR } from "@/shared/theme/theme";
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { type Position } from "@/features/chat/types";
 import { MessageBubbleContent } from "@/features/chat/components/message/MessageBubbleContent";
 import { ReactionChips } from "@/features/chat/components/message/ReactionChips";
@@ -10,6 +10,9 @@ import { ensureAttachmentLoaded } from "@/features/chat/services/attachmentLoade
 import AttachmentMessage from "@/features/attachments/components/attachment/AttachmentMessage";
 import { hasAttachment } from "@/core/db/attachments";
 import { formatBubbleTime } from "@/features/chat/components/message/utils";
+import { openAttachment } from "@/features/attachments/services/openAttachment";
+import Toast from "react-native-toast-message";
+import { kindFromMime } from "@/features/attachments/components/attachment/utils";
 
 export type MessageBubbleProps = {
   message: Message;
@@ -84,20 +87,72 @@ export default memo(function MessageBubble({
   }, [message.id, hasRemoteAttachment]);
 
   const showAttachment = hasRemoteAttachment || hasLocalAttachment;
+  const messageAttachmentMime = message.attachment?.mimeType ?? null;
+  const isDocumentAttachment =
+    messageAttachmentMime != null &&
+    kindFromMime(messageAttachmentMime) === "document";
 
   const { sourceUri, mimeType, fileSize, waveform, durationMs, status, progress } =
     useAttachment({
       conversationId,
       messageId: message.id,
+      keyEpoch: message.keyEpoch,
       enabled: showAttachment,
+      autoLoad: !isDocumentAttachment,
     });
-
-  const retryDownload = () => {
-    ensureAttachmentLoaded({ messageId: message.id, conversationId }).catch(() => {});
-  };
 
   // prefer loader mimeType, fall back to payload so the placeholder renders early.
   const attachmentMime = mimeType ?? message.attachment?.mimeType ?? null;
+
+  const handleOpenAttachment = useCallback(() => {
+    if (!sourceUri) return;
+
+    void openAttachment({
+      uri: sourceUri,
+      mimeType: attachmentMime,
+    }).catch((err) => {
+      Toast.show({
+        type: "error",
+        text1: "Could not open attachment",
+        text2: err instanceof Error ? err.message : "Please try again.",
+      });
+    });
+  }, [attachmentMime, sourceUri]);
+
+  const handleDownloadAttachment = useCallback(async () => {
+    try {
+      const loaded = await ensureAttachmentLoaded({
+        messageId: message.id,
+        conversationId,
+        keyEpoch: message.keyEpoch,
+      });
+
+      if (loaded.status !== "ready" || !loaded.sourceUri) {
+        throw new Error("The attachment could not be downloaded.");
+      }
+
+      if (isDocumentAttachment) {
+        await openAttachment({
+          uri: loaded.sourceUri,
+          mimeType: loaded.mimeType ?? messageAttachmentMime,
+        });
+      }
+    } catch (err) {
+      Toast.show({
+        type: "error",
+        text1: isDocumentAttachment
+          ? "Could not open document"
+          : "Could not download attachment",
+        text2: err instanceof Error ? err.message : "Please try again.",
+      });
+    }
+  }, [
+    conversationId,
+    isDocumentAttachment,
+    message.id,
+    message.keyEpoch,
+    messageAttachmentMime,
+  ]);
 
   // Attachment bubbles carry their own footer (timestamp, actions). Only draw
   // the text bubble when there is actual text or a quoted/forwarded context to
@@ -208,14 +263,15 @@ export default memo(function MessageBubble({
                 durationMs: durationMs ?? undefined,
               }}
               sourceUri={sourceUri}
-              status={status === "idle" ? "downloading" : status}
+              status={status}
               progress={progress}
               isMine={isMine}
-              onDownload={retryDownload}
               seed={message.id}
               timeText={
                 message.sentAt ? formatBubbleTime(message.sentAt) : undefined
               }
+              onDownload={handleDownloadAttachment}
+              onOpen={handleOpenAttachment}
             />
           ) : null}
           {hasBody ? (

@@ -2,14 +2,18 @@ import { getDb } from "@/core/db/connection";
 
 export async function getConversationKeyCache(
   conversationId: number,
+  epoch: number,
 ): Promise<string | null> {
   try {
     const db = await getDb();
     if (!db) return null;
+
     const row = await db.getFirstAsync<{ keyBase64: string }>(
-      `SELECT keyBase64 FROM ConversationKey WHERE conversationId = ?`,
-      [conversationId],
+      `SELECT keyBase64 FROM ConversationKey
+       WHERE conversationId = ? AND epoch = ?`,
+      [conversationId, epoch],
     );
+
     return row?.keyBase64 ?? null;
   } catch (err) {
     console.warn("getConversationKeyCache skipped:", err);
@@ -19,19 +23,17 @@ export async function getConversationKeyCache(
 
 export async function setConversationKeyCache(
   conversationId: number,
+  epoch: number,
   keyBase64: string,
 ): Promise<boolean> {
   try {
     const db = await getDb();
-<<<<<<< Updated upstream
-    if (!db) return;
-=======
     if (!db) return false;
 
->>>>>>> Stashed changes
     await db.runAsync(
-      `INSERT OR REPLACE INTO ConversationKey (conversationId, keyBase64) VALUES (?, ?)`,
-      [conversationId, keyBase64],
+      `INSERT OR REPLACE INTO ConversationKey
+       (conversationId, epoch, keyBase64) VALUES (?, ?, ?)`,
+      [conversationId, epoch, keyBase64],
     );
     return true;
   } catch (err) {
